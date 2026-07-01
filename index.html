@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1a3a5c">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>İSG Saha Asistanı</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #f2f4f7; color: #1c2430; padding-bottom: 40px; }
+  .ekran { display: none; padding: 16px; max-width: 560px; margin: 0 auto; }
+  .ekran.aktif { display: block; }
+  h1 { font-size: 20px; color: #1a3a5c; margin-bottom: 4px; }
+  .alt-baslik { color: #667085; font-size: 14px; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #344054; margin: 14px 0 6px; }
+  input[type=text], select, textarea {
+    width: 100%; padding: 13px; font-size: 16px; border: 1px solid #cfd6e0;
+    border-radius: 10px; background: #fff;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+  .btn { display: block; width: 100%; padding: 15px; font-size: 17px; font-weight: 700;
+    border: none; border-radius: 12px; cursor: pointer; margin-top: 12px; }
+  .btn-ana { background: #1a3a5c; color: #fff; }
+  .btn-foto { background: #0e7a5f; color: #fff; }
+  .btn-ikincil { background: #e6eaf0; color: #1c2430; }
+  .btn-bitir { background: #8a2f1d; color: #fff; }
+  .ust-bar { background: #1a3a5c; color: #fff; margin: -16px -16px 16px; padding: 14px 16px;
+    display: flex; justify-content: space-between; align-items: center; }
+  .ust-bar b { font-size: 16px; }
+  .ust-bar span { font-size: 12px; opacity: .85; display: block; }
+  #tespitSayac { background: #ffffff26; padding: 4px 10px; border-radius: 20px; font-size: 13px; }
+  .kvkk-not { background: #fff8e6; border: 1px solid #eeda9a; color: #7a5a00;
+    font-size: 12.5px; padding: 9px 12px; border-radius: 10px; margin-bottom: 12px; }
+  .satir { display: flex; gap: 10px; }
+  .satir > div { flex: 1; }
+  #sonKonumlar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .cip { padding: 7px 13px; background: #e0e8f2; border: none; border-radius: 20px;
+    font-size: 14px; font-weight: 600; color: #1a3a5c; }
+  #bekleyenFotolar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .thumb { position: relative; width: 74px; height: 74px; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+  .thumb button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px;
+    border-radius: 50%; border: none; background: #8a2f1d; color: #fff; font-size: 13px; }
+  .risk-kutu { display: flex; align-items: center; gap: 10px; background: #fdecec;
+    border: 1.5px solid #e3b2b2; border-radius: 12px; padding: 12px; margin-top: 16px; }
+  .risk-kutu input { width: 22px; height: 22px; accent-color: #8a2f1d; }
+  .risk-kutu label { margin: 0; color: #8a2f1d; font-size: 14.5px; }
+  #fotoSayac { font-size: 13px; color: #0e7a5f; font-weight: 700; margin-left: 8px; }
+  hr { border: none; border-top: 1px solid #dde3ec; margin: 22px 0 14px; }
+  .kart { background: #fff; border: 1px solid #dde3ec; border-radius: 12px;
+    padding: 12px 14px; margin-top: 10px; position: relative; }
+  .kart.riskli { border-color: #d38d8d; background: #fff7f7; }
+  .kart-ust { font-size: 15px; }
+  .kod { background: #e0e8f2; padding: 2px 8px; border-radius: 8px; font-size: 13px;
+    font-weight: 700; color: #1a3a5c; }
+  .kart-alt { font-size: 13px; color: #667085; margin-top: 5px; padding-right: 46px; }
+  .sil { position: absolute; right: 10px; top: 12px; background: none; border: 1px solid #d0d5dd;
+    border-radius: 8px; padding: 5px 9px; font-size: 12px; color: #667085; }
+  #yedekBanner { display: none; background: #e8f4ee; border: 1px solid #a8d5bd; color: #0e5a3f;
+    padding: 10px 12px; border-radius: 10px; font-size: 13.5px; margin-top: 14px; position: relative; }
+  #btnYedekKapat { position: absolute; right: 6px; top: 6px; background: none; border: none;
+    font-size: 15px; color: #0e5a3f; }
+  #bildirim { position: fixed; bottom: -60px; left: 50%; transform: translateX(-50%);
+    background: #1c2430; color: #fff; padding: 11px 22px; border-radius: 24px; font-size: 14.5px;
+    transition: bottom .25s; z-index: 99; white-space: nowrap; }
+  #bildirim.goster { bottom: 24px; }
+</style>
+</head>
+<body>
+
+<div id="ekranKurulum" class="ekran">
+  <h1>İSG Saha Asistanı</h1>
+  <div class="alt-baslik">AxonTR · v0.1 · Tamamen çevrimdışı çalışır</div>
+
+  <label for="denetimTuru">Denetim türü</label>
+  <select id="denetimTuru">
+    <option value="saha">Saha denetimi</option>
+    <option value="risk">Risk analizi</option>
+  </select>
+
+  <label for="isyeriAdi">İşyeri / bina adı</label>
+  <input type="text" id="isyeriAdi" placeholder="Örn: Rektörlük Binası" autocomplete="off">
+
+  <label for="binaProfili">Bina profili</label>
+  <select id="binaProfili"></select>
+
+  <button class="btn btn-ana" id="btnBaslat">Denetimi Başlat</button>
+</div>
+
+<div id="ekranAna" class="ekran">
+  <div class="ust-bar">
+    <div><b id="baslikIsyeri"></b><span id="baslikTur"></span></div>
+    <div id="tespitSayac">0 tespit</div>
+  </div>
+
+  <div class="kvkk-not">KVKK: Kadraja yüz, bilgisayar ekranı ve evrak almayın.</div>
+
+  <div class="satir">
+    <div>
+      <label for="alanTipi">Alan tipi</label>
+      <select id="alanTipi"></select>
+    </div>
+    <div>
+      <label for="konumKodu">Konum kodu <small>(isteğe bağlı)</small></label>
+      <input type="text" id="konumKodu" placeholder="Y01, A203..." autocomplete="off" autocapitalize="characters">
+    </div>
+  </div>
+  <div id="sonKonumlar"></div>
+
+  <button class="btn btn-foto" id="btnFoto">📷 Foto Çek <span id="fotoSayac"></span></button>
+  <input type="file" id="fotoInput" accept="image/*" capture="environment" multiple hidden>
+  <div id="bekleyenFotolar"></div>
+
+  <label for="tespitNotu">Not (fotoğrafsız bulguda zorunlu)</label>
+  <textarea id="tespitNotu" placeholder="Tespit açıklaması..."></textarea>
+
+  <div class="risk-kutu">
+    <input type="checkbox" id="hayatiRisk">
+    <label for="hayatiRisk"><b>HAYATİ RİSK</b> — kaydedince anlık bildirim taslağı açılır</label>
+  </div>
+
+  <button class="btn btn-ana" id="btnKaydet">Tespiti Kaydet</button>
+
+  <div id="yedekBanner">
+    Çok foto birikti — ara yedek almanız önerilir.
+    <button id="btnYedekKapat">✕</button>
+  </div>
+
+  <hr>
+  <div id="tespitListesi"></div>
+
+  <button class="btn btn-ikincil" id="btnAraYedek">Ara Yedek Al (ZIP)</button>
+  <button class="btn btn-bitir" id="btnBitir">Denetimi Bitir ve ZIP İndir</button>
+</div>
+
+<div id="bildirim"></div>
+<script src="./app.js"></script>
+</body>
+</html>
