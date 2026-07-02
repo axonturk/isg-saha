@@ -1,5 +1,5 @@
 'use strict';
-/* İSG Saha Asistanı v0.1 — AxonTR
+/* İSG Saha Asistanı v0.1.1 — AxonTR
    Saf yardımcı fonksiyonlar üstte (Node'da test edilebilir), DOM/uygulama altta. */
 
 // ---------- ZIP WRITER (store, sıkıştırmasız, bağımlılıksız) ----------
@@ -90,6 +90,7 @@ function buildZip(files) {
 const ORTAK_ALANLAR = [
   'Ofis / idari oda', 'Toplantı salonu', 'Koridor / merdiven / kaçış yolu',
   'Islak hacim (WC/lavabo)', 'Çay ocağı / ofis mutfağı', 'Arşiv / depo',
+  'Cami / mescit',
   'Kazan dairesi', 'Elektrik pano odası', 'Jeneratör / UPS', 'Asansör makine dairesi',
   'Çatı / bodrum', 'Otopark / açık alan', 'Güvenlik / danışma', 'Diğer'
 ];
@@ -99,16 +100,45 @@ const EGITIM_ALANLAR = [
   'Kütüphane / okuma salonu', 'Konferans salonu', 'Kantin / yemekhane',
   'Spor salonu / soyunma'
 ];
+const MYO_EK_ALANLAR = [
+  'Yemekhane / mutfak'
+];
 const HASTANE_ALANLAR = [
   'Poliklinik / muayene', 'Servis / hasta odası', 'Ameliyathane', 'Yoğun bakım',
   'Acil servis', 'Görüntüleme (radyasyon)', 'Tıbbi laboratuvar', 'Eczane / ilaç deposu',
   'Sterilizasyon ünitesi', 'Tıbbi atık deposu', 'Endüstriyel mutfak', 'Çamaşırhane', 'Morg'
 ];
+const KUTUPHANE_ALANLAR = [
+  'Raf alanı / kitap deposu', 'Okuma salonu', 'Nadir eser / arşiv deposu',
+  'Kompakt (raylı) arşiv rafları', 'Fotokopi / sayısallaştırma', 'Ödünç verme bankosu'
+];
+const HAVUZ_ALANLAR = [
+  'Havuz çevresi / ıslak zemin', 'Klor / kimyasal deposu', 'Makine dairesi (pompa/filtre)',
+  'Denge deposu / teknik galeri', 'Cankurtaran istasyonu / ilk yardım',
+  'Soyunma / duşlar', 'Seyirci alanı'
+];
+const SPOR_ALANLAR = [
+  'Kapalı spor salonu', 'Futbol sahası / açık saha', 'Fitness / kondisyon salonu',
+  'Minder sporları alanı', 'Tribün / seyirci alanı', 'Soyunma / duşlar', 'Malzeme deposu'
+];
+const KRES_ALANLAR = [
+  'Oyun odası / etkinlik alanı', 'Uyku odası', 'Çocuk mutfağı / mama hazırlama',
+  'Çocuk WC / alt değiştirme', 'Bahçe / oyun parkı', 'Giriş güvenliği'
+];
+const YEMEKHANE_ALANLAR = [
+  'Pişirme alanı (fritöz/kazan/davlumbaz)', 'Soğuk oda / depo', 'Kuru gıda deposu',
+  'Bulaşıkhane', 'Servis / yemek salonu', 'LPG/doğalgaz hattı', 'Personel soyunma'
+];
 const PROFILLER = {
-  idari:   { ad: 'İdari bina (rektörlük, daire bşk.)', alanlar: ORTAK_ALANLAR },
-  egitim:  { ad: 'Eğitim binası (fakülte)',            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR] },
-  myo:     { ad: 'MYO (atölyeli)',                     alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR] },
-  hastane: { ad: 'Hastane',                            alanlar: [...HASTANE_ALANLAR, ...ORTAK_ALANLAR] }
+  idari:     { ad: 'İdari bina (rektörlük, daire bşk.)', alanlar: ORTAK_ALANLAR },
+  egitim:    { ad: 'Eğitim binası (fakülte)',            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR] },
+  myo:       { ad: 'MYO',                                alanlar: [...EGITIM_ALANLAR, ...MYO_EK_ALANLAR, ...ORTAK_ALANLAR] },
+  hastane:   { ad: 'Hastane',                            alanlar: [...HASTANE_ALANLAR, ...ORTAK_ALANLAR] },
+  kutuphane: { ad: 'Kütüphane (merkez)',                 alanlar: [...KUTUPHANE_ALANLAR, ...ORTAK_ALANLAR] },
+  havuz:     { ad: 'Yüzme havuzu',                       alanlar: [...HAVUZ_ALANLAR, ...ORTAK_ALANLAR] },
+  spor:      { ad: 'Spor kompleksi',                     alanlar: [...SPOR_ALANLAR, ...ORTAK_ALANLAR] },
+  kres:      { ad: 'Kreş',                               alanlar: [...KRES_ALANLAR, ...ORTAK_ALANLAR] },
+  yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] }
 };
 
 // ---------- SAF YARDIMCILAR ----------
@@ -130,7 +160,7 @@ function konumNormalize(k) {
 function denetimJson(denetim, tespitler, fotoAdlari) {
   return {
     surum: 1,
-    uygulama: 'ISG Saha Asistani v0.1 (AxonTR)',
+    uygulama: 'ISG Saha Asistani v0.1.1 (AxonTR)',
     olusturma: new Date().toISOString(),
     denetim,
     tespitler,
