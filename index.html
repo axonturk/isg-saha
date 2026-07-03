@@ -66,13 +66,34 @@
     background: #1c2430; color: #fff; padding: 11px 22px; border-radius: 24px; font-size: 14.5px;
     transition: bottom .25s; z-index: 99; white-space: nowrap; }
   #bildirim.goster { bottom: 24px; }
+  .konum-satir { display: flex; gap: 6px; }
+  .konum-satir input { flex: 1; }
+  #btnOcr { width: 52px; border: 1px solid #cfd6e0; border-radius: 10px; background: #fff;
+    font-size: 21px; flex-shrink: 0; }
+  #checklistPanel { background: #eef4fb; border: 1px solid #c5d6ea; border-radius: 12px;
+    padding: 11px 13px; margin-top: 14px; }
+  .cl-baslik { font-size: 13px; font-weight: 700; color: #1a3a5c; margin-bottom: 7px; }
+  .cl-madde { font-size: 14px; padding: 5px 2px; color: #344054; }
+  .cl-madde.tamam { color: #0e7a5f; }
+  .cip-buyuk { font-size: 18px; padding: 12px 22px; background: #0e7a5f; color: #fff; }
+  #ocrModal { display: none; position: fixed; inset: 0; background: rgba(10,14,20,.92);
+    z-index: 50; align-items: center; justify-content: center; }
+  .ocr-kutu { width: 100%; max-width: 560px; padding: 16px; position: relative; }
+  .video-sarici { position: relative; }
+  #ocrVideo { width: 100%; display: block; border-radius: 12px; background: #000; }
+  .ocr-cerceve { position: absolute; left: 15%; right: 15%; top: 32.5%; bottom: 32.5%;
+    border: 2.5px solid #f0b429; border-radius: 8px; pointer-events: none; }
+  #ocrDurum { color: #fff; text-align: center; font-size: 15px; margin-top: 12px; }
+  #ocrAdaylar { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+  .ocr-butonlar { display: flex; gap: 10px; margin-top: 8px; }
+  .ocr-butonlar .btn { margin-top: 0; }
 </style>
 </head>
 <body>
 
 <div id="ekranKurulum" class="ekran">
   <h1>İSG Saha Asistanı</h1>
-  <div class="alt-baslik">AxonTR · v0.1.1 · Tamamen çevrimdışı çalışır</div>
+  <div class="alt-baslik">AxonTR · v0.2 · Tamamen çevrimdışı çalışır</div>
 
   <label for="denetimTuru">Denetim türü</label>
   <select id="denetimTuru">
@@ -104,10 +125,21 @@
     </div>
     <div>
       <label for="konumKodu">Konum kodu <small>(isteğe bağlı)</small></label>
-      <input type="text" id="konumKodu" placeholder="Y01, A203..." autocomplete="off" autocapitalize="characters">
+      <div class="konum-satir">
+        <input type="text" id="konumKodu" placeholder="Y01, A203..." autocomplete="off" autocapitalize="characters">
+        <button id="btnOcr" type="button" title="Etiketi kamerayla oku">📷</button>
+      </div>
     </div>
   </div>
   <div id="sonKonumlar"></div>
+
+  <div id="checklistPanel" style="display:none">
+    <div class="cl-baslik">Bu alanda çekilmesi önerilenler:</div>
+    <div id="checklistListe"></div>
+  </div>
+
+  <label for="checklistMaddesi">Bu tespit hangi kontrol maddesine ait?</label>
+  <select id="checklistMaddesi"><option value="">— Serbest tespit —</option></select>
 
   <button class="btn btn-foto" id="btnFoto">📷 Foto Çek <span id="fotoSayac"></span></button>
   <input type="file" id="fotoInput" accept="image/*" capture="environment" multiple hidden>
@@ -133,6 +165,21 @@
 
   <button class="btn btn-ikincil" id="btnAraYedek">Ara Yedek Al (ZIP)</button>
   <button class="btn btn-bitir" id="btnBitir">Denetimi Bitir ve ZIP İndir</button>
+</div>
+
+<div id="ocrModal">
+  <div class="ocr-kutu">
+    <div class="video-sarici">
+      <video id="ocrVideo" playsinline muted></video>
+      <div class="ocr-cerceve"></div>
+    </div>
+    <div id="ocrDurum">Etiketi çerçeveye hizalayın</div>
+    <div id="ocrAdaylar"></div>
+    <div class="ocr-butonlar">
+      <button class="btn btn-foto" id="btnOcrOku">Oku</button>
+      <button class="btn btn-ikincil" id="btnOcrKapat">Kapat</button>
+    </div>
+  </div>
 </div>
 
 <div id="bildirim"></div>

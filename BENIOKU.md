@@ -1,44 +1,47 @@
-# İSG Saha Asistanı v0.1 (AxonTR)
+# İSG Saha Asistanı v0.2 (AxonTR)
 
-Çevrimdışı çalışan saha denetim PWA'sı. Foto + not + alan tipi + konum kodu toplar,
-denetim sonunda tek ZIP (fotolar + denetim.json) olarak dışa aktarır.
+Çevrimdışı saha denetim PWA'sı: foto + not + alan tipi + konum kodu toplar,
+ZIP olarak dışa aktarır. v0.2 ile: checklist rehberi, OCR etiket okuma, foto küçültme.
 
-## Kurulum (5 dakika, GitHub Pages)
+## v0.2 yenilikleri
 
-1. github.com'da yeni repo aç (örn: `isg-saha`, Public)
-2. Bu klasördeki 6 dosyayı repoya yükle:
-   index.html, app.js, sw.js, manifest.json, icon-192.png, icon-512.png
-3. Repo > Settings > Pages > Source: "Deploy from a branch" > main > Save
-4. 1-2 dk sonra adres: https://KULLANICIADI.github.io/isg-saha/
-5. Bu adresi telefonda Chrome/Safari ile aç
-6. Menü > "Ana ekrana ekle" — artık uygulama gibi açılır
-7. İLK AÇILIŞI internetliyken yap (service worker kendini önbelleğe alsın),
-   sonrası tamamen çevrimdışı çalışır.
+1. CHECKLIST REHBERİ: Alan tipi seçilince "çekilmesi önerilenler" listesi görünür
+   (31 alan tipi, 136 kontrol maddesi). Tespit kaydederken hangi maddeye ait
+   olduğunu seçersin; madde ✅ olur. "Denetimi Bitir" eksik zorunlu kareleri uyarır.
+2. OCR ETİKET OKUMA: Konum kodu yanındaki 📷 ile kamera açılır, kapı etiketine
+   tutulur, "Oku" ile kod adayları çıkar, doğrusuna dokunulur.
+   - İLK KULLANIM İNTERNET İSTER (~5 MB motor bir kez iner, sonra offline).
+   - Okuyamazsa elle yazma yolu aynen durur; OCR sadece kısayoldur.
+3. FOTO KÜÇÜLTME: Çekim anında uzun kenar 2000px'e iner (~3.7 MB -> ~0.5 MB).
+   ZIP'ler ~7-10 kat küçülür. Not: küçültme EXIF verisini düşürür; çekim zamanı
+   zaten denetim.json'da tutulur.
 
-Not: PWA'nın service worker'ı HTTPS ister; GitHub Pages bunu otomatik sağlar.
-Dosyayı doğrudan telefona atıp açmak ÇALIŞMAZ (file:// altında SW ve kamera kısıtlı).
+## Kurulum / güncelleme
 
-## Saha akışı
+İlk kurulum: BENIOKU önceki sürümle aynı (GitHub Pages + Ana ekrana ekle).
+Güncelleme: dosyaları repoya push et; telefonda uygulamayı internetliyken
+kapat-aç (service worker v3 yeni sürümü ikinci açılışta devreye alır).
 
-1. Denetim türü + işyeri adı + bina profili seç > Başlat
-2. Alan tipi seç, istersen konum kodu gir (yapışkan; son 5 kod hızlı buton)
-3. "Foto Çek" ile arka kamera açılır; birden çok foto eklenebilir
-4. Fotoğraf yasak alanlarda (ameliyathane, arşiv): foto çekme, sadece not yaz
-   > "fotoğrafsız bulgu" olarak işaretlenir
-5. HAYATİ RİSK kutusu işaretlenirse kayıtta paylaş menüsü açılır (SMS/WhatsApp taslağı)
-6. Her ~15 fotoda ara yedek hatırlatması çıkar > "Ara Yedek Al"
-7. Gün sonunda "Denetimi Bitir ve ZIP İndir" > ZIP'i bilgisayara aktar
-   (WhatsApp/kablo/Drive) > masaüstü uygulamaya verilecek
+## Saha akışı (v0.2)
 
-## ZIP içeriği
+1. Denetim türü + işyeri + bina profili (9 profil) > Başlat
+2. Alan tipi seç > checklist paneli açılır ("bugün çekilecekler")
+3. Konum kodu: elle yaz, son-5 çipinden seç veya 📷 OCR ile okut
+4. Foto çek (otomatik küçültülür) / fotoğrafsız bulgu için sadece not
+5. "Bu tespit hangi kontrol maddesine ait?" seç (isteğe bağlı) > Kaydet > madde ✅
+6. HAYATİ RİSK kutusu: kayıtta anlık bildirim taslağı açılır
+7. Ara yedek al; gün sonunda "Denetimi Bitir" > eksik zorunlu uyarısı > ZIP
 
-- denetim.json: denetim bilgisi + tespit listesi + manifest (dosya sayısı doğrulaması)
-- fotolar/: alanTipi_konumKodu_sıra.jpg
+## Test durumu (v0.2)
 
-## Test durumu
-
-- ZIP oluşturucu: unzip -t ile doğrulandı (Türkçe karakterler dahil)
-- Birim testleri: slug, dosya adı, konum normalizasyonu, JSON şema, bina profilleri
-- Uçtan uca test (jsdom + fake-indexeddb): kurulum > denetim başlatma >
-  fotoğraflı tespit > fotoğrafsız bulgu > hayati risk bildirimi > ZIP export >
-  ZIP içerik/manifest doğrulaması — tümü geçti
+- OCR pipeline: 10 farklı sentetik etiket yapısı (lazer plaka, kağıt, metal,
+  düşük kontrast, 6° eğik, Türkçe tabela, bulanık, iki satır, hastane tipi,
+  italik) ile benchmark: 10/10. JS piksel matematiği + aday seçimi gerçek
+  Tesseract'a okutularak parite testi: 10/10.
+- Birim testleri: OCR aday üretimi (O/0 varyantı dahil), 31 checklist bütünlüğü,
+  checklist anahtarlarının profil alanlarıyla eşleşmesi, eksik-zorunlu mantığı.
+- Uçtan uca (jsdom+fake-indexeddb): 12 adım — kurulum > denetim > fotoğraflı/
+  fotoğrafsız tespit > hayati risk > checklist paneli > madde kapsama (✅) >
+  eksik zorunlu uyarısı > OCR kamerasız güvenli davranış > ZIP + şema doğrulama.
+- SAHADA DOĞRULANACAKLAR (burada test edilemeyenler): gerçek kapı etiketlerinde
+  OCR isabeti (ışık/açı/etiket kalitesi), gerçek telefonda foto küçültme çıktısı.
