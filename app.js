@@ -501,7 +501,34 @@ if (typeof document !== 'undefined') {
       baslangic: new Date().toISOString()
     };
     await tx('denetim', 'readwrite', s => s.put(aktifDenetim));
+    $('isyeriAdi').value = '';
     anaEkranaGec();
+  }
+
+  async function kurulumaDon() {
+    aktifDenetim = null;
+    sonKonumlar = [];
+    await devamListesiniCiz();
+    ekranGoster('ekranKurulum');
+  }
+
+  async function devamListesiniCiz() {
+    const denetimler = await hepsiniAl('denetim');
+    const panel = $('devamPanel');
+    const kap = $('devamListesi');
+    kap.innerHTML = '';
+    if (!denetimler.length) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    const tespitler = await hepsiniAl('tespitler');
+    for (const d of [...denetimler].reverse()) {
+      const n = tespitler.filter(t => t.denetimId === d.id).length;
+      const kart = document.createElement('div');
+      kart.className = 'devam-kart';
+      const tarih = new Date(d.baslangic).toLocaleDateString('tr-TR');
+      kart.innerHTML = `<b>${d.isyeri}</b><span>${d.tur === 'risk' ? 'Risk analizi' : 'Saha denetimi'} · ${tarih} · ${n} tespit — devam etmek için dokun</span>`;
+      kart.onclick = () => { aktifDenetim = d; sonKonumlar = []; anaEkranaGec(); };
+      kap.appendChild(kart);
+    }
   }
 
   function anaEkranaGec() {
@@ -510,6 +537,10 @@ if (typeof document !== 'undefined') {
     alanTipleriniDoldur();
     ekranGoster('ekranAna');
     listeyiYenile();
+    // Android geri tuşu bu ekrandan kuruluma dönsün diye history'ye kayıt at
+    if (typeof history !== 'undefined' && history.pushState && !history.state?.ana) {
+      history.pushState({ ana: true }, '');
+    }
   }
 
   function alanTipleriniDoldur() {
@@ -848,21 +879,26 @@ if (typeof document !== 'undefined') {
       a.click();
       a.remove();
       bildirim(sonMu ? 'Denetim ZIP indirildi ✓' : 'Ara yedek indirildi ✓');
-      if (sonMu && confirm('ZIP indirildi. Denetim kapatılıp cihazdaki veriler temizlensin mi?\n(ZIP dosyasını bilgisayara aktarmadan temizlemeyin!)')) {
-        await verileriTemizle();
-        ekranGoster('ekranKurulum');
+      if (sonMu && confirm('ZIP indirildi. Bu denetim kapatılıp cihazdaki verisi temizlensin mi?\n(ZIP dosyasını bilgisayara aktarmadan temizlemeyin!)')) {
+        await denetimiTemizle(aktifDenetim.id);
+        await kurulumaDon();
       }
     } catch (e) {
       uyari('ZIP oluşturulamadı: ' + e.message);
     }
   }
 
-  async function verileriTemizle() {
-    await tx('tespitler', 'readwrite', s => s.clear());
-    await tx('fotolar', 'readwrite', s => s.clear());
-    await tx('denetim', 'readwrite', s => s.clear());
-    aktifDenetim = null;
-    sonKonumlar = [];
+  async function denetimiTemizle(denetimId) {
+    const tespitler = await hepsiniAl('tespitler', 'denetimId', denetimId);
+    const fotolar = await hepsiniAl('fotolar');
+    const tespitIdler = new Set(tespitler.map(t => t.id));
+    for (const f of fotolar.filter(f => tespitIdler.has(f.tespitId))) {
+      await tx('fotolar', 'readwrite', s => s.delete(f.id));
+    }
+    for (const t of tespitler) {
+      await tx('tespitler', 'readwrite', s => s.delete(t.id));
+    }
+    await tx('denetim', 'readwrite', s => s.delete(denetimId));
   }
 
   async function yedekHatirlat() {
@@ -890,11 +926,16 @@ if (typeof document !== 'undefined') {
     profilleriDoldur();
     const mevcut = await hepsiniAl('denetim');
     if (mevcut.length) {
-      aktifDenetim = mevcut[0];
+      aktifDenetim = mevcut[mevcut.length - 1];
       anaEkranaGec();
     } else {
       ekranGoster('ekranKurulum');
     }
+    $('btnGeri').onclick = () => kurulumaDon();
+    window.addEventListener('popstate', () => {
+      // Android donanım geri tuşu: ana ekrandaysa kuruluma dön
+      if ($('ekranAna').classList.contains('aktif')) kurulumaDon();
+    });
     $('btnBaslat').onclick = denetimBaslat;
     $('fotoInput').onchange = fotoSec;
     $('btnFoto').onclick = () => $('fotoInput').click();

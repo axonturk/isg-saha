@@ -22,6 +22,13 @@ ZIP olarak dışa aktarır. v0.2 ile: checklist rehberi, OCR etiket okuma, foto 
 Güncelleme: dosyaları repoya push et; telefonda uygulamayı internetliyken
 kapat-aç (service worker v3 yeni sürümü ikinci açılışta devreye alır).
 
+## Çoklu denetim (v0.2)
+
+Üst bardaki ← butonu (veya Android geri tuşu) denetim listesine döner.
+Buradan yeni denetim başlatılabilir veya devam eden bir denetime dokunup
+girilebilir. Her denetimin verisi ayrıdır; "Denetimi Bitir" yalnızca o
+denetimin verisini temizler, diğerleri cihazda kalır.
+
 ## Saha akışı (v0.2)
 
 1. Denetim türü + işyeri + bina profili (9 profil) > Başlat
