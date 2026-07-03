@@ -1,5 +1,5 @@
 'use strict';
-/* İSG Saha Asistanı v0.2.1 — AxonTR
+/* İSG Saha Asistanı v0.3 — AxonTR
    Saf yardımcı fonksiyonlar üstte (Node'da test edilebilir), DOM/uygulama altta. */
 
 // ---------- ZIP WRITER (store, sıkıştırmasız, bağımlılıksız) ----------
@@ -142,24 +142,57 @@ const PROFILLER = {
 };
 
 // ---------- SAF YARDIMCILAR ----------
-// ---- OCR aday seçimi (benchmark: 10/10, etiket testleriyle doğrulandı) ----
-const OCR_KOD_DESENI = /\b([A-Z]{1,4})[-–\s]?(\d{1,4})([A-Z]?)\b/g;
+// ---- OCR: bağlama duyarlı kod desenleri (kurum/alan bazlı, JSON'dan genişletilebilir) ----
+const OCR_PROFILLERI = {
+  konum:        { patterns: [/^[A-Z]-?\d{1,4}[A-Z]?$/, /^[A-Z]{2,4}-?\d{1,3}[A-Z]?$/] },
+  pano:         { patterns: [/^P-?\d{1,4}$/] },
+  yangindolabi: { patterns: [/^YD-?\d{1,4}$/] },
+  makine:       { patterns: [/^[A-Z]{2,5}-?\d{1,4}$/] },
+  genel:        { patterns: [/^[A-Z]{1,5}-?\d{1,4}[A-Z]?$/] }
+};
 
-function ocrAdaylarUret(metin) {
-  const m0 = String(metin || '').toUpperCase().replace(/İ/g, 'I');
+// Ham metinden aday çıkarır: harf+rakam öbeklerini bulur, tire/eğik-çizgi/boşluk ayraçlarını
+// normalize eder. OCR'ın karıştırdığı görsel benzer karakterler için varyant üretir
+// (gerçek saha etiketleriyle doğrulandı: Z okundu "7", İ okundu "1" gibi durumlar oluyor).
+const OCR_KOD_DESENI = /\b([A-Z0-9]{1,5})[-–\/\s]?(\d{1,4})([A-Z]?)\b/g;
+const OCR_KARISIM = { '0': 'O', 'O': '0', '1': 'I', 'I': '1', '5': 'S', 'S': '5',
+                       '8': 'B', 'B': '8', '2': 'Z', 'Z': '2', '7': 'Z', '6': 'G', 'G': '6' };
+
+function ocrAdaylarUret(metin, baglam) {
+  const ham = String(metin || '').toUpperCase().replace(/İ/g, 'I');
+  const birlesik = ham.replace(/[\/]/g, '-').replace(/[^\wçğ-]/g, ' ');
+  const tokenlar = birlesik.split(/\s+/).filter(Boolean);
   const adaylar = [];
   const bicim = (h, s, ek) => (h.length === 1 ? h + s + ek : h + '-' + s + ek);
-  let m;
-  OCR_KOD_DESENI.lastIndex = 0;
-  while ((m = OCR_KOD_DESENI.exec(m0)) !== null) {
-    const [, harf, sayi, ek] = m;
-    adaylar.push({ skor: harf.length + sayi.length, kod: bicim(harf, sayi, ek) });
-    // sadece SONDAKI O'lar rakam 0 olabilir (Y01 -> YO-1 okunması durumu)
-    const t = harf.match(/^(.*?)(O+)$/);
-    if (t && t[1]) {
-      const s2 = t[2].replace(/O/g, '0') + sayi;
-      adaylar.push({ skor: t[1].length + s2.length, kod: bicim(t[1], s2, ek) });
+  const ekle = (h, s, ek, skor) => adaylar.push({ skor, kod: bicim(h, s, ek) });
+
+  // (a) Saf harf bloğu + rakam (standart durum: A203, LAB-2, YO-1)
+  const SAF_HARF_TOKEN = /^([A-Z]{1,5})-?(\d{1,4})([A-Z]?)$/;
+  // (b) Tek karakterlik blok TAMAMEN rakamsa: OCR ilk harfi rakama çevirmiş olabilir (Z->7, İ->1)
+  const KARISIM_TOKEN = /^(\d)-?(\d{1,4})([A-Z]?)$/;
+
+  for (const tok of tokenlar) {
+    const m1 = tok.match(SAF_HARF_TOKEN);
+    if (m1) {
+      const [, blok, sayi, ek] = m1;
+      ekle(blok, sayi, ek, blok.length + sayi.length);
+      const t = blok.match(/^(.*?)([O0]+)$/);
+      if (t && t[1]) {
+        ekle(t[1], t[2].replace(/O/g, '0') + sayi, ek, t[1].length + t[2].length + sayi.length);
+      }
+      continue;
     }
+    const m2 = tok.match(KARISIM_TOKEN);
+    if (m2) {
+      const [, rk, sayi, ek] = m2;
+      if (OCR_KARISIM[rk] && /[A-Z]/.test(OCR_KARISIM[rk])) {
+        ekle(OCR_KARISIM[rk], sayi, ek, 1 + sayi.length - 0.5);
+      }
+    }
+  }
+  const desenler = (baglam && OCR_PROFILLERI[baglam]) ? OCR_PROFILLERI[baglam].patterns : [];
+  for (const a of adaylar) {
+    if (desenler.some(d => d.test(a.kod))) a.skor += 10;
   }
   adaylar.sort((a, b) => b.skor - a.skor);
   const gorulen = new Set(), sonuc = [];
@@ -167,6 +200,14 @@ function ocrAdaylarUret(metin) {
     if (!gorulen.has(a.kod)) { gorulen.add(a.kod); sonuc.push(a.kod); }
   }
   return sonuc.slice(0, 3);
+}
+
+function ocrBaglamTahminEt(checklistId) {
+  const s = String(checklistId || '').toLowerCase();
+  if (s.includes('pano')) return 'pano';
+  if (s.includes('yangin')) return 'yangindolabi';
+  if (s.includes('makine') || s.includes('cnc') || s.includes('ekipman')) return 'makine';
+  return 'konum';
 }
 
 // ---- Checklist rehberi (Inspection Guidance) ----
@@ -414,7 +455,7 @@ function konumNormalize(k) {
 function denetimJson(denetim, tespitler, fotoAdlari) {
   return {
     surum: 1,
-    uygulama: 'ISG Saha Asistani v0.2.1 (AxonTR)',
+    uygulama: 'ISG Saha Asistani v0.3 (AxonTR)',
     olusturma: new Date().toISOString(),
     denetim,
     tespitler,
@@ -424,7 +465,7 @@ function denetimJson(denetim, tespitler, fotoAdlari) {
 
 if (typeof module !== 'undefined') {
   module.exports = { buildZip, crc32, slug, fotoDosyaAdi, konumNormalize, denetimJson, PROFILLER,
-    ocrAdaylarUret, CHECKLISTLER, checklistAl, eksikZorunlular };
+    ocrAdaylarUret, ocrBaglamTahminEt, OCR_PROFILLERI, CHECKLISTLER, checklistAl, eksikZorunlular };
 }
 
 // ---------- UYGULAMA (yalnızca tarayıcıda) ----------
@@ -695,20 +736,27 @@ if (typeof document !== 'undefined') {
     });
   }
 
+  // Çerçeve daraltıldı: kullanıcı fiziksel olarak yaklaşmak zorunda kalır (kök neden çözümü —
+  // gerçek saha fotoğraflarıyla doğrulandı: geniş çerçevede etiket kareye göre çok küçük kalıyordu).
+  const OCR_CERCEVE_W = 0.42;
+  const OCR_CERCEVE_H = 0.16;
+
   async function ocrAc() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       uyari('Bu cihazda kamera erişimi desteklenmiyor.');
       return;
     }
     $('ocrModal').style.display = 'flex';
-    $('ocrDurum').textContent = 'Etiketi çerçeveye hizalayın';
+    $('ocrDurum').textContent = 'Etikete yaklaşın';
     $('ocrAdaylar').innerHTML = '';
+    $('ocrCerceve').classList.remove('hazir');
     try {
       ocrStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 } }
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
       });
       $('ocrVideo').srcObject = ocrStream;
       await $('ocrVideo').play();
+      ocrHaziroluguIzle();
     } catch (e) {
       uyari('Kamera açılamadı: ' + e.message);
       ocrKapat();
@@ -717,13 +765,14 @@ if (typeof document !== 'undefined') {
 
   function ocrKapat() {
     if (ocrStream) { ocrStream.getTracks().forEach(t => t.stop()); ocrStream = null; }
+    if (ocrHazirDongu) { clearInterval(ocrHazirDongu); ocrHazirDongu = null; }
     $('ocrModal').style.display = 'none';
   }
 
   function ocrOnIsle(video) {
-    // Benchmark'la kilitlenen hat: orta bant kırp -> gri -> ortalama eşik -> 2x büyüt
+    // Benchmark'la kilitlenen hat: dar bant kırp -> gri -> ortalama eşik -> 2x büyüt
     const vw = video.videoWidth, vh = video.videoHeight;
-    const kw = Math.round(vw * 0.7), kh = Math.round(vh * 0.35);
+    const kw = Math.round(vw * OCR_CERCEVE_W), kh = Math.round(vh * OCR_CERCEVE_H);
     const kx = Math.round((vw - kw) / 2), ky = Math.round((vh - kh) / 2);
     const c = document.createElement('canvas');
     c.width = kw * 2; c.height = kh * 2;
@@ -747,37 +796,92 @@ if (typeof document !== 'undefined') {
     return c;
   }
 
+  // "Hazır mı" göstergesi: kırpma bandındaki kenar yoğunluğu ölçülür (Sobel-benzeri basit fark).
+  // Etiket kameraya yeterince yakın değilse bant düz/boş kalır -> düşük yoğunluk -> "yaklaşın".
+  // Kalibrasyon: gerçek saha etiketleriyle ölçüldü (bkz. BENIOKU) — eşik altı sürekli %70+ görülüyorsa
+  // OCR_HAZIR_ESIK'i düşürmek gerekebilir; bu tek sabit sahada ayarlanacak nokta.
+  const OCR_HAZIR_ESIK = 6.0;
+
+  function ocrKenarYogunlugu(video) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return 0;
+    const kw = Math.round(vw * OCR_CERCEVE_W), kh = Math.round(vh * OCR_CERCEVE_H);
+    const kx = Math.round((vw - kw) / 2), ky = Math.round((vh - kh) / 2);
+    // Ölçüm için küçük ve ucuz bir örnekleme yeter (performans: canlı önizlemede saniyede birkaç kez çalışır)
+    const c = document.createElement('canvas');
+    c.width = 120; c.height = Math.round(120 * kh / kw);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(video, kx, ky, kw, kh, 0, 0, c.width, c.height);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let toplam = 0, sayac = 0;
+    for (let y = 0; y < c.height; y += 2) {
+      for (let x = 0; x < c.width - 1; x += 2) {
+        const i = (y * c.width + x) * 4;
+        const i2 = i + 4;
+        const g1 = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+        const g2 = d[i2] * 0.299 + d[i2 + 1] * 0.587 + d[i2 + 2] * 0.114;
+        toplam += Math.abs(g1 - g2); sayac++;
+      }
+    }
+    return sayac ? toplam / sayac : 0;
+  }
+
+  let ocrHazirDongu = null;
+  let ocrOtomatikTarandi = false;
+
+  function ocrHaziroluguIzle() {
+    if (ocrHazirDongu) clearInterval(ocrHazirDongu);
+    ocrOtomatikTarandi = false;
+    ocrHazirDongu = setInterval(() => {
+      if (!ocrStream || !$('ocrVideo').videoWidth) return;
+      const yogunluk = ocrKenarYogunlugu($('ocrVideo'));
+      const hazir = yogunluk >= OCR_HAZIR_ESIK;
+      $('ocrCerceve').classList.toggle('hazir', hazir);
+      $('ocrDurum').textContent = hazir ? 'Hazır — okunuyor…' : 'Etikete yaklaşın';
+      if (hazir && !ocrOtomatikTarandi) {
+        ocrOtomatikTarandi = true;
+        if (navigator.vibrate) navigator.vibrate(60);
+        ocrOku();
+      }
+    }, 400);
+  }
+
   async function ocrOku() {
     if (!ocrStream) return;
-    $('ocrDurum').textContent = 'Okunuyor…';
     $('ocrAdaylar').innerHTML = '';
     try {
       await tesseractYukle();
       if (!ocrWorker) {
         ocrWorker = await window.Tesseract.createWorker('eng');
         await ocrWorker.setParameters({
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ',
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ ',
           tessedit_pageseg_mode: '6'
         });
       }
       const kare = ocrOnIsle($('ocrVideo'));
       const { data } = await ocrWorker.recognize(kare);
-      const adaylar = ocrAdaylarUret(data.text || '');
+      const baglam = ocrBaglamTahminEt($('checklistMaddesi').value);
+      const adaylar = ocrAdaylarUret(data.text || '', baglam);
       if (!adaylar.length) {
-        $('ocrDurum').textContent = 'Kod bulunamadı — yaklaşın veya ışığı artırın, tekrar deneyin';
+        $('ocrDurum').textContent = 'Kod bulunamadı — konumu ayarlayın, tekrar denenecek';
+        ocrOtomatikTarandi = false; // bir sonraki "hazır" anında tekrar denesin
         return;
       }
+      if (ocrHazirDongu) { clearInterval(ocrHazirDongu); ocrHazirDongu = null; }
       $('ocrDurum').textContent = 'Doğru olanı seçin:';
       const kap = $('ocrAdaylar');
       for (const a of adaylar) {
         const b = document.createElement('button');
         b.className = 'cip cip-buyuk';
         b.textContent = a;
-        b.onclick = () => { $('konumKodu').value = a; ocrKapat(); bildirim('Konum: ' + a + ' ✓'); };
+        b.onclick = () => {
+          $('konumKodu').value = a; ocrKapat(); bildirim('Konum: ' + a + ' ✓');
+        };
         kap.appendChild(b);
       }
     } catch (e) {
       $('ocrDurum').textContent = 'Hata: ' + e.message;
+      ocrOtomatikTarandi = false;
     }
   }
 

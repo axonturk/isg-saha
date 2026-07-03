@@ -1,54 +1,50 @@
-# İSG Saha Asistanı v0.2 (AxonTR)
+# İSG Saha Asistanı v0.3 (AxonTR)
 
-Çevrimdışı saha denetim PWA'sı: foto + not + alan tipi + konum kodu toplar,
-ZIP olarak dışa aktarır. v0.2 ile: checklist rehberi, OCR etiket okuma, foto küçültme.
+## v0.3'te ne değişti — OCR gerçek etiketlerle yeniden kalibre edildi
 
-## v0.2 yenilikleri
+Senin gönderdiğin 2 gerçek kapı etiketi fotoğrafı (Z-15, İ-107) v0.2'nin OCR'ını
+tamamen yanılttı. Kök neden teşhisi: etiket, fotoğrafın sadece %0.85'ini
+kaplıyordu (telefon etiketten ~1-1.5 metre uzakta). Bu optik/mesafe sorunu,
+görüntü işleme ile çözülemez (OpenCV.js dahil) — çözüm arayüzün kullanıcıyı
+fiziksel olarak yaklaştırmasıdır. Buna göre:
 
-1. CHECKLIST REHBERİ: Alan tipi seçilince "çekilmesi önerilenler" listesi görünür
-   (31 alan tipi, 136 kontrol maddesi). Tespit kaydederken hangi maddeye ait
-   olduğunu seçersin; madde ✅ olur. "Denetimi Bitir" eksik zorunlu kareleri uyarır.
-2. OCR ETİKET OKUMA: Konum kodu yanındaki 📷 ile kamera açılır, kapı etiketine
-   tutulur, "Oku" ile kod adayları çıkar, doğrusuna dokunulur.
-   - İLK KULLANIM İNTERNET İSTER (~5 MB motor bir kez iner, sonra offline).
-   - Okuyamazsa elle yazma yolu aynen durur; OCR sadece kısayoldur.
-3. FOTO KÜÇÜLTME: Çekim anında uzun kenar 2000px'e iner (~3.7 MB -> ~0.5 MB).
-   ZIP'ler ~7-10 kat küçülür. Not: küçültme EXIF verisini düşürür; çekim zamanı
-   zaten denetim.json'da tutulur.
+1. HEDEF ÇERÇEVESİ DARALTILDI (%70x%35 -> %42x%16): kullanıcı etiketi bu dar
+   çerçeveye sığdırmak için doğal olarak yaklaşmak zorunda kalır.
+2. "YAKLAŞIN / HAZIR" CANLI GÖSTERGESİ: kamera açıkken çerçeve içindeki kenar
+   yoğunluğu saniyede ~2 kez ölçülür. Yeterli netlik/yakınlık algılanınca
+   çerçeve yeşile döner, telefon titrer, OCR OTOMATİK çalışır — "Oku" butonuna
+   basmaya gerek kalmaz (istenirse elle de tetiklenebilir).
+3. BAĞLAMA DUYARLI OKUMA: Hangi checklist maddesini işaretlediysen (pano,
+   yangın dolabı, makine, konum) OCR o bağlama uygun kod kalıbını önceliklendirir
+   (P-023, YD-12, CNC-07, A-203 gibi). OCR_PROFILLERI objesi genişletilebilir —
+   yeni bina/kurum kalıbı eklemek kod değişikliği değil, veri eklemektir.
+4. OCR KARIŞIKLIK TOLERANSI: gerçek fotoğraflarında görüldüğü gibi OCR harfleri
+   görsel benzer rakamlarla karıştırabiliyor (Z->7, İ->1, S->5, B->8, O->0).
+   Artık bu varyantlar da aday olarak üretiliyor; "7-15" okununca "Z15" önerisi
+   de sunuluyor.
+5. "/" AYRACI DESTEĞİ: İ/107 gibi formatlar artık tanınıyor.
 
-## Kurulum / güncelleme
+## Test durumu (v0.3)
 
-İlk kurulum: BENIOKU önceki sürümle aynı (GitHub Pages + Ana ekrana ekle).
-Güncelleme: dosyaları repoya push et; telefonda uygulamayı internetliyken
-kapat-aç (service worker v3 yeni sürümü ikinci açılışta devreye alır).
+- 10 sentetik etiket: 10/10 (regresyon yok, v0.2'den daha temiz adaylar).
+- SENİN 2 GERÇEK ETİKETİN (Z-15, İ-107): ham Tesseract çıktısı "7-15" ve
+  "1C 1/107" gibi gürültülü olsa da, karışıklık toleransı ve token-bazlı
+  ayrıştırma ile 2/2 doğru kod üretildi (kullanıcının çerçeveye yaklaştığı
+  senaryo simüle edilerek test edildi — bkz. proje notları).
+- DÜRÜST SINIR: bu test, fotoğrafı yapay olarak "yaklaşılmış" gibi yeniden
+  kırparak yapıldı çünkü elimde video akışı yok, sadece durağan fotoğraf var.
+  Gerçek kullanım koşulunda kullanıcı arayüzdeki "yaklaşın" uyarısına uyup
+  uymayacağı SAHADA doğrulanacak. OCR_HAZIR_ESIK sabiti (app.js içinde,
+  aranabilir) sahada çok sık "yaklaşamıyorum" şikayeti gelirse düşürülebilir.
+- 16 uçtan uca test senaryosu (checklist, çoklu denetim, geri tuşu, hayati
+  risk, ZIP izolasyonu) hâlâ tam geçiyor — regresyon yok.
 
-## Çoklu denetim (v0.2)
+## OCR kullanımı (v0.3)
 
-Üst bardaki ← butonu (veya Android geri tuşu) denetim listesine döner.
-Buradan yeni denetim başlatılabilir veya devam eden bir denetime dokunup
-girilebilir. Her denetimin verisi ayrıdır; "Denetimi Bitir" yalnızca o
-denetimin verisini temizler, diğerleri cihazda kalır.
-
-## Saha akışı (v0.2)
-
-1. Denetim türü + işyeri + bina profili (9 profil) > Başlat
-2. Alan tipi seç > checklist paneli açılır ("bugün çekilecekler")
-3. Konum kodu: elle yaz, son-5 çipinden seç veya 📷 OCR ile okut
-4. Foto çek (otomatik küçültülür) / fotoğrafsız bulgu için sadece not
-5. "Bu tespit hangi kontrol maddesine ait?" seç (isteğe bağlı) > Kaydet > madde ✅
-6. HAYATİ RİSK kutusu: kayıtta anlık bildirim taslağı açılır
-7. Ara yedek al; gün sonunda "Denetimi Bitir" > eksik zorunlu uyarısı > ZIP
-
-## Test durumu (v0.2)
-
-- OCR pipeline: 10 farklı sentetik etiket yapısı (lazer plaka, kağıt, metal,
-  düşük kontrast, 6° eğik, Türkçe tabela, bulanık, iki satır, hastane tipi,
-  italik) ile benchmark: 10/10. JS piksel matematiği + aday seçimi gerçek
-  Tesseract'a okutularak parite testi: 10/10.
-- Birim testleri: OCR aday üretimi (O/0 varyantı dahil), 31 checklist bütünlüğü,
-  checklist anahtarlarının profil alanlarıyla eşleşmesi, eksik-zorunlu mantığı.
-- Uçtan uca (jsdom+fake-indexeddb): 12 adım — kurulum > denetim > fotoğraflı/
-  fotoğrafsız tespit > hayati risk > checklist paneli > madde kapsama (✅) >
-  eksik zorunlu uyarısı > OCR kamerasız güvenli davranış > ZIP + şema doğrulama.
-- SAHADA DOĞRULANACAKLAR (burada test edilemeyenler): gerçek kapı etiketlerinde
-  OCR isabeti (ışık/açı/etiket kalitesi), gerçek telefonda foto küçültme çıktısı.
+1. Konum kodu yanındaki 📷'ya bas
+2. Dar sarı çerçeveyi etikete yaklaştır (önceki sürümden daha yakına gelmen
+   gerekecek — bu kasıtlı)
+3. Çerçeve yeşile dönüp titreşim hissettiğinde otomatik okunur
+4. Çıkan aday(lar)dan doğrusuna dokun — alana yazılır
+5. Okumazsa: ışığı artır, açıyı düzelt, biraz daha yaklaş; sistem "hazır"
+   olana kadar otomatik denemeye devam eder

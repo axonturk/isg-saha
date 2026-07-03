@@ -90,8 +90,10 @@
   .ocr-kutu { width: 100%; max-width: 560px; padding: 16px; position: relative; }
   .video-sarici { position: relative; }
   #ocrVideo { width: 100%; display: block; border-radius: 12px; background: #000; }
-  .ocr-cerceve { position: absolute; left: 15%; right: 15%; top: 32.5%; bottom: 32.5%;
-    border: 2.5px solid #f0b429; border-radius: 8px; pointer-events: none; }
+  .ocr-cerceve { position: absolute; left: 29%; right: 29%; top: 42%; bottom: 42%;
+    border: 3px solid #f0b429; border-radius: 8px; pointer-events: none;
+    transition: border-color .2s, box-shadow .2s; }
+  .ocr-cerceve.hazir { border-color: #2ecc71; box-shadow: 0 0 0 3px #2ecc7133; }
   #ocrDurum { color: #fff; text-align: center; font-size: 15px; margin-top: 12px; }
   #ocrAdaylar { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
   .ocr-butonlar { display: flex; gap: 10px; margin-top: 8px; }
@@ -102,7 +104,7 @@
 
 <div id="ekranKurulum" class="ekran">
   <h1>İSG Saha Asistanı</h1>
-  <div class="alt-baslik">AxonTR · v0.2.1 · Tamamen çevrimdışı çalışır</div>
+  <div class="alt-baslik">AxonTR · v0.3 · Tamamen çevrimdışı çalışır</div>
 
   <div id="devamPanel" style="display:none">
     <label>Devam eden denetimler</label>
@@ -187,7 +189,7 @@
   <div class="ocr-kutu">
     <div class="video-sarici">
       <video id="ocrVideo" playsinline muted></video>
-      <div class="ocr-cerceve"></div>
+      <div class="ocr-cerceve" id="ocrCerceve"></div>
     </div>
     <div id="ocrDurum">Etiketi çerçeveye hizalayın</div>
     <div id="ocrAdaylar"></div>
@@ -198,7 +200,7 @@
   </div>
 </div>
 
-<div class="surum-eti">v0.2.1</div>
+<div class="surum-eti">v0.3</div>
 <div id="bildirim"></div>
 <script src="./app.js"></script>
 </body>
