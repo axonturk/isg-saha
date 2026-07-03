@@ -1,5 +1,5 @@
 'use strict';
-/* İSG Saha Asistanı v0.2 — AxonTR
+/* İSG Saha Asistanı v0.2.1 — AxonTR
    Saf yardımcı fonksiyonlar üstte (Node'da test edilebilir), DOM/uygulama altta. */
 
 // ---------- ZIP WRITER (store, sıkıştırmasız, bağımlılıksız) ----------
@@ -414,7 +414,7 @@ function konumNormalize(k) {
 function denetimJson(denetim, tespitler, fotoAdlari) {
   return {
     surum: 1,
-    uygulama: 'ISG Saha Asistani v0.2 (AxonTR)',
+    uygulama: 'ISG Saha Asistani v0.2.1 (AxonTR)',
     olusturma: new Date().toISOString(),
     denetim,
     tespitler,
@@ -505,7 +505,8 @@ if (typeof document !== 'undefined') {
     anaEkranaGec();
   }
 
-  async function kurulumaDon() {
+  async function kurulumaDonUI() {
+    // Sadece ekranı çizer; history'ye DOKUNMAZ (popstate ve init çağırır)
     aktifDenetim = null;
     sonKonumlar = [];
     await devamListesiniCiz();
@@ -513,13 +514,15 @@ if (typeof document !== 'undefined') {
   }
 
   async function devamListesiniCiz() {
+    // Önce TÜM veriler çekilir, DOM en sonda tek hamlede yazılır.
+    // (popstate + emniyet zamanlayıcısı aynı anda çağırırsa kartlar katlanmasın)
     const denetimler = await hepsiniAl('denetim');
+    const tespitler = denetimler.length ? await hepsiniAl('tespitler') : [];
     const panel = $('devamPanel');
     const kap = $('devamListesi');
     kap.innerHTML = '';
     if (!denetimler.length) { panel.style.display = 'none'; return; }
     panel.style.display = 'block';
-    const tespitler = await hepsiniAl('tespitler');
     for (const d of [...denetimler].reverse()) {
       const n = tespitler.filter(t => t.denetimId === d.id).length;
       const kart = document.createElement('div');
@@ -537,9 +540,12 @@ if (typeof document !== 'undefined') {
     alanTipleriniDoldur();
     ekranGoster('ekranAna');
     listeyiYenile();
-    // Android geri tuşu bu ekrandan kuruluma dönsün diye history'ye kayıt at
-    if (typeof history !== 'undefined' && history.pushState && !history.state?.ana) {
-      history.pushState({ ana: true }, '');
+    // Geri tuşu kalıbı: taban kayıt daima 'kurulum', ana ekran üstüne 'ana' push edilir.
+    // Böylece Android geri tuşu -> popstate('kurulum') -> kurulum ekranı çizilir.
+    if (typeof history !== 'undefined' && history.pushState) {
+      if (!history.state || history.state.ekran !== 'ana') {
+        history.pushState({ ekran: 'ana' }, '');
+      }
     }
   }
 
@@ -881,7 +887,11 @@ if (typeof document !== 'undefined') {
       bildirim(sonMu ? 'Denetim ZIP indirildi ✓' : 'Ara yedek indirildi ✓');
       if (sonMu && confirm('ZIP indirildi. Bu denetim kapatılıp cihazdaki verisi temizlensin mi?\n(ZIP dosyasını bilgisayara aktarmadan temizlemeyin!)')) {
         await denetimiTemizle(aktifDenetim.id);
-        await kurulumaDon();
+        if (typeof history !== 'undefined' && history.state && history.state.ekran === 'ana') {
+          history.back(); // popstate -> kurulumaDonUI
+        } else {
+          await kurulumaDonUI();
+        }
       }
     } catch (e) {
       uyari('ZIP oluşturulamadı: ' + e.message);
@@ -924,18 +934,33 @@ if (typeof document !== 'undefined') {
       navigator.storage.persist().catch(() => {});
     }
     profilleriDoldur();
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState({ ekran: 'kurulum' }, '');
+    }
     const mevcut = await hepsiniAl('denetim');
     if (mevcut.length) {
       aktifDenetim = mevcut[mevcut.length - 1];
       anaEkranaGec();
     } else {
-      ekranGoster('ekranKurulum');
+      await kurulumaDonUI();
     }
-    $('btnGeri').onclick = () => kurulumaDon();
-    window.addEventListener('popstate', () => {
-      // Android donanım geri tuşu: ana ekrandaysa kuruluma dön
-      if ($('ekranAna').classList.contains('aktif')) kurulumaDon();
+    window.addEventListener('popstate', e => {
+      const ekran = e.state && e.state.ekran;
+      if (ekran === 'ana' && aktifDenetim) {
+        ekranGoster('ekranAna');
+      } else {
+        kurulumaDonUI();
+      }
     });
+    $('btnGeri').onclick = () => {
+      // Donanım geri tuşuyla aynı yol: history üzerinden popstate tetiklenir.
+      // popstate desteklenmeyen/gelmeyen ortamlar için kısa emniyet zamanlayıcısı.
+      const onceki = $('ekranAna').classList.contains('aktif');
+      if (typeof history !== 'undefined' && history.back) history.back();
+      setTimeout(() => {
+        if (onceki && $('ekranAna').classList.contains('aktif')) kurulumaDonUI();
+      }, 250);
+    };
     $('btnBaslat').onclick = denetimBaslat;
     $('fotoInput').onchange = fotoSec;
     $('btnFoto').onclick = () => $('fotoInput').click();
