@@ -22,6 +22,183 @@ let sessionTimer   = null;
 let modalCallback  = null;
 let ocrStream      = null;
 
+// ─── RESİM SIKIŞTIRMA (A AŞAMASI) ────────────────────────────
+// Amaç: Saha fotoğraflarını IndexedDB'ye/kayda yazmadan önce küçültmek.
+// Hedef: max 1920px kenar, kalite 0.80, ~200-300 KB/foto.
+// NOT: EXIF verisi bu aşamada İŞLENMEZ (tarih/konum koruması = B aşaması).
+//      Canvas'a çizim EXIF'i düşürür; bu bilinçli bir kısıttır.
+const RESIM_SIKISTIRMA = {
+  maxKenar:  1920,   // px — en uzun kenar bu değere indirilir
+  kalite:    0.80,   // JPEG kalitesi (0-1)
+  format:    'image/jpeg',
+  // Bu boyutun altındaki dosyalara dokunma (zaten yeterince küçük):
+  atlaEsigi: 300 * 1024,        // 300 KB
+  // Bundan büyük girdi = güvenlik sınırı (bozuk/aşırı dosya):
+  maksGirdi: 50 * 1024 * 1024   // 50 MB
+};
+
+// İnsan-okunur boyut (log ve test için).
+function boyutBiçimle(bytes) {
+  if (!bytes && bytes !== 0) return '?';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// SAF fonksiyon (test edilebilir): en-boy oranını koruyarak hedef ölçü hesaplar.
+// Zaten küçükse aynı ölçüyü döner (büyütme yapmaz).
+function hedefOlculeriHesapla(w, h, maxKenar) {
+  if (!w || !h) return { w: 0, h: 0 };
+  const enUzun = Math.max(w, h);
+  if (enUzun <= maxKenar) return { w: Math.round(w), h: Math.round(h) };
+  const oran = maxKenar / enUzun;
+  return { w: Math.round(w * oran), h: Math.round(h * oran) };
+}
+
+// Girdi kaynağının yaklaşık byte boyutunu bul (File/Blob veya dataURL string).
+function kaynakBoyutu(kaynak) {
+  if (!kaynak) return 0;
+  if (typeof kaynak.size === 'number') return kaynak.size;            // File/Blob
+  if (typeof kaynak === 'string' && kaynak.startsWith('data:')) {     // dataURL
+    const virgul = kaynak.indexOf(',');
+    const b64 = virgul >= 0 ? kaynak.slice(virgul + 1) : kaynak;
+    // base64 -> yaklaşık byte
+    return Math.round(b64.length * 3 / 4);
+  }
+  return 0;
+}
+
+// Bir kaynağı (File | Blob | dataURL string) yüklenmiş bir Image nesnesine çevirir.
+function _resmiYukle(kaynak) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    let url = null;
+    img.onload = () => { if (url) URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => {
+      if (url) URL.revokeObjectURL(url);
+      reject(new Error('Görsel çözümlenemedi (desteklenmeyen format olabilir).'));
+    };
+    if (typeof kaynak === 'string') {
+      img.src = kaynak;                       // dataURL / objectURL
+    } else if (kaynak instanceof Blob) {
+      url = URL.createObjectURL(kaynak);
+      img.src = url;
+    } else {
+      reject(new Error('Desteklenmeyen görsel kaynağı türü.'));
+    }
+  });
+}
+
+/**
+ * Resmi Canvas ile sıkıştırır.
+ * @param {File|Blob|string} kaynak  Fotoğraf dosyası, Blob veya dataURL.
+ * @param {Object} [secenek]         { maxKenar, kalite, format } — varsayılanlar RESİM_SIKIŞTIRMA'dan.
+ * @returns {Promise<{blob:Blob, dataUrl:string, orijinalBoyut:number,
+ *                    sikistirilmisBoyut:number, genislik:number, yukseklik:number,
+ *                    sikistirildi:boolean}>}
+ *
+ * Hata durumunda İSTİSNA FIRLATMAZ; her zaman kullanılabilir bir sonuç döner
+ * (başarısızlıkta orijinal veriyle, sikistirildi:false).
+ */
+async function compressImage(kaynak, secenek = {}) {
+  const cfg = {
+    maxKenar: secenek.maxKenar ?? RESIM_SIKISTIRMA.maxKenar,
+    kalite:   secenek.kalite   ?? RESIM_SIKISTIRMA.kalite,
+    format:   secenek.format   ?? RESIM_SIKISTIRMA.format
+  };
+  const orijinalBoyut = kaynakBoyutu(kaynak);
+
+  // — Güvenlik: aşırı büyük girdi —
+  if (orijinalBoyut > RESIM_SIKISTIRMA.maksGirdi) {
+    console.warn(`[sıkıştırma] Dosya çok büyük (${boyutBiçimle(orijinalBoyut)}), ` +
+                 `sınır ${boyutBiçimle(RESIM_SIKISTIRMA.maksGirdi)}. Orijinal kullanılıyor.`);
+    return _orijinaleDon(kaynak, orijinalBoyut);
+  }
+
+  try {
+    const img = await _resmiYukle(kaynak);
+    const { w, h } = hedefOlculeriHesapla(img.naturalWidth || img.width,
+                                          img.naturalHeight || img.height,
+                                          cfg.maxKenar);
+    if (!w || !h) throw new Error('Görsel boyutları okunamadı.');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const dataUrl = canvas.toDataURL(cfg.format, cfg.kalite);
+    const blob = await new Promise(res =>
+      canvas.toBlob(b => res(b), cfg.format, cfg.kalite)
+    );
+    const sikistirilmisBoyut = blob ? blob.size : kaynakBoyutu(dataUrl);
+
+    console.log(`[sıkıştırma] ${img.naturalWidth}x${img.naturalHeight} → ${w}x${h} | ` +
+                `${boyutBiçimle(orijinalBoyut)} → ${boyutBiçimle(sikistirilmisBoyut)} ` +
+                `(kalite ${cfg.kalite})`);
+
+    // Sıkıştırma orijinalden büyük çıktıysa (küçük/zaten optimize) orijinali koru.
+    if (orijinalBoyut > 0 && sikistirilmisBoyut >= orijinalBoyut) {
+      console.log('[sıkıştırma] Sonuç orijinalden küçük değil; orijinal korunuyor.');
+      return _orijinaleDon(kaynak, orijinalBoyut, dataUrl, w, h);
+    }
+
+    return {
+      blob: blob || null,
+      dataUrl,
+      orijinalBoyut,
+      sikistirilmisBoyut,
+      genislik: w,
+      yukseklik: h,
+      sikistirildi: true
+    };
+  } catch (e) {
+    // Sıkıştırma başarısız → orijinal dosyayı kullan (akış bozulmasın).
+    console.warn('[sıkıştırma] Başarısız, orijinal kullanılıyor:', e.message);
+    return _orijinaleDon(kaynak, orijinalBoyut);
+  }
+}
+
+// Yardımcı: sıkıştırılmamış/başarısız durumda tutarlı sonuç nesnesi üret.
+async function _orijinaleDon(kaynak, boyut, dataUrl = null, w = 0, h = 0) {
+  let blob = null;
+  let url = dataUrl;
+  try {
+    if (kaynak instanceof Blob) {
+      blob = kaynak;
+      if (!url) url = await _blobToDataURL(kaynak);
+    } else if (typeof kaynak === 'string') {
+      url = url || kaynak;
+    }
+  } catch (_) { /* yok say */ }
+  return {
+    blob,
+    dataUrl: url,
+    orijinalBoyut: boyut,
+    sikistirilmisBoyut: boyut,
+    genislik: w,
+    yukseklik: h,
+    sikistirildi: false
+  };
+}
+
+function _blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Blob okunamadı.'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+// Test/kullanım için global erişim (IndexedDB kayıt katmanı hazır olduğunda çağrılır).
+if (typeof window !== 'undefined') {
+  window.compressImage = compressImage;
+  window.hedefOlculeriHesapla = hedefOlculeriHesapla;
+  window.boyutBiçimle = boyutBiçimle;
+}
+
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
 window.addEventListener('load', () => {
   console.log(`İSG Saha Asistanı ${APP_VERSION} başlatıldı`);
@@ -304,8 +481,15 @@ async function capturePhoto() {
   canvas.getContext('2d').drawImage(video, 0, 0);
   closeOCR();
 
-  const imageData = canvas.toDataURL('image/jpeg', 0.8);
+  // OCR tam çözünürlükte çalışsın (tanıma başarısı için); sıkıştırma sonra.
+  const imageData = canvas.toDataURL('image/jpeg', 0.95);
   document.getElementById('finding-manual').value = 'OCR işleniyor...';
+
+  // — Sıkıştırma (kayıt/IndexedDB'ye hazır): OCR akışını bloklamadan çalıştır. —
+  // Sonuç ileride tespitle birlikte saklanmak üzere hazır tutulur.
+  compressImage(imageData).then(sonuc => {
+    sonForKaydiSaklaHazir(sonuc);
+  }).catch(e => console.warn('[sıkıştırma] capturePhoto:', e.message));
 
   try {
     const result = await Tesseract.recognize(imageData, 'tur', {
@@ -317,6 +501,25 @@ async function capturePhoto() {
     document.getElementById('finding-manual').value = 'OCR hatası: ' + e.message;
   }
 }
+
+// Son sıkıştırılan fotoğrafı bellekte tut — kayıt/IndexedDB katmanı devreye
+// girdiğinde tespitle birlikte bu (küçültülmüş) veri yazılacak.
+let sonSikistirilmisFoto = null;
+function sonForKaydiSaklaHazir(sonuc) {
+  sonSikistirilmisFoto = sonuc;
+  console.log('[sıkıştırma] Kayda hazır foto:',
+    boyutBiçimle(sonuc.sikistirilmisBoyut),
+    sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');
+}
+
+// Dışarıdan bir dosya/blob/dataURL alıp kayda hazır sıkıştırılmış veri üretir.
+// Fotoğraf yükleme (input[type=file]) veya galeri akışı eklendiğinde kullanılabilir.
+async function fotoAlVeSikistir(kaynak) {
+  const sonuc = await compressImage(kaynak);
+  sonForKaydiSaklaHazir(sonuc);
+  return sonuc; // { blob, dataUrl, orijinalBoyut, sikistirilmisBoyut, ... }
+}
+if (typeof window !== 'undefined') window.fotoAlVeSikistir = fotoAlVeSikistir;
 
 // ─── YEDEK / GERİ YÜKLE ──────────────────────────────────────
 function backupRestore() {
