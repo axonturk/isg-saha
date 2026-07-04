@@ -569,10 +569,34 @@ if (typeof document !== 'undefined') {
       const kart = document.createElement('div');
       kart.className = 'devam-kart';
       const tarih = new Date(d.baslangic).toLocaleDateString('tr-TR');
-      kart.innerHTML = `<b>${d.isyeri}</b><span>${d.tur === 'risk' ? 'Risk analizi' : 'Saha denetimi'} · ${tarih} · ${n} tespit — devam etmek için dokun</span>`;
+      kart.innerHTML = `<div class="devam-kart-ust"><b>${d.isyeri}</b><button class="devam-sil" title="Denetimi sil">🗑</button></div><span>${d.tur === 'risk' ? 'Risk analizi' : 'Saha denetimi'} · ${tarih} · ${n} tespit — devam etmek için dokun</span>`;
       kart.onclick = () => { aktifDenetim = d; sonKonumlar = []; anaEkranaGec(); };
+      kart.querySelector('.devam-sil').onclick = (ev) => {
+        ev.stopPropagation();
+        denetimSil(d);
+      };
       kap.appendChild(kart);
     }
+  }
+
+  // v0.4: denetim silme — kaza ile veri kaybını önlemek için önce yedek sorulur,
+  // sonra ayrı bir adımda kalıcı silme onayı istenir ("işi şansa bırakma" ilkesi).
+  async function denetimSil(d) {
+    const tespitler = await hepsiniAl('tespitler', 'denetimId', d.id);
+    const fotolar = await hepsiniAl('fotolar');
+    const tespitIdler = new Set(tespitler.map(t => t.id));
+    const fotoSayisi = fotolar.filter(f => tespitIdler.has(f.tespitId)).length;
+    const devamEt = confirm(
+      `"${d.isyeri}" denetimi silinecek — ${tespitler.length} tespit, ${fotoSayisi} foto.\n\nDevam edilsin mi?`
+    );
+    if (!devamEt) return;
+    if (confirm('Önce yedek ZIP indirilsin mi? (önerilir — yedeksiz silinen veri geri getirilemez)')) {
+      await zipIndir(false, d);
+    }
+    if (!confirm(`"${d.isyeri}" kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return;
+    await denetimiTemizle(d.id);
+    bildirim('Denetim silindi');
+    await devamListesiniCiz();
   }
 
   function anaEkranaGec() {
@@ -985,8 +1009,11 @@ if (typeof document !== 'undefined') {
   }
 
   // ---- ZIP dışa aktarma ----
-  async function zipOlustur() {
-    const tespitler = await hepsiniAl('tespitler', 'denetimId', aktifDenetim.id);
+  // v0.4: denetim parametresi eklendi — böylece aktif olmayan (listeden silinecek) bir
+  // denetimin de yedek ZIP'i alınabiliyor, aktifDenetim'i değiştirmeden.
+  async function zipOlustur(denetim) {
+    denetim = denetim || aktifDenetim;
+    const tespitler = await hepsiniAl('tespitler', 'denetimId', denetim.id);
     if (!tespitler.length) { uyari('Henüz tespit yok.'); return null; }
     const fotolar = await hepsiniAl('fotolar');
     const dosyalar = [];
@@ -1009,34 +1036,36 @@ if (typeof document !== 'undefined') {
         zaman: t.zaman, fotolar: adlar
       });
     }
-    const json = denetimJson(aktifDenetim, tespitCikti, fotoAdlari);
+    const json = denetimJson(denetim, tespitCikti, fotoAdlari);
     dosyalar.unshift({ name: 'denetim.json', data: new TextEncoder().encode(JSON.stringify(json, null, 2)) });
     return buildZip(dosyalar);
   }
 
-  async function zipIndir(sonMu) {
+  async function zipIndir(sonMu, denetim) {
+    denetim = denetim || aktifDenetim;
+    const buAktif = denetim === aktifDenetim;
     try {
       if (sonMu) {
-        const tespitler = await hepsiniAl('tespitler', 'denetimId', aktifDenetim.id);
+        const tespitler = await hepsiniAl('tespitler', 'denetimId', denetim.id);
         const eksikler = eksikZorunlular(tespitler);
         if (eksikler.length) {
           const metin = eksikler.map(e => e.alan + ': ' + e.eksik.join(', ')).join('\n');
           if (!confirm('Eksik zorunlu kareler var:\n\n' + metin + '\n\nYine de bitirilsin mi?')) return;
         }
       }
-      const zip = await zipOlustur();
+      const zip = await zipOlustur(denetim);
       if (!zip) return;
       const blob = new Blob([zip], { type: 'application/zip' });
       const a = document.createElement('a');
       const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
       a.href = URL.createObjectURL(blob);
-      a.download = `denetim_${slug(aktifDenetim.isyeri)}_${ts}${sonMu ? '' : '_yedek'}.zip`;
+      a.download = `denetim_${slug(denetim.isyeri)}_${ts}${sonMu ? '' : '_yedek'}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       bildirim(sonMu ? 'Denetim ZIP indirildi ✓' : 'Ara yedek indirildi ✓');
-      if (sonMu && confirm('ZIP indirildi. Bu denetim kapatılıp cihazdaki verisi temizlensin mi?\n(ZIP dosyasını bilgisayara aktarmadan temizlemeyin!)')) {
-        await denetimiTemizle(aktifDenetim.id);
+      if (sonMu && buAktif && confirm('ZIP indirildi. Bu denetim kapatılıp cihazdaki verisi temizlensin mi?\n(ZIP dosyasını bilgisayara aktarmadan temizlemeyin!)')) {
+        await denetimiTemizle(denetim.id);
         if (typeof history !== 'undefined' && history.state && history.state.ekran === 'ana') {
           history.back(); // popstate -> kurulumaDonUI
         } else {
