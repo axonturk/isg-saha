@@ -1,298 +1,233 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<meta name="theme-color" content="#1a3a5c">
-<title>İSG Saha Asistanı</title>
-<link rel="manifest" href="manifest.json">
-<style>
-  :root{--lacivert:#1a3a5c;--kiremit:#8a2f1d;--yesil:#1e6b3c;--acik:#f0f4f8;--kart:#fff;--golge:0 2px 8px rgba(0,0,0,.12)}
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-  body{font-family:system-ui,sans-serif;background:var(--acik);color:#1a1a1a;min-height:100dvh}
-  .ekran{display:none}.ekran.aktif{display:flex;flex-direction:column;min-height:100dvh}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>İSG Saha Asistanı v0.4.1</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #3498db;
+            --danger: #e74c3c;
+            --success: #27ae60;
+            --bg: #f8f9fa;
+            --text: #2c3e50;
+            --safe-top: env(safe-area-inset-top);
+        }
 
-  /* ---- KURULUM ---- */
-  #ekranKurulum{background:var(--lacivert);color:#fff;padding:24px 20px 32px}
-  .logo-alan{text-align:center;padding:32px 0 24px}
-  .logo-alan h1{font-size:1.5rem;font-weight:700;letter-spacing:.5px}
-  .logo-alan p{font-size:.8rem;opacity:.7;margin-top:4px}
-  .form-kart{background:rgba(255,255,255,.08);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px}
-  .form-kart label{font-size:.8rem;opacity:.8;margin-bottom:2px;display:block}
-  .form-kart select,.form-kart input{width:100%;padding:12px 14px;border-radius:10px;border:none;font-size:1rem;background:rgba(255,255,255,.15);color:#fff;outline:none}
-  .form-kart select option{background:var(--lacivert)}
-  .btn-basla{margin-top:8px;padding:16px;background:#fff;color:var(--lacivert);border:none;border-radius:12px;font-size:1.1rem;font-weight:700;cursor:pointer;width:100%}
-  #devamPanel{margin-top:20px}
-  #devamPanel h3{font-size:.85rem;opacity:.7;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
-  .devam-kart{background:rgba(255,255,255,.1);border-radius:12px;padding:14px 16px;margin-bottom:8px;cursor:pointer;position:relative}
-  .devam-kart:active{opacity:.8}
-  .devam-kart b{display:block;font-size:1rem;margin-bottom:2px}
-  .devam-kart span{font-size:.8rem;opacity:.75}
-  .devam-sil{position:absolute;top:10px;right:10px;background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:8px;padding:4px 10px;font-size:.85rem;cursor:pointer}
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; background-color: var(--bg); color: var(--text);
+            overflow-x: hidden; touch-action: manipulation;
+        }
 
-  /* ---- ANA EKRAN ---- */
-  #ekranAna{background:var(--acik)}
-  .ust-bar{position:sticky;top:0;z-index:100;background:var(--lacivert);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-  .ust-bar button{background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:.9rem;cursor:pointer;white-space:nowrap}
-  .ust-bar-bilgi{flex:1;min-width:0}
-  .ust-bar-bilgi b{display:block;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ust-bar-bilgi span{font-size:.75rem;opacity:.8}
-  #tespitSayac{background:rgba(255,255,255,.2);border-radius:20px;padding:3px 10px;font-size:.8rem;white-space:nowrap}
+        .screen { display: none; min-height: 100vh; padding: 20px; padding-top: calc(20px + var(--safe-top)); }
+        .screen.active { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-  .ana-icerik{padding:12px 14px 100px;display:flex;flex-direction:column;gap:10px}
+        h1, h2, h3 { color: var(--primary); margin-top: 0; }
 
-  .kart{background:var(--kart);border-radius:14px;padding:14px 16px;box-shadow:var(--golge)}
-  .kart-baslik{font-size:.75rem;font-weight:600;color:var(--lacivert);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+        /* Kart Yapısı */
+        .card { 
+            background: white; border-radius: 12px; padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px;
+        }
 
-  /* Konum satırı */
-  .konum-satir{display:flex;gap:6px;align-items:center}
-  .konum-satir input{flex:1;padding:11px 12px;border:1.5px solid #dde3ea;border-radius:10px;font-size:1rem;outline:none}
-  .konum-satir input:focus{border-color:var(--lacivert)}
-  .konum-satir button{padding:11px 13px;border:none;border-radius:10px;background:var(--lacivert);color:#fff;font-size:1rem;cursor:pointer;white-space:nowrap}
-  #katCipleri{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+        /* Form Elemanları */
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9rem; }
+        select, input, textarea {
+            width: 100%; padding: 12px; border: 2px solid #ddd;
+            border-radius: 8px; font-size: 1rem; transition: border-color 0.3s;
+        }
+        select:focus, input:focus { border-color: var(--accent); outline: none; }
 
-  /* Checklist */
-  #checklistPanel{display:none}
-  #checklistCipler{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-  .cip{padding:7px 13px;border:1.5px solid var(--lacivert);border-radius:20px;background:#fff;color:var(--lacivert);font-size:.85rem;cursor:pointer;white-space:nowrap}
-  .cip:active,.cip.cl-cip-aktif{background:var(--lacivert);color:#fff}
-  .cl-madde{padding:9px 12px;border-radius:8px;cursor:pointer;font-size:.9rem;border-bottom:1px solid #f0f0f0}
-  .cl-madde:active{background:#f0f4f8}
-  .cl-madde.tamam{color:#888;text-decoration:line-through}
-  #checklistListeSarici{display:none;max-height:220px;overflow-y:auto;border:1px solid #e0e6ed;border-radius:10px;margin-top:6px}
-  .btn-cl-tumu{background:none;border:1px solid #ccd3db;border-radius:8px;padding:6px 12px;font-size:.8rem;cursor:pointer;color:#555;width:100%}
+        /* Butonlar */
+        .btn {
+            display: flex; align-items: center; justify-content: center;
+            padding: 15px 20px; border: none; border-radius: 10px;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s; width: 100%; gap: 10px;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background-color: var(--accent); color: white; }
+        .btn-danger { background-color: var(--danger); color: white; }
+        .btn-success { background-color: var(--success); color: white; }
+        .btn-outline { background: white; border: 2px solid var(--primary); color: var(--primary); }
 
-  /* Tespit formu */
-  select{width:100%;padding:11px 12px;border:1.5px solid #dde3ea;border-radius:10px;font-size:.95rem;background:#fff;outline:none}
-  select:focus{border-color:var(--lacivert)}
-  textarea{width:100%;padding:11px 12px;border:1.5px solid #dde3ea;border-radius:10px;font-size:.95rem;resize:none;outline:none;font-family:inherit;min-height:80px}
-  textarea:focus{border-color:var(--lacivert)}
+        /* Konum Grid */
+        .location-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;
+        }
 
-  /* Birim sorumlusu — yeni alan */
-  .sorumlu-satir{display:flex;gap:6px;align-items:center;margin-top:6px}
-  .sorumlu-satir input{flex:1;padding:10px 12px;border:1.5px solid #dde3ea;border-radius:10px;font-size:.9rem;outline:none;background:#fff}
-  .sorumlu-satir input:focus{border-color:var(--lacivert)}
-  .sorumlu-satir input::placeholder{color:#aaa}
+        /* Chip Listesi */
+        .chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .chip {
+            padding: 8px 16px; background: #eee; border-radius: 20px;
+            font-size: 0.85rem; cursor: pointer; border: 2px solid transparent;
+        }
+        .chip.active { background: var(--accent); color: white; }
 
-  /* Foto */
-  .foto-satir{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .btn-foto{padding:11px 18px;background:var(--lacivert);color:#fff;border:none;border-radius:10px;font-size:.95rem;cursor:pointer}
-  #fotoSayac{font-size:.85rem;color:#555}
-  #bekleyenFotolar{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-  .thumb{position:relative;width:72px;height:72px}
-  .thumb img{width:100%;height:100%;object-fit:cover;border-radius:8px}
-  .thumb button{position:absolute;top:-4px;right:-4px;background:var(--kiremit);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:.7rem;cursor:pointer;line-height:1}
+        /* Liste Elemanları */
+        .finding-item {
+            background: white; border-left: 5px solid var(--accent);
+            padding: 15px; margin-bottom: 10px; border-radius: 0 8px 8px 0;
+            position: relative;
+        }
+        .finding-meta { font-size: 0.8rem; color: #666; margin-bottom: 5px; }
+        .finding-loc { font-weight: bold; color: var(--primary); }
 
-  /* Hayati risk */
-  .hayati-satir{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff3f3;border-radius:10px;border:1.5px solid #f5c0c0;cursor:pointer}
-  .hayati-satir input[type=checkbox]{width:20px;height:20px;accent-color:var(--kiremit);cursor:pointer}
-  .hayati-satir label{font-size:.9rem;color:var(--kiremit);font-weight:600;cursor:pointer;flex:1}
+        /* Modal */
+        .modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .modal-content {
+            background: white; border-radius: 15px; padding: 25px; width: 100%;
+            max-width: 400px; text-align: center;
+        }
 
-  /* Kaydet butonu */
-  .btn-kaydet{padding:15px;background:var(--yesil);color:#fff;border:none;border-radius:12px;font-size:1.05rem;font-weight:700;cursor:pointer;width:100%}
-  .btn-kaydet:active{opacity:.85}
+        /* OCR Overlay */
+        #camera-ui {
+            display: none; position: fixed; top:0; left:0; width:100%; height:100%;
+            background: black; z-index: 2000;
+        }
+        #video { width:100%; height:100%; object-fit: cover; }
+        .cam-controls {
+            position: absolute; bottom: 40px; left: 0; width: 100%;
+            display: flex; justify-content: center; padding: 0 20px;
+        }
 
-  /* Yedek uyarısı */
-  #yedekUyari{display:none;background:#fff8e1;border:1px solid #ffe082;border-radius:12px;padding:12px 14px;font-size:.85rem;color:#5d4037;align-items:center;gap:10px}
-  #yedekUyari button{background:none;border:none;font-size:1.1rem;cursor:pointer;margin-left:auto}
-  .btn-yedek-al{padding:8px 14px;background:var(--lacivert);color:#fff;border:none;border-radius:8px;font-size:.85rem;cursor:pointer}
-
-  /* Alt butonlar */
-  .alt-butonlar{display:flex;gap:8px;margin-top:4px}
-  .btn-ara-yedek{flex:1;padding:13px;background:#fff;color:var(--lacivert);border:2px solid var(--lacivert);border-radius:12px;font-size:.9rem;font-weight:600;cursor:pointer}
-  .btn-bitir{flex:1;padding:13px;background:var(--kiremit);color:#fff;border:none;border-radius:12px;font-size:.9rem;font-weight:600;cursor:pointer}
-
-  /* Tespit listesi */
-  #tespitListesi{display:flex;flex-direction:column;gap:8px}
-  .t-kart{background:var(--kart);border-radius:12px;padding:12px 14px;box-shadow:var(--golge);border-left:4px solid #ccd3db}
-  .t-kart.hayati{border-left-color:var(--kiremit)}
-  .t-kart-ust{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
-  .t-kart-ust b{font-size:.9rem;flex:1}
-  .t-kart-ust .kod{font-size:.75rem;background:#e8edf2;padding:2px 8px;border-radius:10px;white-space:nowrap}
-  .t-kart-alt{font-size:.82rem;color:#555}
-  .t-kart-meta{font-size:.75rem;color:#999;margin-top:4px}
-  .btn-sil-t{background:none;border:none;color:#bbb;font-size:.8rem;cursor:pointer;padding:2px 6px;border-radius:6px}
-  .btn-sil-t:active{background:#fee;color:var(--kiremit)}
-
-  /* OCR Modal */
-  #ocrModal{display:none;position:fixed;inset:0;background:#000;z-index:200;flex-direction:column;align-items:center;justify-content:center}
-  #ocrVideo{width:100%;max-height:60dvh;object-fit:cover}
-  .ocr-cerceve{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:42%;height:16%;border:2px solid rgba(255,255,255,.7);border-radius:6px;pointer-events:none}
-  .ocr-alt{width:100%;padding:16px;display:flex;flex-direction:column;gap:10px;background:#111}
-  #ocrDurum{color:#ccc;font-size:.85rem;text-align:center}
-  #ocrAdaylar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;min-height:36px}
-  /* Akıllı çipler: konum vs isim renk ayrımı */
-  .cip-konum{background:#1a3a5c;color:#fff;border-color:#1a3a5c}
-  .cip-isim{background:#1e6b3c;color:#fff;border-color:#1e6b3c}
-  .ocr-butonlar{display:flex;gap:8px}
-  .btn-ocr-oku{flex:1;padding:13px;background:#fff;color:#111;border:none;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer}
-  .btn-ocr-kapat{padding:13px 18px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:10px;font-size:1rem;cursor:pointer}
-
-  /* Bildirim */
-  #bildirim{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a1a;color:#fff;padding:10px 20px;border-radius:20px;font-size:.9rem;opacity:0;transition:all .3s;z-index:300;white-space:nowrap;pointer-events:none}
-  #bildirim.goster{opacity:1;transform:translateX(-50%) translateY(0)}
-
-  /* Işık sensörü göstergesi */
-  #luxGosterge{font-size:.72rem;color:#aaa;text-align:right;padding:2px 0 0}
-</style>
+        /* Header */
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .version-badge { font-size: 0.7rem; background: #ddd; padding: 2px 6px; border-radius: 4px; }
+    </style>
 </head>
 <body>
 
-<!-- KURULUM EKRANI -->
-<div id="ekranKurulum" class="ekran aktif">
-  <div class="logo-alan">
-    <h1>İSG Saha Asistanı</h1>
-    <p>AxonTR · v0.4.1 · Tamamen çevrimdışı çalışır</p>
-  </div>
-  <div class="form-kart">
-    <div>
-      <label>Denetim türü</label>
-      <select id="denetimTuru">
-        <option value="saha">Saha denetimi</option>
-        <option value="risk">Risk analizi</option>
-      </select>
-    </div>
-    <div>
-      <label>İşyeri / bina adı</label>
-      <input id="isyeriAdi" type="text" placeholder="örn. A Blok, Merkez Bina…" autocomplete="off">
-    </div>
-    <div>
-      <label>Bina profili</label>
-      <select id="binaProfili"></select>
-    </div>
-    <button class="btn-basla" onclick="denetimBaslat()">Denetimi Başlat</button>
-  </div>
-  <div id="devamPanel" style="display:none">
-    <h3>Devam eden denetimler</h3>
-    <div id="devamListesi"></div>
-  </div>
-</div>
-
-<!-- ANA EKRAN -->
-<div id="ekranAna" class="ekran">
-  <div class="ust-bar">
-    <button onclick="kurulumaDon()">←</button>
-    <div class="ust-bar-bilgi">
-      <b id="baslikIsyeri">—</b>
-      <span id="baslikTur">—</span>
-    </div>
-    <span id="tespitSayac">0 tespit</span>
-  </div>
-
-  <div class="ana-icerik">
-
-    <!-- KVKK uyarısı -->
-    <div style="font-size:.75rem;color:#888;text-align:center;padding:2px 0">
-      KVKK: Kadraja yüz, bilgisayar ekranı ve evrak almayın.
-    </div>
-
-    <!-- KONUM KARTI -->
-    <div class="kart">
-      <div class="kart-baslik">Konum</div>
-      <div>
-        <label style="font-size:.8rem;color:#555;margin-bottom:4px;display:block">Alan tipi</label>
-        <select id="alanTipi"></select>
-      </div>
-      <div style="margin-top:10px">
-        <label style="font-size:.8rem;color:#555;margin-bottom:4px;display:block">Konum kodu (isteğe bağlı, örn. 1KAT-306)</label>
-        <div class="konum-satir">
-          <input id="konumKodu" type="text" placeholder="örn. A-203" autocomplete="off" autocapitalize="characters">
-          <button onclick="konumIlerlet()" title="Oda +1">→</button>
-          <button onclick="ocrAc()" title="Etiketi oku">📷</button>
+    <!-- GİRİŞ / KURULUM EKRANI -->
+    <div id="screen-setup" class="screen active">
+        <div class="header">
+            <h3>İSG Saha Asistanı <span class="version-badge">v0.4.1</span></h3>
+            <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
+                <i class="fas fa-sync"></i>
+            </button>
         </div>
-        <div id="katCipleri"></div>
-      </div>
 
-      <!-- BİRİM SORUMLUSU — OCR'dan veya elle doldurulur -->
-      <div class="sorumlu-satir">
-        <input id="birimSorumlusu" type="text" placeholder="👤 Birim sorumlusu (OCR veya elle)" autocomplete="off">
-      </div>
-      <div id="luxGosterge"></div>
+        <div class="card">
+            <h2>Yeni Denetim</h2>
+            <div class="input-group">
+                <label>Bina Seçin</label>
+                <select id="setup-bina" onchange="updateFloorChipsOrOdaInput()">
+                    <option value="">Seçiniz...</option>
+                    <option value="MYO">KMYO Binası</option>
+                    <option value="LAB">Laboratuvarlar</option>
+                    <option value="IDARI">İdari Bina</option>
+                    <option value="KUTUPHANE">Kütüphane</option>
+                </select>
+            </div>
+
+            <div id="kat-secimi" style="display:none">
+                <label>Kat Seçin</label>
+                <div class="chip-group" id="floor-chips"></div>
+            </div>
+
+            <div class="location-grid" style="margin-top:15px">
+                <div class="input-group">
+                    <label>Oda/Alan No</label>
+                    <input type="text" id="setup-oda" placeholder="Örn: 203">
+                </div>
+                <div class="input-group">
+                    <label>Sorumlu</label>
+                    <input type="text" id="setup-responsible" placeholder="Ad Soyad">
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="startInspection()">
+                <i class="fas fa-play"></i> Denetimi Başlat
+            </button>
+        </div>
+
+        <div id="active-inspections">
+            <h3 style="margin-top:30px">Geçmiş Kayıtlar</h3>
+            <div id="inspections-list"></div>
+
+            <button class="btn btn-danger" style="margin-top:20px; opacity: 0.7;" onclick="askDeleteAll()">
+                <i class="fas fa-trash-alt"></i> Tüm Veriyi Sıfırla
+            </button>
+        </div>
     </div>
 
-    <!-- CHECKLİST KARTI -->
-    <div class="kart" id="checklistPanel">
-      <div class="kart-baslik">Kontrol rehberi</div>
-      <div id="checklistCipler"></div>
-      <button class="btn-cl-tumu" id="btnChecklistTumu" onclick="checklistToggle()">
-        Tüm liste (<span id="checklistToplam">0</span> madde) <span id="checklistOk">↓</span>
-      </button>
-      <div id="checklistListeSarici">
-        <div id="checklistListe"></div>
-      </div>
+    <!-- DENETİM EKRANI -->
+    <div id="screen-inspection" class="screen">
+        <div class="header">
+            <button class="btn-outline btn" style="width:auto;" onclick="goToSetup()">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div style="text-align:right">
+                <div id="current-loc-display" style="font-weight:bold">Bina - Oda</div>
+                <div id="session-time" style="font-size:0.8rem; color:#666">00:00</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Bulgu Ekle</h3>
+            <button class="btn btn-primary" onclick="openOCR()" style="margin-bottom:15px; background: #8e44ad;">
+                <i class="fas fa-camera"></i> Çek-Onayla (OCR)
+            </button>
+            <textarea id="finding-manual" placeholder="Bulguyu buraya yazın veya OCR kullanın..." rows="3"></textarea>
+            <div class="chip-group" style="margin-top:15px">
+                <div class="chip" onclick="addQuickFinding('Yangın Tüpü Eksik')">Tüp Eksik</div>
+                <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
+                <div class="chip" onclick="addQuickFinding('Priz Yerinden Çıkmış')">Priz</div>
+            </div>
+            <button class="btn btn-success" style="margin-top:15px" onclick="saveFinding()">
+                <i class="fas fa-plus"></i> Bulguyu Kaydet
+            </button>
+        </div>
+
+        <h3>Bu Odadaki Bulgular</h3>
+        <div id="findings-list"></div>
+
+        <button class="btn btn-outline" style="margin-top:20px" onclick="nextRoom()">
+            Sonraki Oda (Otomatik Artır) <i class="fas fa-chevron-right"></i>
+        </button>
     </div>
 
-    <!-- TESPİT FORMU KARTI -->
-    <div class="kart">
-      <div class="kart-baslik">Tespit</div>
-      <select id="checklistMaddesi">
-        <option value="">— Serbest tespit —</option>
-      </select>
-
-      <div class="foto-satir" style="margin-top:10px">
-        <button class="btn-foto" onclick="document.getElementById('fotoInput').click()">📷 Foto Çek</button>
-        <span id="fotoSayac"></span>
-        <input id="fotoInput" type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="fotoSec(event)">
-      </div>
-      <div id="bekleyenFotolar"></div>
-
-      <textarea id="tespitNotu" placeholder="Not (fotoğrafsız bulguda zorunlu)" rows="3" style="margin-top:10px"></textarea>
-
-      <div class="hayati-satir" style="margin-top:10px" onclick="document.getElementById('hayatiRisk').click()">
-        <input type="checkbox" id="hayatiRisk">
-        <label for="hayatiRisk">⚠️ HAYATİ RİSK — kaydedince anlık bildirim taslağı açılır</label>
-      </div>
-
-      <button class="btn-kaydet" style="margin-top:12px" onclick="tespitKaydet()">Tespiti Kaydet</button>
+    <!-- MODALLAR -->
+    <div id="modal-confirm" class="modal">
+        <div class="modal-content">
+            <h3 id="modal-title">Emin misiniz?</h3>
+            <p id="modal-text">Bu işlem geri alınamaz.</p>
+            <div style="display:flex; gap:10px; margin-top:20px">
+                <button class="btn btn-outline" onclick="closeModal()">Vazgeç</button>
+                <button id="modal-action-btn" class="btn btn-danger">Evet, Sil</button>
+            </div>
+        </div>
     </div>
 
-    <!-- YEDEK UYARISI -->
-    <div id="yedekUyari">
-      <span>📦 Çok foto birikti — ara yedek almanız önerilir.</span>
-      <button class="btn-yedek-al" onclick="zipIndir(true)">Yedek Al</button>
-      <button onclick="yedekUyariKapat()">✕</button>
+    <!-- OCR UI -->
+    <div id="camera-ui">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" style="display:none"></canvas>
+        <div class="cam-controls">
+            <button class="btn btn-danger" style="width: auto;" onclick="closeOCR()">İptal</button>
+            <button class="btn btn-success" style="width: 80px; height: 80px; border-radius: 50%;" onclick="capturePhoto()">
+                <i class="fas fa-camera fa-2x"></i>
+            </button>
+        </div>
     </div>
 
-    <!-- ALT BUTONLAR -->
-    <div class="alt-butonlar">
-      <button class="btn-ara-yedek" onclick="zipIndir(true)">Ara Yedek Al (ZIP)</button>
-      <button class="btn-bitir" onclick="denetimiBitir()">Denetimi Bitir ve ZIP İndir</button>
-    </div>
-
-    <!-- TESPİT LİSTESİ -->
-    <div class="kart">
-      <div class="kart-baslik">Kaydedilen tespitler</div>
-      <div id="tespitListesi"></div>
-    </div>
-
-  </div>
-</div>
-
-<!-- OCR MODAL -->
-<div id="ocrModal">
-  <video id="ocrVideo" playsinline muted></video>
-  <div class="ocr-cerceve"></div>
-  <div class="ocr-alt">
-    <div id="ocrDurum">Etiketi çerçeveye hizalayın</div>
-    <!-- Akıllı çipler: 📍 konum (lacivert) ve 👤 isim (yeşil) ayrı renkte -->
-    <div id="ocrAdaylar"></div>
-    <div class="ocr-butonlar">
-      <button class="btn-ocr-oku" onclick="ocrOku()">Oku</button>
-      <button class="btn-ocr-kapat" onclick="ocrKapat()">Kapat</button>
-    </div>
-  </div>
-</div>
-
-<!-- BİLDİRİM -->
-<div id="bildirim"></div>
-
-<script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
-}
-</script>
-<script src="app.js"></script>
-<div style="text-align:center;font-size:.7rem;color:#bbb;padding:8px 0 4px">v0.4.1</div>
+    <script src="app.js"></script>
 </body>
 </html>
-
