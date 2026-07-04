@@ -1,4 +1,4 @@
-const CACHE = 'isg-saha-v5';
+const CACHE = 'isg-saha-v6';
 const RUNTIME = 'isg-saha-runtime-v1';
 const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 // OCR bağımlılıkları (tesseract.js) ilk kullanımda buradan iner, sonra offline çalışır

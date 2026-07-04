@@ -35,7 +35,6 @@
     font-size: 12.5px; padding: 9px 12px; border-radius: 10px; margin-bottom: 12px; }
   .satir { display: flex; gap: 10px; }
   .satir > div { flex: 1; }
-  #sonKonumlar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .cip { padding: 7px 13px; background: #e0e8f2; border: none; border-radius: 20px;
     font-size: 14px; font-weight: 600; color: #1a3a5c; }
   #bekleyenFotolar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
@@ -77,11 +76,20 @@
   .devam-kart span { display: block; font-size: 12.5px; color: #667085; margin-top: 3px; }
   .konum-satir { display: flex; gap: 6px; }
   .konum-satir input { flex: 1; }
+  #btnOdaIlerlet { width: 40px; border: 1px solid #cfd6e0; border-radius: 10px; background: #fff;
+    font-size: 19px; flex-shrink: 0; color: #1a3a5c; }
   #btnOcr { width: 52px; border: 1px solid #cfd6e0; border-radius: 10px; background: #fff;
     font-size: 21px; flex-shrink: 0; }
+  #katCipleri { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   #checklistPanel { background: #eef4fb; border: 1px solid #c5d6ea; border-radius: 12px;
     padding: 11px 13px; margin-top: 14px; }
   .cl-baslik { font-size: 13px; font-weight: 700; color: #1a3a5c; margin-bottom: 7px; }
+  #checklistCipler { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .cl-cip-aktif { background: #0e7a5f; color: #fff; }
+  .cl-tumunu-btn { display: block; width: 100%; text-align: center; background: none; border: none;
+    color: #1a3a5c; font-size: 13px; padding: 6px 0; font-weight: 600; }
+  #checklistListeSarici { border-top: 1px solid #c5d6ea; margin-top: 6px; padding-top: 8px;
+    max-height: 200px; overflow-y: auto; }
   .cl-madde { font-size: 14px; padding: 5px 2px; color: #344054; }
   .cl-madde.tamam { color: #0e7a5f; }
   .cip-buyuk { font-size: 18px; padding: 12px 22px; background: #0e7a5f; color: #fff; }
@@ -91,9 +99,7 @@
   .video-sarici { position: relative; }
   #ocrVideo { width: 100%; display: block; border-radius: 12px; background: #000; }
   .ocr-cerceve { position: absolute; left: 29%; right: 29%; top: 42%; bottom: 42%;
-    border: 3px solid #f0b429; border-radius: 8px; pointer-events: none;
-    transition: border-color .2s, box-shadow .2s; }
-  .ocr-cerceve.hazir { border-color: #2ecc71; box-shadow: 0 0 0 3px #2ecc7133; }
+    border: 3px solid #f0b429; border-radius: 8px; pointer-events: none; }
   #ocrDurum { color: #fff; text-align: center; font-size: 15px; margin-top: 12px; }
   #ocrAdaylar { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
   .ocr-butonlar { display: flex; gap: 10px; margin-top: 8px; }
@@ -104,7 +110,7 @@
 
 <div id="ekranKurulum" class="ekran">
   <h1>İSG Saha Asistanı</h1>
-  <div class="alt-baslik">AxonTR · v0.3 · Tamamen çevrimdışı çalışır</div>
+  <div class="alt-baslik">AxonTR · v0.4 · Tamamen çevrimdışı çalışır</div>
 
   <div id="devamPanel" style="display:none">
     <label>Devam eden denetimler</label>
@@ -142,18 +148,23 @@
       <select id="alanTipi"></select>
     </div>
     <div>
-      <label for="konumKodu">Konum kodu <small>(isteğe bağlı)</small></label>
+      <label for="konumKodu">Konum kodu <small>(isteğe bağlı, örn. 1KAT-306)</small></label>
       <div class="konum-satir">
-        <input type="text" id="konumKodu" placeholder="Y01, A203..." autocomplete="off" autocapitalize="characters">
+        <input type="text" id="konumKodu" placeholder="1KAT-306" autocomplete="off" autocapitalize="characters">
+        <button id="btnOdaIlerlet" type="button" title="Sıradaki oda no">→</button>
         <button id="btnOcr" type="button" title="Etiketi kamerayla oku">📷</button>
       </div>
     </div>
   </div>
-  <div id="sonKonumlar"></div>
+  <div id="katCipleri"></div>
 
   <div id="checklistPanel" style="display:none">
-    <div class="cl-baslik">Bu alanda çekilmesi önerilenler:</div>
-    <div id="checklistListe"></div>
+    <div class="cl-baslik">Sık görülenler — dokun, seçilsin:</div>
+    <div id="checklistCipler"></div>
+    <button type="button" class="cl-tumunu-btn" id="btnChecklistTumu">Tüm liste (<span id="checklistToplam">0</span> madde) <span id="checklistOk">↓</span></button>
+    <div id="checklistListeSarici" style="display:none">
+      <div id="checklistListe"></div>
+    </div>
   </div>
 
   <label for="checklistMaddesi">Bu tespit hangi kontrol maddesine ait?</label>
@@ -200,7 +211,7 @@
   </div>
 </div>
 
-<div class="surum-eti">v0.3</div>
+<div class="surum-eti">v0.4</div>
 <div id="bildirim"></div>
 <script src="./app.js"></script>
 </body>

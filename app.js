@@ -455,7 +455,7 @@ function konumNormalize(k) {
 function denetimJson(denetim, tespitler, fotoAdlari) {
   return {
     surum: 1,
-    uygulama: 'ISG Saha Asistani v0.3 (AxonTR)',
+    uygulama: 'ISG Saha Asistani v0.4 (AxonTR)',
     olusturma: new Date().toISOString(),
     denetim,
     tespitler,
@@ -581,6 +581,7 @@ if (typeof document !== 'undefined') {
     alanTipleriniDoldur();
     ekranGoster('ekranAna');
     listeyiYenile();
+    konumGecmisiniYukle();
     // Geri tuşu kalıbı: taban kayıt daima 'kurulum', ana ekran üstüne 'ana' push edilir.
     // Böylece Android geri tuşu -> popstate('kurulum') -> kurulum ekranı çizilir.
     if (typeof history !== 'undefined' && history.pushState) {
@@ -603,16 +604,55 @@ if (typeof document !== 'undefined') {
   }
 
   // ---- Checklist rehberi ----
+  // v0.4: "panel açıldı ama pratik değildi" geri bildirimi üzerine — tam liste taranacak bir
+  // metin listesi olmaktan çıkarılıp, o alan tipinde gerçekten sık işaretlenen 3 madde çip
+  // olarak öne çıkarıldı (tüm denetimler genelindeki kullanım sıklığına göre). Tam liste
+  // varsayılan kapalı, istenirse açılıyor.
   async function checklistPaneliniCiz() {
     const alan = $('alanTipi').value;
     const liste = checklistAl(alan);
     const panel = $('checklistPanel');
     const sel = $('checklistMaddesi');
+    const seciliMevcut = sel.value;
     sel.innerHTML = '<option value="">— Serbest tespit —</option>';
+    for (const i of liste) {
+      const o = document.createElement('option');
+      o.value = i.id; o.textContent = i.l;
+      sel.appendChild(o);
+    }
+    sel.value = seciliMevcut;
     if (!liste.length) { panel.style.display = 'none'; return; }
-    const tespitler = aktifDenetim ? await hepsiniAl('tespitler', 'denetimId', aktifDenetim.id) : [];
-    const kapsanan = new Set(tespitler.filter(t => t.alanTipi === alan && t.checklist).map(t => t.checklist));
     panel.style.display = 'block';
+
+    const tespitlerBuDenetim = aktifDenetim ? await hepsiniAl('tespitler', 'denetimId', aktifDenetim.id) : [];
+    const kapsanan = new Set(tespitlerBuDenetim.filter(t => t.alanTipi === alan && t.checklist).map(t => t.checklist));
+
+    // Tüm denetimler genelinde bu alan tipinde en çok seçilen maddeler
+    const tumTespitler = await hepsiniAl('tespitler');
+    const sayac = {};
+    for (const t of tumTespitler) {
+      if (t.alanTipi === alan && t.checklist) sayac[t.checklist] = (sayac[t.checklist] || 0) + 1;
+    }
+    const sikKullanilanlar = liste.filter(i => sayac[i.id] > 0)
+      .sort((a, b) => (sayac[b.id] || 0) - (sayac[a.id] || 0))
+      .slice(0, 3);
+    for (const i of liste) {
+      if (sikKullanilanlar.length >= 3) break;
+      if (!sikKullanilanlar.includes(i)) sikKullanilanlar.push(i);
+    }
+
+    const cipKap = $('checklistCipler');
+    cipKap.innerHTML = '';
+    for (const i of sikKullanilanlar) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cip' + (sel.value === i.id ? ' cl-cip-aktif' : '');
+      b.textContent = (kapsanan.has(i.id) ? '✅ ' : '') + i.l;
+      b.onclick = () => { sel.value = i.id; checklistPaneliniCiz(); };
+      cipKap.appendChild(b);
+    }
+
+    $('checklistToplam').textContent = liste.length;
     const ul = $('checklistListe');
     ul.innerHTML = '';
     for (const i of liste) {
@@ -620,11 +660,8 @@ if (typeof document !== 'undefined') {
       const tamam = kapsanan.has(i.id);
       li.className = 'cl-madde' + (tamam ? ' tamam' : '');
       li.textContent = (tamam ? '✅ ' : (i.z ? '⬜ ' : '◻️ ')) + i.l + (i.z ? '' : ' (ops.)');
-      li.onclick = () => { sel.value = i.id; };
+      li.onclick = () => { sel.value = i.id; checklistPaneliniCiz(); };
       ul.appendChild(li);
-      const o = document.createElement('option');
-      o.value = i.id; o.textContent = i.l;
-      sel.appendChild(o);
     }
   }
 
@@ -706,7 +743,7 @@ if (typeof document !== 'undefined') {
     }
     if (konum && !sonKonumlar.includes(konum)) {
       sonKonumlar.unshift(konum);
-      sonKonumlar = sonKonumlar.slice(0, 5);
+      sonKonumlar = sonKonumlar.slice(0, 200); // pratik üst sınır, kat hafızasını bozmasın
       konumCiplerini_Ciz();
     }
     if (tespit.hayatiRisk) hayatiRiskPaylas(tespit);
@@ -741,22 +778,26 @@ if (typeof document !== 'undefined') {
   const OCR_CERCEVE_W = 0.42;
   const OCR_CERCEVE_H = 0.16;
 
+  // v0.4: canlı otomatik tarama (eşik bekleme + titreşim + oto-tetik) kaldırıldı.
+  // Sahada "çok başarısız" bulundu — muhtemelen etiketlerin kendi kalitesinden (soluk/eski)
+  // kaynaklanan bir sorun, kalibrasyonla tam çözülemiyor. Yerine sektörde de kullanılan
+  // "çek, göster, onayla/düzelt" modeli kondu (bkz. SafetyCulture barkod tarama akışı):
+  // kullanıcı Oku'ya dokunur, tek kare işlenir, sonuç öneri olarak sunulur, her zaman elle
+  // düzeltilebilir.
   async function ocrAc() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       uyari('Bu cihazda kamera erişimi desteklenmiyor.');
       return;
     }
     $('ocrModal').style.display = 'flex';
-    $('ocrDurum').textContent = 'Etikete yaklaşın';
+    $('ocrDurum').textContent = 'Etiketi çerçeveye getirin, sonra Oku\'ya dokunun';
     $('ocrAdaylar').innerHTML = '';
-    $('ocrCerceve').classList.remove('hazir');
     try {
       ocrStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
       });
       $('ocrVideo').srcObject = ocrStream;
       await $('ocrVideo').play();
-      ocrHaziroluguIzle();
     } catch (e) {
       uyari('Kamera açılamadı: ' + e.message);
       ocrKapat();
@@ -765,7 +806,6 @@ if (typeof document !== 'undefined') {
 
   function ocrKapat() {
     if (ocrStream) { ocrStream.getTracks().forEach(t => t.stop()); ocrStream = null; }
-    if (ocrHazirDongu) { clearInterval(ocrHazirDongu); ocrHazirDongu = null; }
     $('ocrModal').style.display = 'none';
   }
 
@@ -796,59 +836,10 @@ if (typeof document !== 'undefined') {
     return c;
   }
 
-  // "Hazır mı" göstergesi: kırpma bandındaki kenar yoğunluğu ölçülür (Sobel-benzeri basit fark).
-  // Etiket kameraya yeterince yakın değilse bant düz/boş kalır -> düşük yoğunluk -> "yaklaşın".
-  // Kalibrasyon: gerçek saha etiketleriyle ölçüldü (bkz. BENIOKU) — eşik altı sürekli %70+ görülüyorsa
-  // OCR_HAZIR_ESIK'i düşürmek gerekebilir; bu tek sabit sahada ayarlanacak nokta.
-  const OCR_HAZIR_ESIK = 6.0;
-
-  function ocrKenarYogunlugu(video) {
-    const vw = video.videoWidth, vh = video.videoHeight;
-    if (!vw || !vh) return 0;
-    const kw = Math.round(vw * OCR_CERCEVE_W), kh = Math.round(vh * OCR_CERCEVE_H);
-    const kx = Math.round((vw - kw) / 2), ky = Math.round((vh - kh) / 2);
-    // Ölçüm için küçük ve ucuz bir örnekleme yeter (performans: canlı önizlemede saniyede birkaç kez çalışır)
-    const c = document.createElement('canvas');
-    c.width = 120; c.height = Math.round(120 * kh / kw);
-    const ctx = c.getContext('2d');
-    ctx.drawImage(video, kx, ky, kw, kh, 0, 0, c.width, c.height);
-    const d = ctx.getImageData(0, 0, c.width, c.height).data;
-    let toplam = 0, sayac = 0;
-    for (let y = 0; y < c.height; y += 2) {
-      for (let x = 0; x < c.width - 1; x += 2) {
-        const i = (y * c.width + x) * 4;
-        const i2 = i + 4;
-        const g1 = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-        const g2 = d[i2] * 0.299 + d[i2 + 1] * 0.587 + d[i2 + 2] * 0.114;
-        toplam += Math.abs(g1 - g2); sayac++;
-      }
-    }
-    return sayac ? toplam / sayac : 0;
-  }
-
-  let ocrHazirDongu = null;
-  let ocrOtomatikTarandi = false;
-
-  function ocrHaziroluguIzle() {
-    if (ocrHazirDongu) clearInterval(ocrHazirDongu);
-    ocrOtomatikTarandi = false;
-    ocrHazirDongu = setInterval(() => {
-      if (!ocrStream || !$('ocrVideo').videoWidth) return;
-      const yogunluk = ocrKenarYogunlugu($('ocrVideo'));
-      const hazir = yogunluk >= OCR_HAZIR_ESIK;
-      $('ocrCerceve').classList.toggle('hazir', hazir);
-      $('ocrDurum').textContent = hazir ? 'Hazır — okunuyor…' : 'Etikete yaklaşın';
-      if (hazir && !ocrOtomatikTarandi) {
-        ocrOtomatikTarandi = true;
-        if (navigator.vibrate) navigator.vibrate(60);
-        ocrOku();
-      }
-    }, 400);
-  }
-
   async function ocrOku() {
     if (!ocrStream) return;
     $('ocrAdaylar').innerHTML = '';
+    $('ocrDurum').textContent = 'İşleniyor…';
     try {
       await tesseractYukle();
       if (!ocrWorker) {
@@ -863,25 +854,22 @@ if (typeof document !== 'undefined') {
       const baglam = ocrBaglamTahminEt($('checklistMaddesi').value);
       const adaylar = ocrAdaylarUret(data.text || '', baglam);
       if (!adaylar.length) {
-        $('ocrDurum').textContent = 'Kod bulunamadı — konumu ayarlayın, tekrar denenecek';
-        ocrOtomatikTarandi = false; // bir sonraki "hazır" anında tekrar denesin
+        $('ocrDurum').textContent = 'Kod bulunamadı — tekrar deneyin ya da Kapat\'a dokunup elle girin';
         return;
       }
-      if (ocrHazirDongu) { clearInterval(ocrHazirDongu); ocrHazirDongu = null; }
-      $('ocrDurum').textContent = 'Doğru olanı seçin:';
+      $('ocrDurum').textContent = 'Düşük güvenli öneri — doğru olanı seçin, gerekirse sonra düzeltin:';
       const kap = $('ocrAdaylar');
       for (const a of adaylar) {
         const b = document.createElement('button');
         b.className = 'cip cip-buyuk';
         b.textContent = a;
         b.onclick = () => {
-          $('konumKodu').value = a; ocrKapat(); bildirim('Konum: ' + a + ' ✓');
+          $('konumKodu').value = a; ocrKapat(); bildirim('Konum: ' + a + ' ✓ — gerekirse elle düzeltin');
         };
         kap.appendChild(b);
       }
     } catch (e) {
       $('ocrDurum').textContent = 'Hata: ' + e.message;
-      ocrOtomatikTarandi = false;
     }
   }
 
@@ -895,17 +883,75 @@ if (typeof document !== 'undefined') {
     }
   }
 
-  // ---- Konum çipleri ----
-  function konumCiplerini_Ciz() {
-    const kap = $('sonKonumlar');
-    kap.innerHTML = '';
+  // ---- Konum: kat/oda ayrıştırma ----
+  // v0.4: "kat sabit gibi görünüyor" geri bildirimi üzerine — kat asla gizli bir varsayım değil,
+  // her zaman tek dokunuşla değiştirilebilir bir çip. Oda no'su o katın kendi son değerinden
+  // otomatik ilerletilir (1KAT'ta kaldığın yerden devam, 2KAT'a geçince onun kendi sırası).
+  function konumKatOdaAyikla(kod) {
+    const m = String(kod || '').match(/^(.+?)-(\d+)([A-Z]?)$/);
+    if (m) return { kat: m[1], oda: m[2], ek: m[3] };
+    return { kat: String(kod || ''), oda: null, ek: '' };
+  }
+
+  function konumSiradakiOda(kat) {
+    // sonKonumlar en yeniden en eskiye sıralıdır (bkz. konumGecmisiniYukle / tespitKaydet)
     for (const k of sonKonumlar) {
-      const b = document.createElement('button');
-      b.className = 'cip';
-      b.textContent = k;
-      b.onclick = () => { $('konumKodu').value = k; };
-      kap.appendChild(b);
+      const p = konumKatOdaAyikla(k);
+      if (p.kat === kat && p.oda !== null) {
+        return String(parseInt(p.oda, 10) + 1) + (p.ek || '');
+      }
     }
+    return null;
+  }
+
+  function konumOdaIlerlet() {
+    const p = konumKatOdaAyikla($('konumKodu').value);
+    if (p.oda === null || !/^\d+$/.test(p.oda)) {
+      uyari('Önce kat-oda biçiminde bir konum girin (örn. 1KAT-306), sonra ilerletin.');
+      return;
+    }
+    $('konumKodu').value = p.kat + '-' + (parseInt(p.oda, 10) + 1) + (p.ek || '');
+  }
+
+  // ---- Kat çipleri ----
+  function konumCiplerini_Ciz() {
+    const kap = $('katCipleri');
+    kap.innerHTML = '';
+    const gorulen = new Set();
+    for (const k of sonKonumlar) {
+      const kat = konumKatOdaAyikla(k).kat;
+      if (!kat || gorulen.has(kat)) continue;
+      gorulen.add(kat);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cip';
+      b.textContent = kat;
+      b.onclick = () => {
+        const oda = konumSiradakiOda(kat);
+        $('konumKodu').value = oda ? (kat + '-' + oda) : kat;
+        $('konumKodu').focus();
+      };
+      kap.appendChild(b);
+      if (gorulen.size >= 6) break;
+    }
+  }
+
+  // Ekrana her girişte (yeni denetim ya da devam) bu denetimin konum geçmişini DB'den yükler.
+  // Önceden yalnızca oturum-içi son 5 kod tutuluyordu; devam eden bir denetime dönünce kat
+  // çipleri boş kalıyordu — bu, geçmişi de kapsayacak şekilde düzeltildi.
+  async function konumGecmisiniYukle() {
+    sonKonumlar = [];
+    if (aktifDenetim) {
+      const tespitler = await hepsiniAl('tespitler', 'denetimId', aktifDenetim.id);
+      const gorulen = new Set();
+      for (const t of [...tespitler].reverse()) {
+        if (t.konumKodu && !gorulen.has(t.konumKodu)) {
+          gorulen.add(t.konumKodu);
+          sonKonumlar.push(t.konumKodu);
+        }
+      }
+    }
+    konumCiplerini_Ciz();
   }
 
   // ---- Liste ----
@@ -1075,6 +1121,13 @@ if (typeof document !== 'undefined') {
     $('btnOcr').onclick = ocrAc;
     $('btnOcrOku').onclick = ocrOku;
     $('btnOcrKapat').onclick = ocrKapat;
+    $('btnOdaIlerlet').onclick = konumOdaIlerlet;
+    $('btnChecklistTumu').onclick = () => {
+      const s = $('checklistListeSarici');
+      const acik = s.style.display === 'block';
+      s.style.display = acik ? 'none' : 'block';
+      $('checklistOk').textContent = acik ? '↓' : '↑';
+    };
     if (navigator.serviceWorker && navigator.serviceWorker.register) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
