@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>İSG Saha Asistanı v0.4.1</title>
+    <title>İSG Saha Asistanı v0.5.0</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -118,7 +118,7 @@
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
         <div class="header">
-            <h3>İSG Saha Asistanı <span class="version-badge">v0.4.1</span></h3>
+            <h3>İSG Saha Asistanı <span class="version-badge">v0.5.0</span></h3>
             <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
                 <i class="fas fa-sync"></i>
             </button>
@@ -126,15 +126,34 @@
 
         <div class="card">
             <h2>Yeni Denetim</h2>
+
             <div class="input-group">
-                <label>Bina Seçin</label>
-                <select id="setup-bina" onchange="updateFloorChipsOrOdaInput()">
-                    <option value="">Seçiniz...</option>
-                    <option value="MYO">KMYO Binası</option>
-                    <option value="LAB">Laboratuvarlar</option>
-                    <option value="IDARI">İdari Bina</option>
-                    <option value="KUTUPHANE">Kütüphane</option>
-                </select>
+                <label>Kurum</label>
+                <div style="display:flex; gap:8px;">
+                    <select id="setup-kurum" onchange="birimleriYukle()" style="flex:1">
+                        <option value="">Seçiniz...</option>
+                    </select>
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniKurumEkle()">+</button>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label>Birim</label>
+                <div style="display:flex; gap:8px;">
+                    <select id="setup-birim" onchange="updateFloorChipsOrOdaInput()" style="flex:1" disabled>
+                        <option value="">Önce kurum seçin</option>
+                    </select>
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniBirimEkle()">+</button>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:15px;">
+                <button class="btn btn-outline" style="font-size:0.8rem;" onclick="exportBirimZip()">
+                    <i class="fas fa-file-archive"></i> Birimi Yedekle (ZIP)
+                </button>
+                <button class="btn btn-outline" style="font-size:0.8rem;" onclick="exportKurumZip()">
+                    <i class="fas fa-file-archive"></i> Kurumu Yedekle (ZIP)
+                </button>
             </div>
 
             <div id="kat-secimi" style="display:none">
@@ -142,15 +161,19 @@
                 <div class="chip-group" id="floor-chips"></div>
             </div>
 
-            <div class="location-grid" style="margin-top:15px">
-                <div class="input-group">
-                    <label>Oda/Alan No</label>
-                    <input type="text" id="setup-oda" placeholder="Örn: 203">
+            <div class="input-group">
+                <label>Oda/Alan</label>
+                <div style="display:flex; gap:8px;">
+                    <select id="setup-oda" style="flex:1">
+                        <option value="">Önce birim seçin</option>
+                    </select>
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniOdaEkle()">+</button>
                 </div>
-                <div class="input-group">
-                    <label>Sorumlu</label>
-                    <input type="text" id="setup-responsible" placeholder="Ad Soyad">
-                </div>
+            </div>
+
+            <div class="input-group">
+                <label>Sorumlu</label>
+                <input type="text" id="setup-responsible" placeholder="Ad Soyad">
             </div>
 
             <button class="btn btn-primary" onclick="startInspection()">
@@ -191,7 +214,10 @@
                 <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
                 <div class="chip" onclick="addQuickFinding('Priz Yerinden Çıkmış')">Priz</div>
             </div>
-            <button class="btn btn-success" style="margin-top:15px" onclick="saveFinding()">
+            <button id="btn-hayati-risk" class="btn" style="margin-top:15px; background:#eee; color:#333;" onclick="toggleHayatiRisk()">
+                ⚠ Hayati Risk İşaretle
+            </button>
+            <button class="btn btn-success" style="margin-top:10px" onclick="saveFinding()">
                 <i class="fas fa-plus"></i> Bulguyu Kaydet
             </button>
         </div>

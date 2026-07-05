@@ -1,8 +1,8 @@
-const CACHE = 'isg-saha-v6';
+const CACHE = 'isg-saha-v8';
 const RUNTIME = 'isg-saha-runtime-v1';
 const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
-// OCR bağımlılıkları (tesseract.js) ilk kullanımda buradan iner, sonra offline çalışır
-const RUNTIME_HOSTLAR = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com', 'unpkg.com'];
+// OCR bağımlılıkları (tesseract.js) + ikon fontu ilk kullanımda buradan iner, sonra offline çalışır
+const RUNTIME_HOSTLAR = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com', 'unpkg.com', 'cdnjs.cloudflare.com'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(DOSYALAR)).then(() => self.skipWaiting()));

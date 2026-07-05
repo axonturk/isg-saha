@@ -1,43 +1,139 @@
 // ============================================================
 // İSG SAHA ASİSTANI - app.js
-// Versiyon: v0.4.1
-// Güncelleme: Silme onayı, kat/oda mantığı, OCR revizyonu
+// Versiyon: v0.5.0
+// Güncelleme: IndexedDB'ye tam geçiş (Kurum > Birim > Denetim > Bulgu),
+//             foto artık bulguya kalıcı bağlanıyor, bulgu silme onayı,
+//             hayati risk etiketi, birim/kurum bazlı ZIP dışa aktarma
+//             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.4.1';
-const DB_KEY = 'isg_findings';
-const SESSION_KEY = 'isg_session';
-
-// Bina → Kat yapısı
-const BINA_KATLAR = {
-  MYO:       ['Zemin', '1.Kat', '2.Kat', '3.Kat'],
-  LAB:       ['Zemin', '1.Kat'],
-  IDARI:     ['Zemin', '1.Kat', '2.Kat'],
-  KUTUPHANE: ['Zemin', '1.Kat']
-};
+const APP_VERSION = 'v0.5.0';
+const DB_NAME = 'isgSahaDB';
+const DB_VERSION = 1;
 
 // ─── STATE ───────────────────────────────────────────────────
-let currentSession = null;
-let sessionTimer   = null;
-let modalCallback  = null;
-let ocrStream      = null;
+let currentSession   = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
+let sessionBulgular  = [];     // aktif denetimin bulgu listesi (cache)
+let sessionTimer     = null;
+let modalCallback    = null;
+let ocrStream        = null;
+let aktifFotoTaslak  = null;   // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış foto
+let hayatiRiskAktif  = false;
 
-// ─── RESİM SIKIŞTIRMA (A AŞAMASI) ────────────────────────────
-// Amaç: Saha fotoğraflarını IndexedDB'ye/kayda yazmadan önce küçültmek.
-// Hedef: max 1920px kenar, kalite 0.80, ~200-300 KB/foto.
-// NOT: EXIF verisi bu aşamada İŞLENMEZ (tarih/konum koruması = B aşaması).
-//      Canvas'a çizim EXIF'i düşürür; bu bilinçli bir kısıttır.
+// ─── UUID ────────────────────────────────────────────────────
+function uuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function _esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s ?? '');
+  return d.innerHTML;
+}
+
+// ─── INDEXEDDB KATMANI ───────────────────────────────────────
+let _dbPromise = null;
+
+function openDB() {
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('kurumlar')) {
+        db.createObjectStore('kurumlar', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('birimler')) {
+        const s = db.createObjectStore('birimler', { keyPath: 'id' });
+        s.createIndex('kurumId', 'kurumId');
+      }
+      if (!db.objectStoreNames.contains('denetimler')) {
+        const s = db.createObjectStore('denetimler', { keyPath: 'id' });
+        s.createIndex('birimId', 'birimId');
+      }
+      if (!db.objectStoreNames.contains('bulgular')) {
+        const s = db.createObjectStore('bulgular', { keyPath: 'id' });
+        s.createIndex('denetimId', 'denetimId');
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+  return _dbPromise;
+}
+
+async function _tx(storeName, mode) {
+  const db = await openDB();
+  return db.transaction(storeName, mode).objectStore(storeName);
+}
+
+async function dbEkle(store, obj) {
+  const s = await _tx(store, 'readwrite');
+  return new Promise((res, rej) => {
+    const r = s.add(obj);
+    r.onsuccess = () => res(obj);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbGuncelle(store, obj) {
+  const s = await _tx(store, 'readwrite');
+  return new Promise((res, rej) => {
+    const r = s.put(obj);
+    r.onsuccess = () => res(obj);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbSil(store, id) {
+  const s = await _tx(store, 'readwrite');
+  return new Promise((res, rej) => {
+    const r = s.delete(id);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbGetir(store, id) {
+  const s = await _tx(store, 'readonly');
+  return new Promise((res, rej) => {
+    const r = s.get(id);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbTumu(store) {
+  const s = await _tx(store, 'readonly');
+  return new Promise((res, rej) => {
+    const r = s.getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbIndexTumu(store, indexName, key) {
+  const s = await _tx(store, 'readonly');
+  return new Promise((res, rej) => {
+    const r = s.index(indexName).getAll(key);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+// Test/kullanım için global erişim.
+if (typeof window !== 'undefined') {
+  window._idb = { dbEkle, dbGuncelle, dbSil, dbGetir, dbTumu, dbIndexTumu, openDB };
+}
+
+// ─── RESİM SIKIŞTIRMA (değişmedi — v0.4'te test edilip doğrulandı) ──
 const RESIM_SIKISTIRMA = {
-  maxKenar:  1920,   // px — en uzun kenar bu değere indirilir
-  kalite:    0.80,   // JPEG kalitesi (0-1)
+  maxKenar:  1920,
+  kalite:    0.80,
   format:    'image/jpeg',
-  // Bu boyutun altındaki dosyalara dokunma (zaten yeterince küçük):
-  atlaEsigi: 300 * 1024,        // 300 KB
-  // Bundan büyük girdi = güvenlik sınırı (bozuk/aşırı dosya):
-  maksGirdi: 50 * 1024 * 1024   // 50 MB
+  atlaEsigi: 300 * 1024,
+  maksGirdi: 50 * 1024 * 1024
 };
 
-// İnsan-okunur boyut (log ve test için).
 function boyutBiçimle(bytes) {
   if (!bytes && bytes !== 0) return '?';
   if (bytes < 1024) return bytes + ' B';
@@ -45,8 +141,6 @@ function boyutBiçimle(bytes) {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-// SAF fonksiyon (test edilebilir): en-boy oranını koruyarak hedef ölçü hesaplar.
-// Zaten küçükse aynı ölçüyü döner (büyütme yapmaz).
 function hedefOlculeriHesapla(w, h, maxKenar) {
   if (!w || !h) return { w: 0, h: 0 };
   const enUzun = Math.max(w, h);
@@ -55,20 +149,17 @@ function hedefOlculeriHesapla(w, h, maxKenar) {
   return { w: Math.round(w * oran), h: Math.round(h * oran) };
 }
 
-// Girdi kaynağının yaklaşık byte boyutunu bul (File/Blob veya dataURL string).
 function kaynakBoyutu(kaynak) {
   if (!kaynak) return 0;
-  if (typeof kaynak.size === 'number') return kaynak.size;            // File/Blob
-  if (typeof kaynak === 'string' && kaynak.startsWith('data:')) {     // dataURL
+  if (typeof kaynak.size === 'number') return kaynak.size;
+  if (typeof kaynak === 'string' && kaynak.startsWith('data:')) {
     const virgul = kaynak.indexOf(',');
     const b64 = virgul >= 0 ? kaynak.slice(virgul + 1) : kaynak;
-    // base64 -> yaklaşık byte
     return Math.round(b64.length * 3 / 4);
   }
   return 0;
 }
 
-// Bir kaynağı (File | Blob | dataURL string) yüklenmiş bir Image nesnesine çevirir.
 function _resmiYukle(kaynak) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -79,7 +170,7 @@ function _resmiYukle(kaynak) {
       reject(new Error('Görsel çözümlenemedi (desteklenmeyen format olabilir).'));
     };
     if (typeof kaynak === 'string') {
-      img.src = kaynak;                       // dataURL / objectURL
+      img.src = kaynak;
     } else if (kaynak instanceof Blob) {
       url = URL.createObjectURL(kaynak);
       img.src = url;
@@ -89,17 +180,6 @@ function _resmiYukle(kaynak) {
   });
 }
 
-/**
- * Resmi Canvas ile sıkıştırır.
- * @param {File|Blob|string} kaynak  Fotoğraf dosyası, Blob veya dataURL.
- * @param {Object} [secenek]         { maxKenar, kalite, format } — varsayılanlar RESİM_SIKIŞTIRMA'dan.
- * @returns {Promise<{blob:Blob, dataUrl:string, orijinalBoyut:number,
- *                    sikistirilmisBoyut:number, genislik:number, yukseklik:number,
- *                    sikistirildi:boolean}>}
- *
- * Hata durumunda İSTİSNA FIRLATMAZ; her zaman kullanılabilir bir sonuç döner
- * (başarısızlıkta orijinal veriyle, sikistirildi:false).
- */
 async function compressImage(kaynak, secenek = {}) {
   const cfg = {
     maxKenar: secenek.maxKenar ?? RESIM_SIKISTIRMA.maxKenar,
@@ -108,7 +188,6 @@ async function compressImage(kaynak, secenek = {}) {
   };
   const orijinalBoyut = kaynakBoyutu(kaynak);
 
-  // — Güvenlik: aşırı büyük girdi —
   if (orijinalBoyut > RESIM_SIKISTIRMA.maksGirdi) {
     console.warn(`[sıkıştırma] Dosya çok büyük (${boyutBiçimle(orijinalBoyut)}), ` +
                  `sınır ${boyutBiçimle(RESIM_SIKISTIRMA.maksGirdi)}. Orijinal kullanılıyor.`);
@@ -138,7 +217,6 @@ async function compressImage(kaynak, secenek = {}) {
                 `${boyutBiçimle(orijinalBoyut)} → ${boyutBiçimle(sikistirilmisBoyut)} ` +
                 `(kalite ${cfg.kalite})`);
 
-    // Sıkıştırma orijinalden büyük çıktıysa (küçük/zaten optimize) orijinali koru.
     if (orijinalBoyut > 0 && sikistirilmisBoyut >= orijinalBoyut) {
       console.log('[sıkıştırma] Sonuç orijinalden küçük değil; orijinal korunuyor.');
       return _orijinaleDon(kaynak, orijinalBoyut, dataUrl, w, h);
@@ -154,13 +232,11 @@ async function compressImage(kaynak, secenek = {}) {
       sikistirildi: true
     };
   } catch (e) {
-    // Sıkıştırma başarısız → orijinal dosyayı kullan (akış bozulmasın).
     console.warn('[sıkıştırma] Başarısız, orijinal kullanılıyor:', e.message);
     return _orijinaleDon(kaynak, orijinalBoyut);
   }
 }
 
-// Yardımcı: sıkıştırılmamış/başarısız durumda tutarlı sonuç nesnesi üret.
 async function _orijinaleDon(kaynak, boyut, dataUrl = null, w = 0, h = 0) {
   let blob = null;
   let url = dataUrl;
@@ -192,17 +268,118 @@ function _blobToDataURL(blob) {
   });
 }
 
-// Test/kullanım için global erişim (IndexedDB kayıt katmanı hazır olduğunda çağrılır).
 if (typeof window !== 'undefined') {
   window.compressImage = compressImage;
   window.hedefOlculeriHesapla = hedefOlculeriHesapla;
   window.boyutBiçimle = boyutBiçimle;
 }
 
+// ─── DAHİLİ ZIP YAZICI (harici kütüphane YOK — store/no-compress) ───
+// Gerekçe: fotoğraflar zaten JPEG (sıkıştırılmış); tekrar deflate etmek
+// kazanç sağlamaz ama CDN bağımlılığı riski ekler (offline saha ortamı).
+function _crc32Tablosu() {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+}
+const _CRC_TABLO = _crc32Tablosu();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    c = _CRC_TABLO[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function _dosZamanDamgasi(date = new Date()) {
+  const dosTime = ((date.getHours() & 0x1F) << 11) | ((date.getMinutes() & 0x3F) << 5) | ((date.getSeconds() >> 1) & 0x1F);
+  const dosDate = (((date.getFullYear() - 1980) & 0x7F) << 9) | (((date.getMonth() + 1) & 0xF) << 5) | (date.getDate() & 0x1F);
+  return { dosTime, dosDate };
+}
+
+// girdiler: [{ad: string, veri: Uint8Array|Blob|string}]
+async function zipYaz(girdiler) {
+  const parcalar = [];
+  const merkezKayitlari = [];
+  let ofset = 0;
+  const enc = new TextEncoder();
+
+  for (const g of girdiler) {
+    let veri = g.veri;
+    if (veri instanceof Blob) veri = new Uint8Array(await veri.arrayBuffer());
+    else if (!(veri instanceof Uint8Array)) veri = enc.encode(String(veri));
+
+    const adBytes = enc.encode(g.ad);
+    const crc = crc32(veri);
+    const { dosTime, dosDate } = _dosZamanDamgasi();
+
+    const yerelBaslik = new DataView(new ArrayBuffer(30));
+    yerelBaslik.setUint32(0, 0x04034b50, true);
+    yerelBaslik.setUint16(4, 20, true);
+    yerelBaslik.setUint16(6, 0, true);
+    yerelBaslik.setUint16(8, 0, true);
+    yerelBaslik.setUint16(10, dosTime, true);
+    yerelBaslik.setUint16(12, dosDate, true);
+    yerelBaslik.setUint32(14, crc, true);
+    yerelBaslik.setUint32(18, veri.length, true);
+    yerelBaslik.setUint32(22, veri.length, true);
+    yerelBaslik.setUint16(26, adBytes.length, true);
+    yerelBaslik.setUint16(28, 0, true);
+
+    parcalar.push(new Uint8Array(yerelBaslik.buffer), adBytes, veri);
+    merkezKayitlari.push({ adBytes, crc, boyut: veri.length, ofset, dosTime, dosDate });
+    ofset += 30 + adBytes.length + veri.length;
+  }
+
+  const merkezBaslangic = ofset;
+  for (const m of merkezKayitlari) {
+    const baslik = new DataView(new ArrayBuffer(46));
+    baslik.setUint32(0, 0x02014b50, true);
+    baslik.setUint16(4, 20, true);
+    baslik.setUint16(6, 20, true);
+    baslik.setUint16(8, 0, true);
+    baslik.setUint16(10, 0, true);
+    baslik.setUint16(12, m.dosTime, true);
+    baslik.setUint16(14, m.dosDate, true);
+    baslik.setUint32(16, m.crc, true);
+    baslik.setUint32(20, m.boyut, true);
+    baslik.setUint32(24, m.boyut, true);
+    baslik.setUint16(28, m.adBytes.length, true);
+    baslik.setUint16(30, 0, true);
+    baslik.setUint16(32, 0, true);
+    baslik.setUint16(34, 0, true);
+    baslik.setUint16(36, 0, true);
+    baslik.setUint32(38, 0, true);
+    baslik.setUint32(42, m.ofset, true);
+    parcalar.push(new Uint8Array(baslik.buffer), m.adBytes);
+    ofset += 46 + m.adBytes.length;
+  }
+  const merkezBoyut = ofset - merkezBaslangic;
+
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(4, 0, true);
+  eocd.setUint16(6, 0, true);
+  eocd.setUint16(8, merkezKayitlari.length, true);
+  eocd.setUint16(10, merkezKayitlari.length, true);
+  eocd.setUint32(12, merkezBoyut, true);
+  eocd.setUint32(16, merkezBaslangic, true);
+  eocd.setUint16(20, 0, true);
+  parcalar.push(new Uint8Array(eocd.buffer));
+
+  return new Blob(parcalar, { type: 'application/zip' });
+}
+if (typeof window !== 'undefined') window.zipYaz = zipYaz;
+
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
 window.addEventListener('load', () => {
   console.log(`İSG Saha Asistanı ${APP_VERSION} başlatıldı`);
   showScreen('setup');
+  kurumlariYukle();
   loadInspectionsList();
 });
 
@@ -213,26 +390,92 @@ function showScreen(name) {
   if (el) el.classList.add('active');
 }
 
-// ─── KAT CHİPLERİ ────────────────────────────────────────────
-function updateFloorChipsOrOdaInput() {
-  const bina  = document.getElementById('setup-bina').value;
+// ─── KURUM / BİRİM ───────────────────────────────────────────
+async function kurumlariYukle() {
+  const kurumlar = await dbTumu('kurumlar');
+  const sel = document.getElementById('setup-kurum');
+  const secili = sel.value;
+  sel.innerHTML = '<option value="">Seçiniz...</option>' +
+    kurumlar.map(k => `<option value="${k.id}">${_esc(k.ad)}</option>`).join('');
+  if (secili && kurumlar.some(k => k.id === secili)) sel.value = secili;
+  await birimleriYukle();
+}
+
+async function birimleriYukle() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  const sel = document.getElementById('setup-birim');
+  if (!kurumId) {
+    sel.innerHTML = '<option value="">Önce kurum seçin</option>';
+    sel.disabled = true;
+    await updateFloorChipsOrOdaInput();
+    return;
+  }
+  sel.disabled = false;
+  const secili = sel.value;
+  const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
+  sel.innerHTML = '<option value="">Seçiniz...</option>' +
+    birimler.map(b => `<option value="${b.id}">${_esc(b.ad)}</option>`).join('');
+  if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
+  await updateFloorChipsOrOdaInput();
+}
+
+async function yeniKurumEkle() {
+  const ad = prompt('Kurum adı (örn: KMÜ Rektörlüğü, Veterinerlik Fakültesi):');
+  if (!ad || !ad.trim()) return;
+  const kurum = { id: uuid(), ad: ad.trim(), olusturma: new Date().toISOString() };
+  await dbEkle('kurumlar', kurum);
+  await kurumlariYukle();
+  document.getElementById('setup-kurum').value = kurum.id;
+  await birimleriYukle();
+}
+
+async function yeniBirimEkle() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
+  const ad = prompt('Birim adı (örn: KMYO, Kütüphane, Veteriner Hastanesi, Daire Başkanlığı):');
+  if (!ad || !ad.trim()) return;
+  const katSayisiStr = prompt('Kaç katlı? (boş bırakırsanız tek kat "Zemin" olur)', '1');
+  let katlar = ['Zemin'];
+  const katSayisi = parseInt(katSayisiStr);
+  if (!isNaN(katSayisi) && katSayisi > 1) {
+    katlar = ['Zemin', ...Array.from({ length: katSayisi - 1 }, (_, i) => `${i + 1}.Kat`)];
+  }
+  const birim = { id: uuid(), kurumId, ad: ad.trim(), tip: 'genel', katlar, odalar: [], olusturma: new Date().toISOString() };
+  await dbEkle('birimler', birim);
+  await birimleriYukle();
+  document.getElementById('setup-birim').value = birim.id;
+  await updateFloorChipsOrOdaInput();
+}
+
+// ─── KAT ÇİPLERİ + ODA LİSTESİ (birim altında kalıcı) ────────
+async function updateFloorChipsOrOdaInput() {
+  const birimId = document.getElementById('setup-birim').value;
   const wrap  = document.getElementById('kat-secimi');
   const chips = document.getElementById('floor-chips');
 
-  if (!bina || !BINA_KATLAR[bina]) { wrap.style.display = 'none'; return; }
+  if (!birimId) {
+    wrap.style.display = 'none';
+    document.getElementById('setup-oda').innerHTML = '<option value="">Önce birim seçin</option>';
+    return;
+  }
+
+  const birim = await dbGetir('birimler', birimId);
+  const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
 
   chips.innerHTML = '';
-  BINA_KATLAR[bina].forEach((kat, i) => {
+  katlar.forEach((kat, i) => {
     const c = document.createElement('div');
     c.className = 'chip' + (i === 0 ? ' active' : '');
     c.textContent = kat;
     c.onclick = () => {
       chips.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
+      odalariYukle();
     };
     chips.appendChild(c);
   });
   wrap.style.display = 'block';
+  await odalariYukle();
 }
 
 function getSelectedKat() {
@@ -240,29 +483,80 @@ function getSelectedKat() {
   return active ? active.textContent : 'Zemin';
 }
 
+function _birimOdalari(birim, kat) {
+  return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
+}
+
+async function odalariYukle() {
+  const birimId = document.getElementById('setup-birim').value;
+  const sel = document.getElementById('setup-oda');
+  if (!birimId) { sel.innerHTML = '<option value="">Önce birim seçin</option>'; return; }
+
+  const birim = await dbGetir('birimler', birimId);
+  const kat = getSelectedKat();
+  const odalar = _birimOdalari(birim, kat);
+  const secili = sel.value;
+
+  if (odalar.length === 0) {
+    sel.innerHTML = '<option value="">Bu katta oda yok — + ile ekleyin</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Seçiniz...</option>' +
+    odalar.map(o => `<option value="${o.id}">${_esc(o.ad)}</option>`).join('');
+  if (secili && odalar.some(o => o.id === secili)) sel.value = secili;
+}
+
+async function yeniOdaEkle() {
+  const birimId = document.getElementById('setup-birim').value;
+  if (!birimId) { alert('Önce bir birim seçin.'); return; }
+  const ad = prompt('Oda/Alan adı veya no (örn: 203, Muayene Odası):');
+  if (!ad || !ad.trim()) return;
+
+  const birim = await dbGetir('birimler', birimId);
+  if (!birim.odalar) birim.odalar = [];
+  const oda = { id: uuid(), kat: getSelectedKat(), ad: ad.trim() };
+  birim.odalar.push(oda);
+  await dbGuncelle('birimler', birim);
+  await odalariYukle();
+  document.getElementById('setup-oda').value = oda.id;
+}
+if (typeof window !== 'undefined') window.yeniOdaEkle = yeniOdaEkle;
+
 // ─── DENETİM BAŞLAT ──────────────────────────────────────────
-function startInspection() {
-  const bina = document.getElementById('setup-bina').value;
-  const oda  = document.getElementById('setup-oda').value.trim();
+async function startInspection() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  const birimId = document.getElementById('setup-birim').value;
+  const odaId = document.getElementById('setup-oda').value;
   const resp = document.getElementById('setup-responsible').value.trim();
 
-  if (!bina) { alert('Lütfen bina seçin.'); return; }
-  if (!oda)  { alert('Lütfen oda/alan no girin.'); return; }
+  if (!kurumId) { alert('Lütfen kurum seçin.'); return; }
+  if (!birimId) { alert('Lütfen birim seçin.'); return; }
+  if (!odaId)  { alert('Lütfen oda/alan seçin (yoksa + ile ekleyin).'); return; }
 
-  currentSession = {
-    id:          Date.now(),
-    bina,
-    kat:         getSelectedKat(),
-    oda,
-    responsible: resp,
-    startTime:   new Date().toISOString(),
-    findings:    []
+  const birim = await dbGetir('birimler', birimId);
+  const kat = getSelectedKat();
+  const odaKaydi = _birimOdalari(birim, kat).find(o => o.id === odaId);
+
+  const denetim = {
+    id: uuid(),
+    kurumId,
+    birimId,
+    bina: birim ? birim.ad : '?',
+    kat,
+    odaId,
+    oda: odaKaydi ? odaKaydi.ad : '?',
+    sorumlu: resp,
+    baslangic: new Date().toISOString(),
+    guncelleme: new Date().toISOString()
   };
+  await dbEkle('denetimler', denetim);
 
+  currentSession = denetim;
+  sessionBulgular = [];
   updateLocationDisplay();
   showScreen('inspection');
   startTimer();
-  renderFindings();
+  await renderFindings();
 }
 
 function updateLocationDisplay() {
@@ -274,6 +568,7 @@ function updateLocationDisplay() {
 
 // ─── TIMER ───────────────────────────────────────────────────
 function startTimer() {
+  clearInterval(sessionTimer);
   const start = Date.now();
   sessionTimer = setInterval(() => {
     const elapsed = Math.floor((Date.now() - start) / 1000);
@@ -283,22 +578,44 @@ function startTimer() {
   }, 1000);
 }
 
+// ─── HAYATİ RİSK ETİKETİ ─────────────────────────────────────
+function toggleHayatiRisk() {
+  hayatiRiskAktif = !hayatiRiskAktif;
+  _hayatiRiskButonGuncelle();
+}
+function _hayatiRiskButonGuncelle() {
+  const btn = document.getElementById('btn-hayati-risk');
+  if (!btn) return;
+  btn.style.background = hayatiRiskAktif ? '#e74c3c' : '#eee';
+  btn.style.color = hayatiRiskAktif ? 'white' : '#333';
+  btn.textContent = hayatiRiskAktif ? '⚠ Hayati Risk: AÇIK' : '⚠ Hayati Risk İşaretle';
+}
+
 // ─── BULGU KAYDET ────────────────────────────────────────────
-function saveFinding() {
+async function saveFinding() {
   const text = document.getElementById('finding-manual').value.trim();
   if (!text) { alert('Bulgu metni boş olamaz.'); return; }
 
-  const finding = {
-    id:        Date.now(),
-    text,
-    timestamp: new Date().toISOString(),
-    loc:       `${currentSession.bina}/${currentSession.kat}/${currentSession.oda}`
+  const bulgu = {
+    id: uuid(),
+    denetimId: currentSession.id,
+    metin: text,
+    foto: aktifFotoTaslak ? aktifFotoTaslak.blob : null,
+    fotoBoyut: aktifFotoTaslak ? aktifFotoTaslak.sikistirilmisBoyut : null,
+    fotoGenislik: aktifFotoTaslak ? aktifFotoTaslak.genislik : null,
+    fotoYukseklik: aktifFotoTaslak ? aktifFotoTaslak.yukseklik : null,
+    hayatiRisk: hayatiRiskAktif,
+    zaman: new Date().toISOString()
   };
+  await dbEkle('bulgular', bulgu);
+  currentSession.guncelleme = bulgu.zaman;
+  await dbGuncelle('denetimler', currentSession);
 
-  currentSession.findings.push(finding);
-  saveSessionToStorage();
+  aktifFotoTaslak = null;
+  hayatiRiskAktif = false;
+  _hayatiRiskButonGuncelle();
   document.getElementById('finding-manual').value = '';
-  renderFindings();
+  await renderFindings();
 }
 
 function addQuickFinding(text) {
@@ -306,131 +623,140 @@ function addQuickFinding(text) {
   saveFinding();
 }
 
-function renderFindings() {
+async function renderFindings() {
+  sessionBulgular = await dbIndexTumu('bulgular', 'denetimId', currentSession.id);
+  sessionBulgular.sort((a, b) => a.zaman.localeCompare(b.zaman));
+
   const list = document.getElementById('findings-list');
-  if (!currentSession || currentSession.findings.length === 0) {
+  if (sessionBulgular.length === 0) {
     list.innerHTML = '<p style="color:#999">Henüz bulgu eklenmedi.</p>';
     return;
   }
-  list.innerHTML = currentSession.findings.map(f => `
-    <div class="finding-item">
-      <div class="finding-meta">${new Date(f.timestamp).toLocaleTimeString('tr-TR')}</div>
-      <div>${f.text}</div>
-      <button onclick="deleteFinding(${f.id})" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
+  list.innerHTML = sessionBulgular.map(f => `
+    <div class="finding-item"${f.hayatiRisk ? ' style="border-left-color:#e74c3c"' : ''}>
+      <div class="finding-meta">${new Date(f.zaman).toLocaleTimeString('tr-TR')}
+        ${f.foto ? ' 📷' : ''}${f.hayatiRisk ? ' ⚠ HAYATİ RİSK' : ''}</div>
+      <div>${_esc(f.metin)}</div>
+      <button onclick="askDeleteFinding('${f.id}')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
         <i class="fas fa-times"></i>
       </button>
     </div>
   `).join('');
 }
 
-// ─── SONRAKI ODA (OTOMATİK ARTIR) ────────────────────────────
-function nextRoom() {
+// ─── SONRAKI ODA (birim altındaki kalıcı oda listesinde ilerler) ─
+async function nextRoom() {
   if (!currentSession) return;
-  saveSessionToStorage();
 
-  const current = currentSession.oda;
-  const num = parseInt(current);
-  currentSession.oda = isNaN(num) ? current : String(num + 1);
-  currentSession.findings = [];
-  currentSession.id = Date.now();
+  const birim = await dbGetir('birimler', currentSession.birimId);
+  const odalar = _birimOdalari(birim, currentSession.kat);
+  const suankiIndeks = odalar.findIndex(o => o.id === currentSession.odaId);
+  const sonraki = suankiIndeks >= 0 ? odalar[suankiIndeks + 1] : null;
 
+  if (!sonraki) {
+    alert('Bu kattaki son odadasınız. Yeni oda eklemek için Kurulum ekranındaki + butonunu kullanın.');
+    return;
+  }
+
+  currentSession.odaId = sonraki.id;
+  currentSession.oda = sonraki.ad;
+  currentSession.id = uuid();
+  currentSession.baslangic = new Date().toISOString();
+  currentSession.guncelleme = currentSession.baslangic;
+  await dbEkle('denetimler', currentSession);   // yeni oda kaydı HEMEN kalıcı yazılır
+
+  sessionBulgular = [];
   updateLocationDisplay();
-  renderFindings();
-}
-
-// ─── STORAGE ─────────────────────────────────────────────────
-function saveSessionToStorage() {
-  if (!currentSession) return;
-  const all = getAllFindings();
-  const idx = all.findIndex(s => s.id === currentSession.id);
-  if (idx >= 0) all[idx] = currentSession;
-  else all.push(currentSession);
-  localStorage.setItem(DB_KEY, JSON.stringify(all));
-}
-
-function getAllFindings() {
-  try { return JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-  catch { return []; }
+  await renderFindings();
 }
 
 // ─── GEÇMİŞ LİSTESİ ─────────────────────────────────────────
-function loadInspectionsList() {
-  const all  = getAllFindings();
+async function loadInspectionsList() {
+  const denetimler = await dbTumu('denetimler');
   const list = document.getElementById('inspections-list');
-  if (all.length === 0) {
+  if (denetimler.length === 0) {
     list.innerHTML = '<p style="color:#999">Kayıt bulunamadı.</p>';
     return;
   }
-  list.innerHTML = all.slice().reverse().map(s => `
-    <div class="finding-item" style="cursor:pointer" onclick="resumeSession(${s.id})">
-      <div class="finding-meta">${new Date(s.startTime).toLocaleString('tr-TR')}</div>
-      <div class="finding-loc">${s.bina} / ${s.kat || ''} / Oda ${s.oda}</div>
-      <div style="font-size:0.85rem;color:#666">${s.findings.length} bulgu</div>
-      <button onclick="event.stopPropagation(); askDeleteSession(${s.id})"
+  denetimler.sort((a, b) => b.baslangic.localeCompare(a.baslangic));
+  const satirlar = await Promise.all(denetimler.map(async d => {
+    const bulgular = await dbIndexTumu('bulgular', 'denetimId', d.id);
+    return `
+    <div class="finding-item" style="cursor:pointer" onclick="resumeSession('${d.id}')">
+      <div class="finding-meta">${new Date(d.baslangic).toLocaleString('tr-TR')}</div>
+      <div class="finding-loc">${_esc(d.bina)} / ${_esc(d.kat || '')} / Oda ${_esc(d.oda)}</div>
+      <div style="font-size:0.85rem;color:#666">${bulgular.length} bulgu</div>
+      <button onclick="event.stopPropagation(); askDeleteSession('${d.id}')"
         style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
         <i class="fas fa-trash"></i>
       </button>
-    </div>
-  `).join('');
+    </div>`;
+  }));
+  list.innerHTML = satirlar.join('');
 }
 
-function resumeSession(id) {
-  const all = getAllFindings();
-  const s   = all.find(x => x.id === id);
+async function resumeSession(id) {
+  const s = await dbGetir('denetimler', id);
   if (!s) return;
   currentSession = s;
   updateLocationDisplay();
   showScreen('inspection');
   startTimer();
-  renderFindings();
+  await renderFindings();
 }
 
-// ─── SİLME (ONAY MEKANİZMASI) ────────────────────────────────
+// ─── SİLME (ONAY MEKANİZMASI — HER SEVİYEDE) ─────────────────
 function askDeleteSession(id) {
   showModal(
     'Kaydı Sil',
-    'Bu denetim kaydı kalıcı olarak silinecek. Emin misiniz?',
-    () => {
-      const all = getAllFindings().filter(s => s.id !== id);
-      localStorage.setItem(DB_KEY, JSON.stringify(all));
-      loadInspectionsList();
+    'Bu denetim kaydı ve içindeki TÜM bulgular kalıcı olarak silinecek. Emin misiniz?',
+    async () => {
+      const bulgular = await dbIndexTumu('bulgular', 'denetimId', id);
+      for (const b of bulgular) await dbSil('bulgular', b.id);
+      await dbSil('denetimler', id);
+      await loadInspectionsList();
     },
     'Evet, Sil',
     'btn-danger'
   );
 }
 
-function askDeleteAll() {
+function askDeleteFinding(id) {
+  showModal(
+    'Bulguyu Sil',
+    'Bu bulgu (ve varsa fotoğrafı) kalıcı olarak silinecek. Emin misiniz?',
+    async () => {
+      await dbSil('bulgular', id);
+      await renderFindings();
+    },
+    'Evet, Sil',
+    'btn-danger'
+  );
+}
+
+async function askDeleteAll() {
   showModal(
     '⚠️ Tüm Veriyi Sıfırla',
-    'Tüm denetim kayıtları silinecek. Bu işlem GERİ ALINAMAZ. Devam etmek istiyor musunuz?',
-    () => {
-      const backup = getAllFindings();
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url  = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href     = url;
-      a.download = `isg_yedek_${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
-      localStorage.removeItem(DB_KEY);
-      loadInspectionsList();
+    'Tüm kurumlar, birimler, denetimler ve bulgular silinecek. Önce tam yedek ZIP indirilecek. ' +
+    'Bu işlem GERİ ALINAMAZ. Devam etmek istiyor musunuz?',
+    async () => {
+      await tumVeriyiZipleVeIndir();
+      for (const store of ['bulgular', 'denetimler', 'birimler', 'kurumlar']) {
+        const tumu = await dbTumu(store);
+        for (const kayit of tumu) await dbSil(store, kayit.id);
+      }
+      await kurumlariYukle();
+      await loadInspectionsList();
     },
     'Yedekle ve Sil',
     'btn-danger'
   );
 }
 
-function deleteFinding(id) {
-  if (!currentSession) return;
-  currentSession.findings = currentSession.findings.filter(f => f.id !== id);
-  saveSessionToStorage();
-  renderFindings();
-}
-
 // ─── MODAL ───────────────────────────────────────────────────
 function showModal(title, text, onConfirm, btnText = 'Onayla', btnClass = 'btn-primary') {
-  document.getElementById('modal-title').textContent  = title;
-  document.getElementById('modal-text').textContent    = text;
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-text').textContent   = text;
   const btn = document.getElementById('modal-action-btn');
   btn.textContent = btnText;
   btn.className   = `btn ${btnClass}`;
@@ -445,15 +771,16 @@ function closeModal() {
 
 document.getElementById('modal-action-btn') &&
   document.getElementById('modal-action-btn').addEventListener('click', () => {
-    if (modalCallback) modalCallback();
+    const cb = modalCallback;
     closeModal();
+    if (cb) cb();
   });
 
 // ─── GERİ / SETUP ────────────────────────────────────────────
 function goToSetup() {
-  if (currentSession) saveSessionToStorage();
   clearInterval(sessionTimer);
   showScreen('setup');
+  kurumlariYukle();
   loadInspectionsList();
 }
 
@@ -481,15 +808,13 @@ async function capturePhoto() {
   canvas.getContext('2d').drawImage(video, 0, 0);
   closeOCR();
 
-  // OCR tam çözünürlükte çalışsın (tanıma başarısı için); sıkıştırma sonra.
   const imageData = canvas.toDataURL('image/jpeg', 0.95);
   document.getElementById('finding-manual').value = 'OCR işleniyor...';
 
-  // — Sıkıştırma (kayıt/IndexedDB'ye hazır): OCR akışını bloklamadan çalıştır. —
-  // Sonuç ileride tespitle birlikte saklanmak üzere hazır tutulur.
-  compressImage(imageData).then(sonuc => {
-    sonForKaydiSaklaHazir(sonuc);
-  }).catch(e => console.warn('[sıkıştırma] capturePhoto:', e.message));
+  const sonuc = await compressImage(imageData);
+  aktifFotoTaslak = sonuc;
+  console.log('[sıkıştırma] Kayda hazır foto:', boyutBiçimle(sonuc.sikistirilmisBoyut),
+    sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');
 
   try {
     const result = await Tesseract.recognize(imageData, 'tur', {
@@ -502,40 +827,132 @@ async function capturePhoto() {
   }
 }
 
-// Son sıkıştırılan fotoğrafı bellekte tut — kayıt/IndexedDB katmanı devreye
-// girdiğinde tespitle birlikte bu (küçültülmüş) veri yazılacak.
-let sonSikistirilmisFoto = null;
-function sonForKaydiSaklaHazir(sonuc) {
-  sonSikistirilmisFoto = sonuc;
-  console.log('[sıkıştırma] Kayda hazır foto:',
-    boyutBiçimle(sonuc.sikistirilmisBoyut),
-    sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');
-}
-
-// Dışarıdan bir dosya/blob/dataURL alıp kayda hazır sıkıştırılmış veri üretir.
-// Fotoğraf yükleme (input[type=file]) veya galeri akışı eklendiğinde kullanılabilir.
+// Dışarıdan bir dosya/blob/dataURL alıp kayda hazır sıkıştırılmış veri üretir
+// (galeri/dosya seçme akışı için — aktif taslağa yazar).
 async function fotoAlVeSikistir(kaynak) {
   const sonuc = await compressImage(kaynak);
-  sonForKaydiSaklaHazir(sonuc);
-  return sonuc; // { blob, dataUrl, orijinalBoyut, sikistirilmisBoyut, ... }
+  aktifFotoTaslak = sonuc;
+  return sonuc;
 }
 if (typeof window !== 'undefined') window.fotoAlVeSikistir = fotoAlVeSikistir;
 
-// ─── YEDEK / GERİ YÜKLE ──────────────────────────────────────
+// ─── ZIP DIŞA AKTARMA (Birim / Kurum) ────────────────────────
+// Ortak format: denetimler.json (array) + fotolar/ (düz, `${denetimId}_${bulguId}.jpg`)
+// Bu format tek denetimli (birim) ve çok denetimli (kurum) ihracatta AYNIDIR.
+
+async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
+  const bulgular = await dbIndexTumu('bulgular', 'denetimId', denetim.id);
+  const dosyalar = [];
+  const fotoGirdileri = [];
+
+  const tespitler = bulgular.map(b => {
+    let fotoAdi = null;
+    if (b.foto) {
+      fotoAdi = `${denetim.id}_${b.id}.jpg`;
+      dosyalar.push(fotoAdi);
+      fotoGirdileri.push({ ad: `fotolar/${fotoAdi}`, veri: b.foto });
+    }
+    return {
+      alanTipi: denetim.kat || 'genel',
+      konumKodu: `${denetim.bina}/${denetim.kat}/${denetim.oda}`,
+      not: b.metin,
+      hayatiRisk: !!b.hayatiRisk,
+      fotografsiz: !b.foto,
+      checklist: null,
+      zaman: b.zaman,
+      fotolar: fotoAdi ? [fotoAdi] : []
+    };
+  });
+
+  const paket = {
+    denetim: {
+      id: denetim.id,
+      baslangic: denetim.baslangic,
+      isyeri: birimAdi,
+      tur: 'saha',
+      binaProfili: denetim.bina,
+      kurumId: denetim.kurumId,
+      kurumAdi,
+      birimId: denetim.birimId,
+      birimAdi,
+      kat: denetim.kat,
+      oda: denetim.oda,
+      sorumlu: denetim.sorumlu
+    },
+    tespitler,
+    manifest: { dosyalar, fotoSayisi: dosyalar.length }
+  };
+  return { paket, fotoGirdileri };
+}
+
+async function _zipVeIndir(denetimler, dosyaAdiOnEki) {
+  if (denetimler.length === 0) {
+    alert('Dışa aktarılacak denetim bulunamadı.');
+    return;
+  }
+  const paketler = [];
+  const tumFotoGirdileri = [];
+
+  for (const d of denetimler) {
+    const birim = await dbGetir('birimler', d.birimId);
+    const kurum = birim ? await dbGetir('kurumlar', birim.kurumId) : null;
+    const { paket, fotoGirdileri } = await _denetimPaketiOlustur(
+      d, kurum ? kurum.ad : '?', birim ? birim.ad : '?');
+    paketler.push(paket);
+    tumFotoGirdileri.push(...fotoGirdileri);
+  }
+
+  const girdiler = [
+    { ad: 'denetimler.json', veri: JSON.stringify(paketler, null, 2) },
+    ...tumFotoGirdileri
+  ];
+  const blob = await zipYaz(girdiler);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${dosyaAdiOnEki}_${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportBirimZip() {
+  const birimId = document.getElementById('setup-birim').value;
+  if (!birimId) { alert('Önce bir birim seçin.'); return; }
+  const birim = await dbGetir('birimler', birimId);
+  const denetimler = await dbIndexTumu('denetimler', 'birimId', birimId);
+  await _zipVeIndir(denetimler, `birim_${(birim ? birim.ad : 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_')}`);
+}
+
+async function exportKurumZip() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
+  const kurum = await dbGetir('kurumlar', kurumId);
+  const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
+  let tumDenetimler = [];
+  for (const b of birimler) {
+    const d = await dbIndexTumu('denetimler', 'birimId', b.id);
+    tumDenetimler = tumDenetimler.concat(d);
+  }
+  await _zipVeIndir(tumDenetimler, `kurum_${(kurum ? kurum.ad : 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_')}`);
+}
+
+async function tumVeriyiZipleVeIndir() {
+  const denetimler = await dbTumu('denetimler');
+  await _zipVeIndir(denetimler, 'isg_tam_yedek');
+}
+
+if (typeof window !== 'undefined') {
+  window.exportBirimZip = exportBirimZip;
+  window.exportKurumZip = exportKurumZip;
+}
+
+// ─── YEDEK / GERİ YÜKLE (üst bar butonu) ─────────────────────
 function backupRestore() {
   showModal(
     'Yedek İşlemleri',
-    'Mevcut verileri JSON dosyası olarak indirmek ister misiniz?',
-    () => {
-      const data = getAllFindings();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url  = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href     = url;
-      a.download = `isg_yedek_${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
-    },
-    'Yedek Al',
+    'Tüm kurumlar için tam yedek ZIP indirmek ister misiniz?',
+    () => { tumVeriyiZipleVeIndir(); },
+    'Tam Yedek İndir',
     'btn-primary'
   );
 }
