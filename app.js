@@ -7,7 +7,7 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.9.0';
+const APP_VERSION = 'v0.10.0';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 1;
 
@@ -27,6 +27,7 @@ let sesChunks         = [];
 let secilenKat        = null;   // Ekran B'de seçili kat
 let secilenAlanTipi   = null;   // Ekran B'de seçili alan tipi (chip veya dropdown)
 let secilenMevcutOdaId = null;  // "Bu kattaki mevcut odalar"dan seçilirse dolu — yeni oda oluşturulmaz
+let secilenTur        = 'saha'; // 'saha' (Saha Denetimi) | 'risk' (Risk Analizi) — masaüstü bu etikete göre yönlendirir
 
 // ─── UUID ────────────────────────────────────────────────────
 function uuid() {
@@ -92,7 +93,9 @@ const YEMEKHANE_ALANLAR = [
   'Bulaşıkhane', 'Servis / yemek salonu', 'LPG/doğalgaz hattı', 'Personel soyunma'
 ];
 const PROFILLER = {
-  idari:     { ad: 'İdari bina (rektörlük, daire bşk.)', alanlar: ORTAK_ALANLAR },
+  rektorluk: { ad: 'Rektörlük',                          alanlar: ORTAK_ALANLAR, konteyner: true },
+  enstitu:   { ad: 'Enstitü',                            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR], konteyner: true },
+  idari:     { ad: 'Daire Başkanlığı / İdari Ofis',      alanlar: ORTAK_ALANLAR },
   egitim:    { ad: 'Eğitim binası (fakülte)',            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR] },
   myo:       { ad: 'MYO',                                alanlar: [...EGITIM_ALANLAR, ...MYO_EK_ALANLAR, ...ORTAK_ALANLAR] },
   hastane:   { ad: 'Hastane',                            alanlar: [...HASTANE_ALANLAR, ...ORTAK_ALANLAR] },
@@ -102,6 +105,17 @@ const PROFILLER = {
   kres:      { ad: 'Kreş',                               alanlar: [...KRES_ALANLAR, ...ORTAK_ALANLAR] },
   yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] }
 };
+
+// Konteyner tiplerde (Rektörlük, Enstitü) hazır Daire Başkanlığı önerileri —
+// "+ Özel" ile listede olmayanlar da eklenebilir.
+const DAIRE_BASKANLIKLARI = [
+  'Strateji Geliştirme Daire Başkanlığı', 'Bilgi İşlem Daire Başkanlığı',
+  'Yapı İşleri ve Teknik Daire Başkanlığı', 'Personel Daire Başkanlığı',
+  'Öğrenci İşleri Daire Başkanlığı', 'İdari ve Mali İşler Daire Başkanlığı',
+  'Sağlık Kültür ve Spor Daire Başkanlığı', 'Kütüphane ve Dokümantasyon Daire Başkanlığı',
+  'Hukuk Müşavirliği', 'Genel Sekreterlik'
+];
+const KONTEYNER_TIPLER = new Set(Object.entries(PROFILLER).filter(([, v]) => v.konteyner).map(([k]) => k));
 
 function _birimAlanTipleri(birim) {
   const profil = PROFILLER[birim && birim.tip];
@@ -627,17 +641,26 @@ async function yeniBirimEkle() {
   const kurumId = document.getElementById('setup-kurum').value;
   if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
 
-  const profilSecenekleri = '<option value="genel">Genel / Diğer</option>' +
-    Object.entries(PROFILLER).map(([k, v]) => `<option value="${k}">${_esc(v.ad)}</option>`).join('');
+  const profilSecenekleri = '<option value="">Seçiniz...</option>' +
+    Object.entries(PROFILLER).map(([k, v]) => `<option value="${k}">${_esc(v.ad)}</option>`).join('') +
+    '<option value="genel">Genel / Diğer</option>';
 
   showFormModal('Yeni Birim', `
     <div class="input-group">
+      <label>Bina Tipi (alan tipi listesini belirler)</label>
+      <select id="form-birim-profil" onchange="_birimFormTipDegisti()">${profilSecenekleri}</select>
+    </div>
+    <div id="form-birim-konteyner-secim" style="display:none; margin-top:10px;">
+      <label>Bu birim nedir?</label>
+      <div class="chip-group" id="form-birim-konteyner-chips">
+        <div class="chip" data-secim="kendisi" onclick="_birimFormKonteynerSec(this)">Kendisi (bütün bina)</div>
+        <div class="chip" data-secim="alt" onclick="_birimFormKonteynerSec(this)">Alt Birim (Daire Başkanlığı)</div>
+      </div>
+      <div class="chip-group" id="form-birim-daire-chips" style="display:none; margin-top:8px;"></div>
+    </div>
+    <div class="input-group" id="form-birim-ad-wrap" style="margin-top:15px;">
       <label>Birim Adı</label>
       <input type="text" id="form-birim-ad" placeholder="Örn: Veteriner Hastanesi">
-    </div>
-    <div class="input-group">
-      <label>Bina Tipi (alan tipi listesini belirler)</label>
-      <select id="form-birim-profil">${profilSecenekleri}</select>
     </div>
     <div class="input-group">
       <label>Kaç Katlı?</label>
@@ -647,6 +670,7 @@ async function yeniBirimEkle() {
     const ad = document.getElementById('form-birim-ad').value.trim();
     if (!ad) { alert('Birim adı gerekli.'); return; }
     const profil = document.getElementById('form-birim-profil').value;
+    if (!profil) { alert('Bina tipi seçin.'); return; }
     const katSayisi = parseInt(document.getElementById('form-birim-kat').value) || 1;
     let katlar = ['Zemin'];
     if (katSayisi > 1) katlar = ['Zemin', ...Array.from({ length: katSayisi - 1 }, (_, i) => `${i + 1}.Kat`)];
@@ -658,6 +682,69 @@ async function yeniBirimEkle() {
     document.getElementById('setup-birim').value = birim.id;
   }, 'Birimi Oluştur');
 }
+
+// Rektörlük/Enstitü gibi "konteyner" tipler seçilince Ad kutusu gizlenir,
+// önce "Kendisi mi / Daire Başkanlığı mı" sorulur.
+function _birimFormTipDegisti() {
+  const tip = document.getElementById('form-birim-profil').value;
+  const konteynerWrap = document.getElementById('form-birim-konteyner-secim');
+  const adWrap = document.getElementById('form-birim-ad-wrap');
+  const daireChips = document.getElementById('form-birim-daire-chips');
+  daireChips.style.display = 'none';
+  daireChips.innerHTML = '';
+  const konteynerChips = document.getElementById('form-birim-konteyner-chips');
+  if (konteynerChips) konteynerChips.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+
+  if (KONTEYNER_TIPLER.has(tip)) {
+    konteynerWrap.style.display = 'block';
+    adWrap.style.display = 'none';
+    document.getElementById('form-birim-ad').value = '';
+  } else {
+    konteynerWrap.style.display = 'none';
+    adWrap.style.display = 'block';
+  }
+}
+if (typeof window !== 'undefined') window._birimFormTipDegisti = _birimFormTipDegisti;
+
+function _birimFormKonteynerSec(el) {
+  document.querySelectorAll('#form-birim-konteyner-chips .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const secim = el.dataset.secim;
+  const adWrap = document.getElementById('form-birim-ad-wrap');
+  const daireChips = document.getElementById('form-birim-daire-chips');
+  const tip = document.getElementById('form-birim-profil').value;
+  const profilAdi = PROFILLER[tip] ? PROFILLER[tip].ad : tip;
+
+  if (secim === 'kendisi') {
+    daireChips.style.display = 'none';
+    daireChips.innerHTML = '';
+    adWrap.style.display = 'block';
+    document.getElementById('form-birim-ad').value = profilAdi;
+  } else {
+    adWrap.style.display = 'none';
+    daireChips.style.display = 'flex';
+    daireChips.innerHTML = DAIRE_BASKANLIKLARI.map(d =>
+      `<div class="chip" onclick="_birimFormDaireSec(this)">${_esc(d)}</div>`
+    ).join('') + `<div class="chip" onclick="_birimFormOzelDaireEkle()" style="border:1px dashed #999">+ Özel</div>`;
+  }
+}
+if (typeof window !== 'undefined') window._birimFormKonteynerSec = _birimFormKonteynerSec;
+
+function _birimFormDaireSec(el) {
+  document.querySelectorAll('#form-birim-daire-chips .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('form-birim-ad-wrap').style.display = 'block';
+  document.getElementById('form-birim-ad').value = el.textContent;
+}
+if (typeof window !== 'undefined') window._birimFormDaireSec = _birimFormDaireSec;
+
+function _birimFormOzelDaireEkle() {
+  const ad = prompt('Daire Başkanlığı / birim adı:');
+  if (!ad || !ad.trim()) return;
+  document.getElementById('form-birim-ad-wrap').style.display = 'block';
+  document.getElementById('form-birim-ad').value = ad.trim();
+}
+if (typeof window !== 'undefined') window._birimFormOzelDaireEkle = _birimFormOzelDaireEkle;
 
 function _birimOdalari(birim, kat) {
   return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
@@ -674,6 +761,9 @@ async function ekranKatAlanaGec() {
   const birim = await dbGetir('birimler', birimId);
   document.getElementById('kat-alan-baslik').textContent = `${kurum ? kurum.ad : ''} / ${birim ? birim.ad : ''}`;
 
+  secilenTur = 'saha';
+  document.querySelectorAll('#kat-alan-tur-chips .chip').forEach(c => c.classList.toggle('active', c.dataset.tur === 'saha'));
+
   const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
   await _katChipleriCiz(katlar, katlar[0]);
 
@@ -682,15 +772,28 @@ async function ekranKatAlanaGec() {
 }
 if (typeof window !== 'undefined') window.ekranKatAlanaGec = ekranKatAlanaGec;
 
+// Masaüstü zaten "tur" alanına göre Risk Analizi / Saha Denetimi ayırıyordu
+// (main.py'de hazırdı) — PWA bugüne kadar hep sabit "saha" gönderiyordu.
+function _turSec(el) {
+  document.querySelectorAll('#kat-alan-tur-chips .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  secilenTur = el.dataset.tur;
+}
+if (typeof window !== 'undefined') window._turSec = _turSec;
+
 // Kat çiplerini çizer + seçili katı ayarlar. Hem ilk açılışta hem "+ Kat Ekle"
 // sonrası yeniden çizimde kullanılır (tek kaynak, tekrar yok).
+function _silBadgeHtml(onclickJs) {
+  return `<span onclick="event.stopPropagation(); ${onclickJs}" style="margin-left:6px; background:rgba(0,0,0,0.15); border-radius:50%; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; font-size:0.7rem; cursor:pointer;">✕</span>`;
+}
+
 async function _katChipleriCiz(katlar, secilecekKat) {
   const chips = document.getElementById('kat-alan-kat-chips');
   chips.innerHTML = '';
   katlar.forEach(kat => {
     const c = document.createElement('div');
     c.className = 'chip' + (kat === secilecekKat ? ' active' : '');
-    c.textContent = kat;
+    c.innerHTML = `<span>${_esc(kat)}</span>` + _silBadgeHtml(`_katSil('${_escAttr(kat).replace(/'/g, "\\'")}')`);
     c.onclick = () => {
       chips.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
@@ -712,6 +815,22 @@ async function _katChipleriCiz(katlar, secilecekKat) {
   await _katAlanMevcutOdalariGoster();
   await _katAlanAlanTipleriGoster();
 }
+
+async function _katSil(kat) {
+  const birimId = document.getElementById('setup-birim').value;
+  const birim = await dbGetir('birimler', birimId);
+  if ((birim.katlar || []).length <= 1) { alert('Son kat silinemez — en az bir kat olmalı.'); return; }
+  const oOdalar = _birimOdalari(birim, kat);
+  if (oOdalar.length > 0) {
+    alert(`Bu katta ${oOdalar.length} oda tanımlı — önce onları silin.`);
+    return;
+  }
+  if (!confirm(`"${kat}" katı silinsin mi?`)) return;
+  birim.katlar = birim.katlar.filter(k => k !== kat);
+  await dbGuncelle('birimler', birim);
+  await _katChipleriCiz(birim.katlar, birim.katlar[0]);
+}
+if (typeof window !== 'undefined') window._katSil = _katSil;
 
 async function _katEkle(e) {
   e.preventDefault();
@@ -736,9 +855,26 @@ async function _katAlanMevcutOdalariGoster() {
   if (odalar.length === 0) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   kutu.innerHTML = odalar.map(o =>
-    `<div class="chip" onclick="_katAlanMevcutOdaSec('${o.id}', this)">${_esc(o.ad)}</div>`
+    `<div class="chip" onclick="_katAlanMevcutOdaSec('${o.id}', this)">
+      <span>${_esc(o.ad)}</span>${_silBadgeHtml(`_odaSil('${o.id}')`)}
+    </div>`
   ).join('');
 }
+
+async function _odaSil(odaId) {
+  if (!confirm('Bu oda tanımı silinsin mi? (Geçmiş denetim kayıtları etkilenmez)')) return;
+  const birimId = document.getElementById('setup-birim').value;
+  const birim = await dbGetir('birimler', birimId);
+  birim.odalar = (birim.odalar || []).filter(o => o.id !== odaId);
+  await dbGuncelle('birimler', birim);
+  if (secilenMevcutOdaId === odaId) {
+    secilenMevcutOdaId = null;
+    secilenAlanTipi = null;
+    document.getElementById('kat-alan-oda-no').value = '';
+  }
+  await _katAlanMevcutOdalariGoster();
+}
+if (typeof window !== 'undefined') window._odaSil = _odaSil;
 
 // NOT: `el` parametresi olarak DOM elemanı doğrudan alınır — async fonksiyon
 // içinde await'ten sonra global `event` nesnesine güvenmek kırılgandır
@@ -768,8 +904,11 @@ async function _katAlanAlanTipleriGoster() {
   const tumAlanlar = _birimAlanTipleri(birim);
 
   const chipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_katAlanChipSec(this)">${_esc(a)}</div>`;
+  const ozelChipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_katAlanChipSec(this)">
+      <span>${_esc(a)}</span>${_silBadgeHtml(`_ozelAlanSil('${_escAttr(a).replace(/'/g, "\\'")}')`)}
+    </div>`;
   document.getElementById('kat-alan-hizli-chips').innerHTML =
-    hizli.map(chipHtml).join('') + ozel.map(chipHtml).join('') +
+    hizli.map(chipHtml).join('') + ozel.map(ozelChipHtml).join('') +
     `<div class="chip" onclick="_katAlanOzelAlanEkle()" style="border:1px dashed #999">+ Özel Tip</div>`;
 
   const sel = document.getElementById('kat-alan-alan-dropdown');
@@ -810,6 +949,17 @@ async function _katAlanOzelAlanEkle() {
   await _katAlanAlanTipleriGoster();
 }
 if (typeof window !== 'undefined') window._katAlanOzelAlanEkle = _katAlanOzelAlanEkle;
+
+async function _ozelAlanSil(ad) {
+  if (!confirm(`"${ad}" özel alan tipi silinsin mi?`)) return;
+  const birimId = document.getElementById('setup-birim').value;
+  const birim = await dbGetir('birimler', birimId);
+  birim.ozelAlanlar = (birim.ozelAlanlar || []).filter(a => a !== ad);
+  await dbGuncelle('birimler', birim);
+  if (secilenAlanTipi === ad) secilenAlanTipi = null;
+  await _katAlanAlanTipleriGoster();
+}
+if (typeof window !== 'undefined') window._ozelAlanSil = _ozelAlanSil;
 
 function _katAlanOdaNoDegisti() {
   secilenMevcutOdaId = null;
@@ -859,6 +1009,7 @@ async function startInspection() {
     oda: odaKaydi.ad,
     alanTipi: odaKaydi.alanTipi,
     odaNo: odaKaydi.no,
+    tur: secilenTur,
     sorumlu: resp,
     baslangic: new Date().toISOString(),
     guncelleme: new Date().toISOString()
@@ -1031,14 +1182,15 @@ async function loadInspectionsList() {
     const satirlar = await Promise.all(grup.kayitlar.map(async d => {
       const bulgular = await dbIndexTumu('bulgular', 'denetimId', d.id);
       return `
-      <div class="finding-item" style="cursor:pointer" onclick="resumeSession('${d.id}')">
-        <div class="finding-meta">${new Date(d.baslangic).toLocaleString('tr-TR')}</div>
-        <div class="finding-loc">${_esc(d.kat || '')} / Oda ${_esc(d.oda)}</div>
-        <div style="font-size:0.85rem;color:#666">${bulgular.length} bulgu</div>
-        <button onclick="event.stopPropagation(); askDeleteSession('${d.id}')"
-          style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
+      <div class="swipe-wrap" style="position:relative; overflow:hidden; border-radius:0 8px 8px 0; margin-bottom:10px;">
+        <div style="position:absolute; inset:0; background:#e74c3c; display:flex; align-items:center; justify-content:flex-end; padding-right:20px; color:white;">
           <i class="fas fa-trash"></i>
-        </button>
+        </div>
+        <div class="finding-item swipe-content" data-swipe-id="${d.id}" style="cursor:pointer; margin-bottom:0;" onclick="resumeSession('${d.id}')">
+          <div class="finding-meta">${new Date(d.baslangic).toLocaleString('tr-TR')}</div>
+          <div class="finding-loc">${_esc(d.kat || '')} / Oda ${_esc(d.oda)}</div>
+          <div style="font-size:0.85rem;color:#666">${bulgular.length} bulgu</div>
+        </div>
       </div>`;
     }));
     return `
@@ -1050,6 +1202,38 @@ async function loadInspectionsList() {
     </details>`;
   }));
   list.innerHTML = gruplarHtml.join('');
+  list.querySelectorAll('.swipe-content[data-swipe-id]').forEach(el => {
+    _swipeAyarla(el, () => askDeleteSession(el.dataset.swipeId));
+  });
+}
+
+// Genel amaçlı yana-kaydırarak-silme: dar chip'lerde pratik değil ama geniş
+// liste satırlarında (Geçmiş Kayıtlar, Birim Yönet) doğal ve hızlı çalışır.
+function _swipeAyarla(el, onSil) {
+  let basX = 0, guncelX = 0, surukleniyor = false;
+  const ESIK = -70;
+
+  const basla = (x) => { basX = x; surukleniyor = true; el.style.transition = 'none'; };
+  const tasi = (x) => {
+    if (!surukleniyor) return;
+    guncelX = Math.min(0, x - basX);
+    el.style.transform = `translateX(${guncelX}px)`;
+  };
+  const bitir = () => {
+    if (!surukleniyor) return;
+    surukleniyor = false;
+    el.style.transition = 'transform 0.2s';
+    // onSil() bir onay modalı açar (askDeleteSession gibi) — silme kesin değil,
+    // bu yüzden satırı önden gizlemiyoruz. Onaylanırsa liste zaten yeniden çizilip
+    // satırı kaldıracak; "Vazgeç" denirse satır burada zaten yerinde duruyor olur.
+    if (guncelX < ESIK) onSil();
+    el.style.transform = 'translateX(0)';
+    guncelX = 0;
+  };
+
+  el.addEventListener('touchstart', e => basla(e.touches[0].clientX), { passive: true });
+  el.addEventListener('touchmove', e => tasi(e.touches[0].clientX), { passive: true });
+  el.addEventListener('touchend', bitir);
 }
 
 async function resumeSession(id) {
@@ -1372,7 +1556,7 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       id: denetim.id,
       baslangic: denetim.baslangic,
       isyeri: birimAdi,
-      tur: 'saha',
+      tur: denetim.tur || 'saha',
       binaProfili: denetim.bina,
       kurumId: denetim.kurumId,
       kurumAdi,
@@ -1423,9 +1607,57 @@ function _dosyaAdiTemizle(ad) {
   return String(ad || 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_');
 }
 
-// Kurum altındaki birimleri checkbox listesiyle gösterir; istenen kaçı
-// seçilirse seçilir, tek ZIP'te birleştirilir. Esnek: 1 birim, birkaçı,
-// ya da hepsi seçilebilir.
+// Birim listesini yana-kaydırarak-silme ile yönetme ekranı. Not: burada
+// showModal (onay modalı) yerine düz confirm() kullanılır — showFormModal
+// zaten açıkken ikinci bir .modal katmanı (aynı z-index) üst üste binip
+// görsel çakışma yaratabilirdi; native confirm() bu sorunu tamamen bypass eder.
+async function birimleriYonetAc() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
+  const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
+  if (birimler.length === 0) { alert('Bu kurumda henüz birim yok.'); return; }
+
+  const satirlar = birimler.map(b => `
+    <div class="swipe-wrap" style="position:relative; overflow:hidden; border-radius:0 8px 8px 0; margin-bottom:8px;">
+      <div style="position:absolute; inset:0; background:#e74c3c; display:flex; align-items:center; justify-content:flex-end; padding-right:20px; color:white;">
+        <i class="fas fa-trash"></i>
+      </div>
+      <div class="finding-item swipe-content" data-swipe-birim-id="${b.id}" style="margin-bottom:0;">
+        <div class="finding-loc">${_esc(b.ad)}</div>
+        <div style="font-size:0.8rem;color:#666">${PROFILLER[b.tip] ? PROFILLER[b.tip].ad : (b.tip || 'genel')}</div>
+      </div>
+    </div>`).join('');
+
+  showFormModal('Birimleri Yönet', `
+    <p style="font-size:0.85rem; color:#666; margin-top:0;">Silmek için sola kaydırın.</p>
+    <div id="birim-yonet-liste">${satirlar}</div>
+  `, async () => { closeFormModal(); }, 'Kapat');
+
+  document.querySelectorAll('#birim-yonet-liste .swipe-content').forEach(el => {
+    _swipeAyarla(el, () => _birimSilOnayla(el.dataset.swipeBirimId));
+  });
+}
+if (typeof window !== 'undefined') window.birimleriYonetAc = birimleriYonetAc;
+
+async function _birimSilOnayla(birimId) {
+  const denetimler = await dbIndexTumu('denetimler', 'birimId', birimId);
+  const mesaj = denetimler.length > 0
+    ? `Bu birim silinirse ${denetimler.length} denetim kaydı ve tüm bulguları (foto/ses dahil) da silinir. Emin misiniz?`
+    : 'Bu birim silinsin mi?';
+  if (!confirm(mesaj)) return;
+
+  for (const d of denetimler) {
+    const bulgular = await dbIndexTumu('bulgular', 'denetimId', d.id);
+    for (const b of bulgular) await dbSil('bulgular', b.id);
+    await dbSil('denetimler', d.id);
+  }
+  await dbSil('birimler', birimId);
+  closeFormModal();
+  await birimleriYukle();
+  await loadInspectionsList();
+}
+if (typeof window !== 'undefined') window._birimSilOnayla = _birimSilOnayla;
+
 async function yedekModalAc() {
   const kurumId = document.getElementById('setup-kurum').value;
   if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
