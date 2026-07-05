@@ -25,7 +25,7 @@ window.addEventListener('error', (e) => {
   document.body.prepend(banner);
 });
 
-const APP_VERSION = 'v0.11.1';
+const APP_VERSION = 'v0.11.2';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 2;   // v2: 'ayarlar' deposu eklendi (özel Denetim Türü listesi için)
 
@@ -1161,37 +1161,48 @@ function _hayatiRiskButonGuncelle() {
 }
 
 // ─── BULGU KAYDET (çoklu fotoğraf + çoklu ses, sınırsız) ─────
+let _bulguKaydediliyor = false;
+
 async function saveFinding() {
+  // Dokunmatik ekranlarda tek dokunuş bazen click olayını iki kez tetikler:
+  // ilk çağrı kaydedip taslağı temizler, hemen ardından gelen ikinci çağrı
+  // artık boş olan taslakla karşılaşıp gereksiz "en az biri gerekli" uyarısı
+  // verir. Kayıt sürerken ikinci çağrıyı sessizce yok say.
+  if (_bulguKaydediliyor) return;
   const text = document.getElementById('finding-manual').value.trim();
   if (!text && aktifFotolarTaslak.length === 0 && aktifSeslerTaslak.length === 0) {
     alert('Bulgu için metin, fotoğraf veya ses notundan en az biri gerekli.');
     return;
   }
+  _bulguKaydediliyor = true;
+  try {
+    const bulgu = {
+      id: uuid(),
+      denetimId: currentSession.id,
+      metin: text,
+      fotolar: aktifFotolarTaslak.map(f => ({
+        blob: f.blob, boyut: f.sikistirilmisBoyut, genislik: f.genislik, yukseklik: f.yukseklik
+      })),
+      sesler: aktifSeslerTaslak.map(s => ({ blob: s.blob, sure: s.sure })),
+      hayatiRisk: hayatiRiskAktif,
+      zaman: new Date().toISOString()
+    };
+    await dbEkle('bulgular', bulgu);
+    currentSession.guncelleme = bulgu.zaman;
+    await dbGuncelle('denetimler', currentSession);
 
-  const bulgu = {
-    id: uuid(),
-    denetimId: currentSession.id,
-    metin: text,
-    fotolar: aktifFotolarTaslak.map(f => ({
-      blob: f.blob, boyut: f.sikistirilmisBoyut, genislik: f.genislik, yukseklik: f.yukseklik
-    })),
-    sesler: aktifSeslerTaslak.map(s => ({ blob: s.blob, sure: s.sure })),
-    hayatiRisk: hayatiRiskAktif,
-    zaman: new Date().toISOString()
-  };
-  await dbEkle('bulgular', bulgu);
-  currentSession.guncelleme = bulgu.zaman;
-  await dbGuncelle('denetimler', currentSession);
-
-  aktifFotolarTaslak = [];
-  aktifSeslerTaslak = [];
-  hayatiRiskAktif = false;
-  _hayatiRiskButonGuncelle();
-  _sesButonSifirla();
-  _fotoOnizlemeGoster();
-  _sesOnizlemeGoster();
-  document.getElementById('finding-manual').value = '';
-  await renderFindings();
+    aktifFotolarTaslak = [];
+    aktifSeslerTaslak = [];
+    hayatiRiskAktif = false;
+    _hayatiRiskButonGuncelle();
+    _sesButonSifirla();
+    _fotoOnizlemeGoster();
+    _sesOnizlemeGoster();
+    document.getElementById('finding-manual').value = '';
+    await renderFindings();
+  } finally {
+    _bulguKaydediliyor = false;
+  }
 }
 
 function addQuickFinding(text) {
