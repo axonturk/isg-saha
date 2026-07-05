@@ -7,7 +7,7 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.6.0';
+const APP_VERSION = 'v0.7.0';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 1;
 
@@ -105,6 +105,34 @@ function _birimAlanTipleri(birim) {
   const temel = profil ? profil.alanlar : ORTAK_ALANLAR;
   const ozel = (birim && birim.ozelAlanlar) || [];
   return [...temel, ...ozel];
+}
+
+// En sık kullanılan 6 alan tipi — profile göre (Oda ekleme formunda önce bunlar gösterilir).
+const HIZLI_ALANLAR = {
+  genel:     ['Ofis / idari oda', 'Toplantı salonu', 'Islak hacim (WC/lavabo)',
+              'Koridor / merdiven / kaçış yolu', 'Arşiv / depo', 'Diğer'],
+  idari:     ['Ofis / idari oda', 'Toplantı salonu', 'Islak hacim (WC/lavabo)',
+              'Koridor / merdiven / kaçış yolu', 'Arşiv / depo', 'Çay ocağı / ofis mutfağı'],
+  egitim:    ['Derslik / amfi', 'Ofis / idari oda', 'Bilgisayar lab.',
+              'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu', 'Kantin / yemekhane'],
+  myo:       ['Derslik / amfi', 'Atölye (makine/kaynak/vb.)', 'Ofis / idari oda',
+              'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu', 'Yemekhane / mutfak'],
+  hastane:   ['Poliklinik / muayene', 'Servis / hasta odası', 'Acil servis',
+              'Eczane / ilaç deposu', 'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu'],
+  kutuphane: ['Raf alanı / kitap deposu', 'Okuma salonu', 'Ödünç verme bankosu',
+              'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu', 'Arşiv / depo'],
+  havuz:     ['Havuz çevresi / ıslak zemin', 'Soyunma / duşlar', 'Makine dairesi (pompa/filtre)',
+              'Cankurtaran istasyonu / ilk yardım', 'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu'],
+  spor:      ['Kapalı spor salonu', 'Soyunma / duşlar', 'Fitness / kondisyon salonu',
+              'Malzeme deposu', 'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu'],
+  kres:      ['Oyun odası / etkinlik alanı', 'Uyku odası', 'Çocuk WC / alt değiştirme',
+              'Bahçe / oyun parkı', 'Giriş güvenliği', 'Çocuk mutfağı / mama hazırlama'],
+  yemekhane: ['Pişirme alanı (fritöz/kazan/davlumbaz)', 'Servis / yemek salonu', 'Bulaşıkhane',
+              'Soğuk oda / depo', 'Islak hacim (WC/lavabo)', 'Personel soyunma']
+};
+
+function _birimHizliAlanlar(birim) {
+  return HIZLI_ALANLAR[birim && birim.tip] || HIZLI_ALANLAR.genel;
 }
 
 // ─── OCR KOD OKUMA (v0.3'ten taşındı) — kapı/pano etiketi aday üretimi ────
@@ -628,16 +656,24 @@ async function yeniOdaEkle() {
   const birimId = document.getElementById('setup-birim').value;
   if (!birimId) { alert('Önce bir birim seçin.'); return; }
   const birim = await dbGetir('birimler', birimId);
-  const alanTipleri = _birimAlanTipleri(birim);
+  const hizliAlanlar = _birimHizliAlanlar(birim);
+  const ozel = (birim && birim.ozelAlanlar) || [];
+  const tumAlanlar = _birimAlanTipleri(birim);
+  const digerAlanlar = tumAlanlar.filter(a => !hizliAlanlar.includes(a));
 
-  const chipsHtml = alanTipleri.map(a =>
-    `<div class="chip" data-alan="${_escAttr(a)}" onclick="_odaFormAlanSec(this)">${_esc(a)}</div>`
-  ).join('') + `<div class="chip" onclick="_odaFormOzelAlanEkle('${birimId}')" style="border:1px dashed #999">+ Özel Tip</div>`;
+  const chipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_odaFormAlanSec(this)">${_esc(a)}</div>`;
+
+  const hizliChipsHtml = hizliAlanlar.map(chipHtml).join('') +
+    ozel.map(chipHtml).join('') +
+    `<div class="chip" onclick="_odaFormOzelAlanEkle('${birimId}')" style="border:1px dashed #999">+ Özel Tip</div>`;
+  const digerChipsHtml = digerAlanlar.map(chipHtml).join('');
 
   showFormModal('Yeni Oda / Alan Ekle', `
     <label>Alan Tipi</label>
-    <div class="chip-group" id="form-oda-alanlar" style="margin-bottom:15px">${chipsHtml}</div>
-    <div class="input-group">
+    <div class="chip-group" id="form-oda-alanlar" style="margin-bottom:8px">${hizliChipsHtml}</div>
+    <a href="#" onclick="_odaFormDigerleriGoster(event)" style="font-size:0.85rem; color:var(--accent);">▾ Diğerleri (${digerAlanlar.length})</a>
+    <div class="chip-group" id="form-oda-diger-alanlar" style="display:none; margin-top:8px; margin-bottom:15px">${digerChipsHtml}</div>
+    <div class="input-group" style="margin-top:15px">
       <label>Oda No (opsiyonel — örn: 203)</label>
       <div style="display:flex; gap:8px;">
         <input type="text" id="form-oda-no" placeholder="Örn: 203">
@@ -646,7 +682,7 @@ async function yeniOdaEkle() {
       <div id="form-oda-adaylar" class="chip-group" style="margin-top:8px"></div>
     </div>
   `, async () => {
-    const secili = document.querySelector('#form-oda-alanlar .chip.active');
+    const secili = document.querySelector('#form-oda-alanlar .chip.active, #form-oda-diger-alanlar .chip.active');
     if (!secili) { alert('Bir alan tipi seçin.'); return; }
     const alanTipi = secili.dataset.alan;
     const no = document.getElementById('form-oda-no').value.trim();
@@ -665,10 +701,18 @@ async function yeniOdaEkle() {
 if (typeof window !== 'undefined') window.yeniOdaEkle = yeniOdaEkle;
 
 function _odaFormAlanSec(el) {
-  document.querySelectorAll('#form-oda-alanlar .chip').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('#form-oda-alanlar .chip, #form-oda-diger-alanlar .chip')
+    .forEach(c => c.classList.remove('active'));
   el.classList.add('active');
 }
 if (typeof window !== 'undefined') window._odaFormAlanSec = _odaFormAlanSec;
+
+function _odaFormDigerleriGoster(e) {
+  e.preventDefault();
+  const el = document.getElementById('form-oda-diger-alanlar');
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+}
+if (typeof window !== 'undefined') window._odaFormDigerleriGoster = _odaFormDigerleriGoster;
 
 async function _odaFormOzelAlanEkle(birimId) {
   const ad = prompt('Yeni alan tipi adı (örn: Sunucu Odası):');
@@ -1196,35 +1240,64 @@ async function _zipVeIndir(denetimler, dosyaAdiOnEki) {
   URL.revokeObjectURL(url);
 }
 
-async function exportBirimZip() {
-  const birimId = document.getElementById('setup-birim').value;
-  if (!birimId) { alert('Önce bir birim seçin.'); return; }
-  const birim = await dbGetir('birimler', birimId);
-  const denetimler = await dbIndexTumu('denetimler', 'birimId', birimId);
-  await _zipVeIndir(denetimler, `birim_${(birim ? birim.ad : 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_')}`);
+function _dosyaAdiTemizle(ad) {
+  return String(ad || 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_');
 }
 
-async function exportKurumZip() {
+// Kurum altındaki birimleri checkbox listesiyle gösterir; istenen kaçı
+// seçilirse seçilir, tek ZIP'te birleştirilir. Esnek: 1 birim, birkaçı,
+// ya da hepsi seçilebilir.
+async function yedekModalAc() {
   const kurumId = document.getElementById('setup-kurum').value;
   if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
   const kurum = await dbGetir('kurumlar', kurumId);
   const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
-  let tumDenetimler = [];
-  for (const b of birimler) {
-    const d = await dbIndexTumu('denetimler', 'birimId', b.id);
-    tumDenetimler = tumDenetimler.concat(d);
-  }
-  await _zipVeIndir(tumDenetimler, `kurum_${(kurum ? kurum.ad : 'yedek').replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g, '_')}`);
+  if (birimler.length === 0) { alert('Bu kurumda henüz birim yok.'); return; }
+
+  const suankiBirimId = document.getElementById('setup-birim').value;
+  const satirlar = birimler.map(b => `
+    <label style="display:flex; align-items:center; gap:8px; padding:8px 0; cursor:pointer;">
+      <input type="checkbox" class="yedek-birim-cb" value="${b.id}" ${b.id === suankiBirimId ? 'checked' : ''} style="width:auto;">
+      <span>${_esc(b.ad)}</span>
+    </label>`).join('');
+
+  showFormModal(`Yedekle — ${kurum ? kurum.ad : ''}`, `
+    <div style="margin-bottom:10px;">
+      <a href="#" onclick="_yedekTumunuSecToggle(event)" style="font-size:0.85rem; color:var(--accent);">Tümünü Seç / Kaldır</a>
+    </div>
+    <div>${satirlar}</div>
+  `, async () => {
+    const secililer = [...document.querySelectorAll('.yedek-birim-cb:checked')].map(cb => cb.value);
+    if (secililer.length === 0) { alert('En az bir birim seçin.'); return; }
+
+    let tumDenetimler = [];
+    const secilenAdlar = [];
+    for (const birimId of secililer) {
+      const b = birimler.find(x => x.id === birimId);
+      if (b) secilenAdlar.push(b.ad);
+      const d = await dbIndexTumu('denetimler', 'birimId', birimId);
+      tumDenetimler = tumDenetimler.concat(d);
+    }
+    closeFormModal();
+    const dosyaOnEki = secililer.length === birimler.length
+      ? `kurum_${_dosyaAdiTemizle(kurum ? kurum.ad : '')}`
+      : `birimler_${_dosyaAdiTemizle(secilenAdlar.join('_'))}`;
+    await _zipVeIndir(tumDenetimler, dosyaOnEki);
+  }, 'ZIP İndir');
 }
+if (typeof window !== 'undefined') window.yedekModalAc = yedekModalAc;
+
+function _yedekTumunuSecToggle(e) {
+  e.preventDefault();
+  const kutular = document.querySelectorAll('.yedek-birim-cb');
+  const hepsiSecili = [...kutular].every(cb => cb.checked);
+  kutular.forEach(cb => { cb.checked = !hepsiSecili; });
+}
+if (typeof window !== 'undefined') window._yedekTumunuSecToggle = _yedekTumunuSecToggle;
 
 async function tumVeriyiZipleVeIndir() {
   const denetimler = await dbTumu('denetimler');
   await _zipVeIndir(denetimler, 'isg_tam_yedek');
-}
-
-if (typeof window !== 'undefined') {
-  window.exportBirimZip = exportBirimZip;
-  window.exportKurumZip = exportKurumZip;
 }
 
 // ─── YEDEK / GERİ YÜKLE (üst bar butonu) ─────────────────────
