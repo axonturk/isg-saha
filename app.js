@@ -7,7 +7,25 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.11.0';
+// Yakalanmamış bir hata (örn. silinen bir fonksiyona kalan referans) script'in
+// TAMAMINI sessizce durdurabilir — butonlar tıklanır ama hiçbir şey olmaz,
+// hiçbir konsol hatası kullanıcıya görünmez. Bu banner en azından "bir şeyler
+// ters gitti" bilgisini verir, "neden çalışmıyor" diye saatlerce debug
+// edilmesini önler. (v0.11.0'daki form-action-btn/modal-action-btn'in hiç
+// çalışmaması sorunu tam olarak buydu — window._turSec = _turSec satırı
+// silinen bir fonksiyonu referans alıyordu.)
+window.addEventListener('error', (e) => {
+  console.error('[Yakalanmamış hata]', e.message, 'satır:', e.lineno);
+  const mevcut = document.getElementById('hata-banner');
+  if (mevcut) return;
+  const banner = document.createElement('div');
+  banner.id = 'hata-banner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#e74c3c;color:white;padding:10px;text-align:center;font-size:0.85rem;z-index:9999;';
+  banner.textContent = '⚠ Bir hata oluştu, bazı butonlar çalışmayabilir. Sayfayı yenileyin.';
+  document.body.prepend(banner);
+});
+
+const APP_VERSION = 'v0.11.1';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 2;   // v2: 'ayarlar' deposu eklendi (özel Denetim Türü listesi için)
 
@@ -852,7 +870,6 @@ async function turEkle() {
   secilenTur = document.getElementById('setup-tur').value;
 }
 if (typeof window !== 'undefined') window.turEkle = turEkle;
-if (typeof window !== 'undefined') window._turSec = _turSec;
 
 // Kat çiplerini çizer + seçili katı ayarlar. Hem ilk açılışta hem "+ Kat Ekle"
 // sonrası yeniden çizimde kullanılır (tek kaynak, tekrar yok).
