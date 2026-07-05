@@ -7,7 +7,7 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.7.0';
+const APP_VERSION = 'v0.8.0';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 1;
 
@@ -24,6 +24,9 @@ let aktifSesTaslak    = null;   // ses kaydından gelen {blob, sure}
 let hayatiRiskAktif   = false;
 let sesRecorder       = null;
 let sesChunks         = [];
+let secilenKat        = null;   // Ekran B'de seçili kat
+let secilenAlanTipi   = null;   // Ekran B'de seçili alan tipi (chip veya dropdown)
+let secilenMevcutOdaId = null;  // "Bu kattaki mevcut odalar"dan seçilirse dolu — yeni oda oluşturulmaz
 
 // ─── UUID ────────────────────────────────────────────────────
 function uuid() {
@@ -508,6 +511,9 @@ window.addEventListener('load', () => {
   showScreen('setup');
   kurumlariYukle();
   loadInspectionsList();
+  if (typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState({ ekran: 'kurulum' }, '');
+  }
 });
 
 // ─── EKRAN YÖNETİMİ ──────────────────────────────────────────
@@ -515,6 +521,55 @@ function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById(`screen-${name}`);
   if (el) el.classList.add('active');
+}
+
+// ─── GERİ TUŞU / HISTORY (v0.2.1'den uyarlandı — kanıtlanmış desen) ──
+// Taban kayıt daima 'kurulum'; her ileri ekran kendi state'ini push eder.
+// Android/tarayıcı geri tuşu -> popstate -> bir önceki ekran çizilir.
+// popstate gelmeyen nadir durumlar için 250ms emniyet zamanlayıcısı.
+function _ekraniPushEt(ekranAdi) {
+  if (typeof history === 'undefined' || !history.pushState) return;
+  if (!history.state || history.state.ekran !== ekranAdi) {
+    history.pushState({ ekran: ekranAdi }, '');
+  }
+}
+
+// Kat-Alan ekranından İnceleme'ye geçişte kullanılır: 'kat-alan' seviyesini
+// yığına EKLEMEK yerine YERİNE koyar — böylece İnceleme'den geri tuşu
+// doğrudan Kurulum'a döner (Kat-Alan adımı atlanır, tekrar tekrar seçim
+// yapılmaz), tasarım kararına uygun.
+function _ekraniDegistirEt(ekranAdi) {
+  if (typeof history === 'undefined' || !history.replaceState) return;
+  history.replaceState({ ekran: ekranAdi }, '');
+}
+
+function _geriTikla(oncekiEkranId) {
+  const oncekiAktifMi = document.getElementById(oncekiEkranId).classList.contains('active');
+  if (typeof history !== 'undefined' && history.back) history.back();
+  setTimeout(() => {
+    // popstate 250ms içinde gelmediyse (bazı gömülü tarayıcılar) manuel düş.
+    if (oncekiAktifMi && document.getElementById(oncekiEkranId).classList.contains('active')) {
+      _setupEkraninaGec();
+    }
+  }, 250);
+}
+
+window.addEventListener('popstate', (e) => {
+  const ekran = e.state && e.state.ekran;
+  if (ekran === 'kat-alan') {
+    showScreen('kat-alan');
+  } else if (ekran === 'inceleme' && currentSession) {
+    showScreen('inspection');
+  } else {
+    _setupEkraninaGec();
+  }
+});
+
+function _setupEkraninaGec() {
+  clearInterval(sessionTimer);
+  showScreen('setup');
+  kurumlariYukle();
+  loadInspectionsList();
 }
 
 // ─── KURUM / BİRİM ───────────────────────────────────────────
@@ -534,7 +589,6 @@ async function birimleriYukle() {
   if (!kurumId) {
     sel.innerHTML = '<option value="">Önce kurum seçin</option>';
     sel.disabled = true;
-    await updateFloorChipsOrOdaInput();
     return;
   }
   sel.disabled = false;
@@ -543,7 +597,6 @@ async function birimleriYukle() {
   sel.innerHTML = '<option value="">Seçiniz...</option>' +
     birimler.map(b => `<option value="${b.id}">${_esc(b.ad)}</option>`).join('');
   if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
-  await updateFloorChipsOrOdaInput();
 }
 
 async function yeniKurumEkle() {
@@ -589,25 +642,26 @@ async function yeniBirimEkle() {
     closeFormModal();
     await birimleriYukle();
     document.getElementById('setup-birim').value = birim.id;
-    await updateFloorChipsOrOdaInput();
   }, 'Birimi Oluştur');
 }
 
-// ─── KAT ÇİPLERİ + ODA LİSTESİ (birim altında kalıcı) ────────
-async function updateFloorChipsOrOdaInput() {
+function _birimOdalari(birim, kat) {
+  return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
+}
+
+// ─── EKRAN B: KAT + ALAN TİPİ (Devam'a basınca açılır) ───────
+async function ekranKatAlanaGec() {
+  const kurumId = document.getElementById('setup-kurum').value;
   const birimId = document.getElementById('setup-birim').value;
-  const wrap  = document.getElementById('kat-secimi');
-  const chips = document.getElementById('floor-chips');
+  if (!kurumId) { alert('Lütfen kurum seçin.'); return; }
+  if (!birimId) { alert('Lütfen birim seçin.'); return; }
 
-  if (!birimId) {
-    wrap.style.display = 'none';
-    document.getElementById('setup-oda').innerHTML = '<option value="">Önce birim seçin</option>';
-    return;
-  }
-
+  const kurum = await dbGetir('kurumlar', kurumId);
   const birim = await dbGetir('birimler', birimId);
-  const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
+  document.getElementById('kat-alan-baslik').textContent = `${kurum ? kurum.ad : ''} / ${birim ? birim.ad : ''}`;
 
+  const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
+  const chips = document.getElementById('kat-alan-kat-chips');
   chips.innerHTML = '';
   katlar.forEach((kat, i) => {
     const c = document.createElement('div');
@@ -616,140 +670,162 @@ async function updateFloorChipsOrOdaInput() {
     c.onclick = () => {
       chips.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
-      odalariYukle();
+      secilenKat = kat;
+      secilenAlanTipi = null;
+      secilenMevcutOdaId = null;
+      document.getElementById('kat-alan-oda-no').value = '';
+      _katAlanMevcutOdalariGoster();
+      _katAlanAlanTipleriGoster();
     };
     chips.appendChild(c);
   });
+  secilenKat = katlar[0];
+  secilenAlanTipi = null;
+  secilenMevcutOdaId = null;
+  document.getElementById('kat-alan-oda-no').value = '';
+  document.getElementById('kat-alan-oda-adaylar').innerHTML = '';
+
+  await _katAlanMevcutOdalariGoster();
+  await _katAlanAlanTipleriGoster();
+
+  showScreen('kat-alan');
+  _ekraniPushEt('kat-alan');
+}
+if (typeof window !== 'undefined') window.ekranKatAlanaGec = ekranKatAlanaGec;
+
+async function _katAlanMevcutOdalariGoster() {
+  const birimId = document.getElementById('setup-birim').value;
+  const birim = await dbGetir('birimler', birimId);
+  const odalar = _birimOdalari(birim, secilenKat);
+  const wrap = document.getElementById('kat-alan-mevcut-wrap');
+  const kutu = document.getElementById('kat-alan-mevcut-odalar');
+  if (odalar.length === 0) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
-  await odalariYukle();
+  kutu.innerHTML = odalar.map(o =>
+    `<div class="chip" onclick="_katAlanMevcutOdaSec('${o.id}', this)">${_esc(o.ad)}</div>`
+  ).join('');
 }
 
-function getSelectedKat() {
-  const active = document.querySelector('#floor-chips .chip.active');
-  return active ? active.textContent : 'Zemin';
-}
-
-function _birimOdalari(birim, kat) {
-  return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
-}
-
-async function odalariYukle() {
+// NOT: `el` parametresi olarak DOM elemanı doğrudan alınır — async fonksiyon
+// içinde await'ten sonra global `event` nesnesine güvenmek kırılgandır
+// (mikrogörev sınırından sonra window.event sıfırlanabilir).
+async function _katAlanMevcutOdaSec(odaId, el) {
   const birimId = document.getElementById('setup-birim').value;
-  const sel = document.getElementById('setup-oda');
-  if (!birimId) { sel.innerHTML = '<option value="">Önce birim seçin</option>'; return; }
-
   const birim = await dbGetir('birimler', birimId);
-  const kat = getSelectedKat();
-  const odalar = _birimOdalari(birim, kat);
-  const secili = sel.value;
-
-  if (odalar.length === 0) {
-    sel.innerHTML = '<option value="">Bu katta oda yok — + ile ekleyin</option>';
-    return;
-  }
-  sel.innerHTML = '<option value="">Seçiniz...</option>' +
-    odalar.map(o => `<option value="${o.id}">${_esc(o.ad)}</option>`).join('');
-  if (secili && odalar.some(o => o.id === secili)) sel.value = secili;
+  const oda = (birim.odalar || []).find(o => o.id === odaId);
+  if (!oda) return;
+  secilenMevcutOdaId = oda.id;
+  secilenAlanTipi = oda.alanTipi;
+  document.getElementById('kat-alan-oda-no').value = oda.no || '';
+  document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('kat-alan-alan-dropdown').value = oda.alanTipi;
 }
+if (typeof window !== 'undefined') window._katAlanMevcutOdaSec = _katAlanMevcutOdaSec;
 
-async function yeniOdaEkle() {
+async function _katAlanAlanTipleriGoster() {
   const birimId = document.getElementById('setup-birim').value;
-  if (!birimId) { alert('Önce bir birim seçin.'); return; }
   const birim = await dbGetir('birimler', birimId);
-  const hizliAlanlar = _birimHizliAlanlar(birim);
+  const hizli = _birimHizliAlanlar(birim);
   const ozel = (birim && birim.ozelAlanlar) || [];
   const tumAlanlar = _birimAlanTipleri(birim);
-  const digerAlanlar = tumAlanlar.filter(a => !hizliAlanlar.includes(a));
+  const diger = tumAlanlar.filter(a => !hizli.includes(a));
 
-  const chipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_odaFormAlanSec(this)">${_esc(a)}</div>`;
+  const chipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_katAlanChipSec(this)">${_esc(a)}</div>`;
+  document.getElementById('kat-alan-hizli-chips').innerHTML =
+    hizli.map(chipHtml).join('') + ozel.map(chipHtml).join('') +
+    `<div class="chip" onclick="_katAlanOzelAlanEkle()" style="border:1px dashed #999">+ Özel Tip</div>`;
 
-  const hizliChipsHtml = hizliAlanlar.map(chipHtml).join('') +
-    ozel.map(chipHtml).join('') +
-    `<div class="chip" onclick="_odaFormOzelAlanEkle('${birimId}')" style="border:1px dashed #999">+ Özel Tip</div>`;
-  const digerChipsHtml = digerAlanlar.map(chipHtml).join('');
-
-  showFormModal('Yeni Oda / Alan Ekle', `
-    <label>Alan Tipi</label>
-    <div class="chip-group" id="form-oda-alanlar" style="margin-bottom:8px">${hizliChipsHtml}</div>
-    <a href="#" onclick="_odaFormDigerleriGoster(event)" style="font-size:0.85rem; color:var(--accent);">▾ Diğerleri (${digerAlanlar.length})</a>
-    <div class="chip-group" id="form-oda-diger-alanlar" style="display:none; margin-top:8px; margin-bottom:15px">${digerChipsHtml}</div>
-    <div class="input-group" style="margin-top:15px">
-      <label>Oda No (opsiyonel — örn: 203)</label>
-      <div style="display:flex; gap:8px;">
-        <input type="text" id="form-oda-no" placeholder="Örn: 203">
-        <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="openOCR('etiket')">📷</button>
-      </div>
-      <div id="form-oda-adaylar" class="chip-group" style="margin-top:8px"></div>
-    </div>
-  `, async () => {
-    const secili = document.querySelector('#form-oda-alanlar .chip.active, #form-oda-diger-alanlar .chip.active');
-    if (!secili) { alert('Bir alan tipi seçin.'); return; }
-    const alanTipi = secili.dataset.alan;
-    const no = document.getElementById('form-oda-no').value.trim();
-    const ad = no ? `${alanTipi} ${no}` : alanTipi;
-
-    const guncelBirim = await dbGetir('birimler', birimId);
-    if (!guncelBirim.odalar) guncelBirim.odalar = [];
-    const oda = { id: uuid(), kat: getSelectedKat(), alanTipi, no, ad };
-    guncelBirim.odalar.push(oda);
-    await dbGuncelle('birimler', guncelBirim);
-    closeFormModal();
-    await odalariYukle();
-    document.getElementById('setup-oda').value = oda.id;
-  }, 'Odayı Ekle');
+  const sel = document.getElementById('kat-alan-alan-dropdown');
+  sel.innerHTML = '<option value="">— Açılır listeden seçin (tüm bölümler) —</option>' +
+    tumAlanlar.map(a => `<option value="${_escAttr(a)}">${_esc(a)}</option>`).join('');
+  document.getElementById('kat-alan-diger-alanlar').innerHTML = diger.map(chipHtml).join('');
 }
-if (typeof window !== 'undefined') window.yeniOdaEkle = yeniOdaEkle;
 
-function _odaFormAlanSec(el) {
-  document.querySelectorAll('#form-oda-alanlar .chip, #form-oda-diger-alanlar .chip')
+function _katAlanChipSec(el) {
+  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip')
     .forEach(c => c.classList.remove('active'));
   el.classList.add('active');
+  secilenAlanTipi = el.dataset.alan;
+  secilenMevcutOdaId = null;
+  document.getElementById('kat-alan-alan-dropdown').value = secilenAlanTipi;
+  document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
 }
-if (typeof window !== 'undefined') window._odaFormAlanSec = _odaFormAlanSec;
+if (typeof window !== 'undefined') window._katAlanChipSec = _katAlanChipSec;
 
-function _odaFormDigerleriGoster(e) {
-  e.preventDefault();
-  const el = document.getElementById('form-oda-diger-alanlar');
-  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+function _katAlanDropdownDegisti() {
+  const deger = document.getElementById('kat-alan-alan-dropdown').value;
+  if (!deger) return;
+  secilenAlanTipi = deger;
+  secilenMevcutOdaId = null;
+  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.alan === deger);
+  });
+  document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
 }
-if (typeof window !== 'undefined') window._odaFormDigerleriGoster = _odaFormDigerleriGoster;
+if (typeof window !== 'undefined') window._katAlanDropdownDegisti = _katAlanDropdownDegisti;
 
-async function _odaFormOzelAlanEkle(birimId) {
+async function _katAlanOzelAlanEkle() {
   const ad = prompt('Yeni alan tipi adı (örn: Sunucu Odası):');
   if (!ad || !ad.trim()) return;
+  const birimId = document.getElementById('setup-birim').value;
   const birim = await dbGetir('birimler', birimId);
   if (!birim.ozelAlanlar) birim.ozelAlanlar = [];
   birim.ozelAlanlar.push(ad.trim());
   await dbGuncelle('birimler', birim);
-  await yeniOdaEkle();   // formu güncel liste ile yeniden aç
+  await _katAlanAlanTipleriGoster();
 }
-if (typeof window !== 'undefined') window._odaFormOzelAlanEkle = _odaFormOzelAlanEkle;
+if (typeof window !== 'undefined') window._katAlanOzelAlanEkle = _katAlanOzelAlanEkle;
+
+function _katAlanOdaNoDegisti() {
+  secilenMevcutOdaId = null;
+  document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
+}
+if (typeof window !== 'undefined') window._katAlanOdaNoDegisti = _katAlanOdaNoDegisti;
+
+function katAlanGeri() {
+  _geriTikla('screen-setup');
+}
+if (typeof window !== 'undefined') window.katAlanGeri = katAlanGeri;
 
 // ─── DENETİM BAŞLAT ──────────────────────────────────────────
 async function startInspection() {
   const kurumId = document.getElementById('setup-kurum').value;
   const birimId = document.getElementById('setup-birim').value;
-  const odaId = document.getElementById('setup-oda').value;
   const resp = document.getElementById('setup-responsible').value.trim();
+  const odaNo = document.getElementById('kat-alan-oda-no').value.trim();
 
   if (!kurumId) { alert('Lütfen kurum seçin.'); return; }
   if (!birimId) { alert('Lütfen birim seçin.'); return; }
-  if (!odaId)  { alert('Lütfen oda/alan seçin (yoksa + ile ekleyin).'); return; }
+  if (!secilenAlanTipi) { alert('Lütfen alan tipi seçin (hızlı chip veya açılır listeden).'); return; }
 
   const birim = await dbGetir('birimler', birimId);
-  const kat = getSelectedKat();
-  const odaKaydi = _birimOdalari(birim, kat).find(o => o.id === odaId);
+  if (!birim.odalar) birim.odalar = [];
+
+  let odaKaydi = secilenMevcutOdaId ? birim.odalar.find(o => o.id === secilenMevcutOdaId) : null;
+  if (!odaKaydi) {
+    odaKaydi = birim.odalar.find(o => o.kat === secilenKat && o.alanTipi === secilenAlanTipi && (o.no || '') === odaNo);
+  }
+  if (!odaKaydi) {
+    odaKaydi = {
+      id: uuid(), kat: secilenKat, alanTipi: secilenAlanTipi, no: odaNo,
+      ad: odaNo ? `${secilenAlanTipi} ${odaNo}` : secilenAlanTipi
+    };
+    birim.odalar.push(odaKaydi);
+    await dbGuncelle('birimler', birim);
+  }
 
   const denetim = {
     id: uuid(),
     kurumId,
     birimId,
-    bina: birim ? birim.ad : '?',
-    kat,
-    odaId,
-    oda: odaKaydi ? odaKaydi.ad : '?',
-    alanTipi: odaKaydi ? odaKaydi.alanTipi : null,
-    odaNo: odaKaydi ? odaKaydi.no : null,
+    bina: birim.ad,
+    kat: secilenKat,
+    odaId: odaKaydi.id,
+    oda: odaKaydi.ad,
+    alanTipi: odaKaydi.alanTipi,
+    odaNo: odaKaydi.no,
     sorumlu: resp,
     baslangic: new Date().toISOString(),
     guncelleme: new Date().toISOString()
@@ -760,6 +836,7 @@ async function startInspection() {
   sessionBulgular = [];
   updateLocationDisplay();
   showScreen('inspection');
+  _ekraniDegistirEt('inceleme');
   startTimer();
   await renderFindings();
 }
@@ -919,6 +996,7 @@ async function resumeSession(id) {
   currentSession = s;
   updateLocationDisplay();
   showScreen('inspection');
+  _ekraniPushEt('inceleme');
   startTimer();
   await renderFindings();
 }
@@ -1017,10 +1095,7 @@ document.getElementById('form-action-btn') &&
 
 // ─── GERİ / SETUP ────────────────────────────────────────────
 function goToSetup() {
-  clearInterval(sessionTimer);
-  showScreen('setup');
-  kurumlariYukle();
-  loadInspectionsList();
+  _geriTikla('screen-inspection');
 }
 
 // ─── KAMERA — İKİ AYRI GÖREV ──────────────────────────────────
@@ -1079,7 +1154,7 @@ function _fotoOnizlemeGoster(sonuc) {
 // düz yazı etiketleri ("Teknik Servis") aday olarak sunulur.
 async function _etiketOku(canvas) {
   const imageData = canvas.toDataURL('image/jpeg', 0.95);
-  const adayKutu = document.getElementById('form-oda-adaylar');
+  const adayKutu = document.getElementById('kat-alan-oda-adaylar');
   if (adayKutu) adayKutu.innerHTML = 'Okunuyor…';
   try {
     const result = await Tesseract.recognize(imageData, 'tur', { logger: () => {} });
@@ -1094,7 +1169,7 @@ async function _etiketOku(canvas) {
       return;
     }
     adayKutu.innerHTML = tumAdaylar.map(a =>
-      `<div class="chip" onclick="document.getElementById('form-oda-no').value='${_escAttr(a).replace(/'/g, "\\'")}'">${_esc(a)}</div>`
+      `<div class="chip" onclick="document.getElementById('kat-alan-oda-no').value='${_escAttr(a).replace(/'/g, "\\'")}'; _katAlanOdaNoDegisti()">${_esc(a)}</div>`
     ).join('');
   } catch (e) {
     if (adayKutu) adayKutu.innerHTML = `<span style="color:#e74c3c">OCR hatası: ${_esc(e.message)}</span>`;

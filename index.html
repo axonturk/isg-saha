@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>İSG Saha Asistanı v0.7.0</title>
+    <title>İSG Saha Asistanı v0.8.0</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -118,7 +118,7 @@
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
         <div class="header">
-            <h3>İSG Saha Asistanı <span class="version-badge">v0.7.0</span></h3>
+            <h3>İSG Saha Asistanı <span class="version-badge">v0.8.0</span></h3>
             <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
                 <i class="fas fa-sync"></i>
             </button>
@@ -140,25 +140,10 @@
             <div class="input-group">
                 <label>Birim</label>
                 <div style="display:flex; gap:8px;">
-                    <select id="setup-birim" onchange="updateFloorChipsOrOdaInput()" style="flex:1" disabled>
+                    <select id="setup-birim" style="flex:1" disabled>
                         <option value="">Önce kurum seçin</option>
                     </select>
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniBirimEkle()">+</button>
-                </div>
-            </div>
-
-            <div id="kat-secimi" style="display:none">
-                <label>Kat Seçin</label>
-                <div class="chip-group" id="floor-chips"></div>
-            </div>
-
-            <div class="input-group">
-                <label>Oda/Alan</label>
-                <div style="display:flex; gap:8px;">
-                    <select id="setup-oda" style="flex:1">
-                        <option value="">Önce birim seçin</option>
-                    </select>
-                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniOdaEkle()">+</button>
                 </div>
             </div>
 
@@ -167,8 +152,8 @@
                 <input type="text" id="setup-responsible" placeholder="Ad Soyad">
             </div>
 
-            <button class="btn btn-primary" onclick="startInspection()">
-                <i class="fas fa-play"></i> Denetimi Başlat
+            <button class="btn btn-primary" onclick="ekranKatAlanaGec()">
+                <i class="fas fa-arrow-right"></i> Devam
             </button>
             <button class="btn btn-outline" style="margin-top:10px; font-size:0.85rem;" onclick="yedekModalAc()">
                 <i class="fas fa-file-archive"></i> Yedekle (ZIP)
@@ -181,6 +166,52 @@
 
             <button class="btn btn-danger" style="margin-top:20px; opacity: 0.7;" onclick="askDeleteAll()">
                 <i class="fas fa-trash-alt"></i> Tüm Veriyi Sıfırla
+            </button>
+        </div>
+    </div>
+
+    <!-- KAT + ALAN TİPİ EKRANI -->
+    <div id="screen-kat-alan" class="screen">
+        <div class="header">
+            <button class="btn-outline btn" style="width:auto;" onclick="katAlanGeri()">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div id="kat-alan-baslik" style="font-weight:bold; text-align:right;">Kurum / Birim</div>
+        </div>
+
+        <div class="card">
+            <label>Kat Seçin</label>
+            <div class="chip-group" id="kat-alan-kat-chips"></div>
+
+            <div id="kat-alan-mevcut-wrap" style="display:none; margin-top:20px;">
+                <label>Bu Kattaki Mevcut Odalar (devam etmek için dokun)</label>
+                <div class="chip-group" id="kat-alan-mevcut-odalar"></div>
+            </div>
+
+            <div style="margin-top:20px;">
+                <label>Alan Tipi — Hızlı Seçim</label>
+                <div class="chip-group" id="kat-alan-hizli-chips"></div>
+            </div>
+
+            <div class="input-group" style="margin-top:15px;">
+                <label>Alan Tipi — Açılır Liste (tüm bölümler)</label>
+                <select id="kat-alan-alan-dropdown" onchange="_katAlanDropdownDegisti()">
+                    <option value="">— Açılır listeden seçin (tüm bölümler) —</option>
+                </select>
+                <div class="chip-group" id="kat-alan-diger-alanlar" style="margin-top:8px"></div>
+            </div>
+
+            <div class="input-group" style="margin-top:15px;">
+                <label>Oda No (opsiyonel — örn: 203)</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="kat-alan-oda-no" placeholder="Örn: 203" oninput="_katAlanOdaNoDegisti()">
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="openOCR('etiket')">📷</button>
+                </div>
+                <div id="kat-alan-oda-adaylar" class="chip-group" style="margin-top:8px"></div>
+            </div>
+
+            <button class="btn btn-primary" style="margin-top:20px" onclick="startInspection()">
+                <i class="fas fa-play"></i> Denetimi Başlat
             </button>
         </div>
     </div>
