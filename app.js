@@ -7,18 +7,23 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.5.0';
+const APP_VERSION = 'v0.6.0';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 1;
 
 // ─── STATE ───────────────────────────────────────────────────
-let currentSession   = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
-let sessionBulgular  = [];     // aktif denetimin bulgu listesi (cache)
-let sessionTimer     = null;
-let modalCallback    = null;
-let ocrStream        = null;
-let aktifFotoTaslak  = null;   // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış foto
-let hayatiRiskAktif  = false;
+let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
+let sessionBulgular   = [];     // aktif denetimin bulgu listesi (cache)
+let sessionTimer      = null;
+let modalCallback     = null;
+let formConfirmCallback = null;
+let ocrStream         = null;
+let kameraModu        = 'kanit';  // 'kanit' (bulgu fotoğrafı) | 'etiket' (oda etiketi okuma)
+let aktifFotoTaslak   = null;   // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış foto
+let aktifSesTaslak    = null;   // ses kaydından gelen {blob, sure}
+let hayatiRiskAktif   = false;
+let sesRecorder       = null;
+let sesChunks         = [];
 
 // ─── UUID ────────────────────────────────────────────────────
 function uuid() {
@@ -33,6 +38,100 @@ function _esc(s) {
   const d = document.createElement('div');
   d.textContent = String(s ?? '');
   return d.innerHTML;
+}
+
+function _escAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ─── ALAN TİPLERİ (v0.2'den taşındı) — bina profiline göre hazır listeler ──
+const ORTAK_ALANLAR = [
+  'Ofis / idari oda', 'Toplantı salonu', 'Koridor / merdiven / kaçış yolu',
+  'Islak hacim (WC/lavabo)', 'Çay ocağı / ofis mutfağı', 'Arşiv / depo',
+  'Cami / mescit', 'Kazan dairesi', 'Elektrik pano odası', 'Jeneratör / UPS',
+  'Asansör makine dairesi', 'Çatı / bodrum', 'Otopark / açık alan',
+  'Güvenlik / danışma', 'Diğer'
+];
+const EGITIM_ALANLAR = [
+  'Derslik / amfi', 'Kimya laboratuvarı', 'Biyoloji/mikrobiyoloji lab.',
+  'Fizik/elektrik lab.', 'Bilgisayar lab.', 'Atölye (makine/kaynak/vb.)',
+  'Kütüphane / okuma salonu', 'Konferans salonu', 'Kantin / yemekhane',
+  'Spor salonu / soyunma'
+];
+const MYO_EK_ALANLAR = ['Yemekhane / mutfak'];
+const HASTANE_ALANLAR = [
+  'Poliklinik / muayene', 'Servis / hasta odası', 'Ameliyathane', 'Yoğun bakım',
+  'Acil servis', 'Görüntüleme (radyasyon)', 'Tıbbi laboratuvar',
+  'Eczane / ilaç deposu', 'Sterilizasyon ünitesi', 'Tıbbi atık deposu',
+  'Endüstriyel mutfak', 'Çamaşırhane', 'Morg'
+];
+const KUTUPHANE_ALANLAR = [
+  'Raf alanı / kitap deposu', 'Okuma salonu', 'Nadir eser / arşiv deposu',
+  'Kompakt (raylı) arşiv rafları', 'Fotokopi / sayısallaştırma', 'Ödünç verme bankosu'
+];
+const HAVUZ_ALANLAR = [
+  'Havuz çevresi / ıslak zemin', 'Klor / kimyasal deposu', 'Makine dairesi (pompa/filtre)',
+  'Denge deposu / teknik galeri', 'Cankurtaran istasyonu / ilk yardım',
+  'Soyunma / duşlar', 'Seyirci alanı'
+];
+const SPOR_ALANLAR = [
+  'Kapalı spor salonu', 'Futbol sahası / açık saha', 'Fitness / kondisyon salonu',
+  'Minder sporları alanı', 'Tribün / seyirci alanı', 'Soyunma / duşlar', 'Malzeme deposu'
+];
+const KRES_ALANLAR = [
+  'Oyun odası / etkinlik alanı', 'Uyku odası', 'Çocuk mutfağı / mama hazırlama',
+  'Çocuk WC / alt değiştirme', 'Bahçe / oyun parkı', 'Giriş güvenliği'
+];
+const YEMEKHANE_ALANLAR = [
+  'Pişirme alanı (fritöz/kazan/davlumbaz)', 'Soğuk oda / depo', 'Kuru gıda deposu',
+  'Bulaşıkhane', 'Servis / yemek salonu', 'LPG/doğalgaz hattı', 'Personel soyunma'
+];
+const PROFILLER = {
+  idari:     { ad: 'İdari bina (rektörlük, daire bşk.)', alanlar: ORTAK_ALANLAR },
+  egitim:    { ad: 'Eğitim binası (fakülte)',            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR] },
+  myo:       { ad: 'MYO',                                alanlar: [...EGITIM_ALANLAR, ...MYO_EK_ALANLAR, ...ORTAK_ALANLAR] },
+  hastane:   { ad: 'Hastane',                            alanlar: [...HASTANE_ALANLAR, ...ORTAK_ALANLAR] },
+  kutuphane: { ad: 'Kütüphane (merkez)',                 alanlar: [...KUTUPHANE_ALANLAR, ...ORTAK_ALANLAR] },
+  havuz:     { ad: 'Yüzme havuzu',                       alanlar: [...HAVUZ_ALANLAR, ...ORTAK_ALANLAR] },
+  spor:      { ad: 'Spor kompleksi',                     alanlar: [...SPOR_ALANLAR, ...ORTAK_ALANLAR] },
+  kres:      { ad: 'Kreş',                               alanlar: [...KRES_ALANLAR, ...ORTAK_ALANLAR] },
+  yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] }
+};
+
+function _birimAlanTipleri(birim) {
+  const profil = PROFILLER[birim && birim.tip];
+  const temel = profil ? profil.alanlar : ORTAK_ALANLAR;
+  const ozel = (birim && birim.ozelAlanlar) || [];
+  return [...temel, ...ozel];
+}
+
+// ─── OCR KOD OKUMA (v0.3'ten taşındı) — kapı/pano etiketi aday üretimi ────
+// Benchmark: 10/10 sentetik + 2/2 gerçek etiket (bkz. BENIOKU.md).
+const OCR_KOD_DESENI = /\b([A-Z]{1,4})[-–\s]?(\d{1,4})([A-Z]?)\b/g;
+
+function ocrAdaylarUret(metin) {
+  const m0 = String(metin || '').toUpperCase().replace(/İ/g, 'I');
+  const adaylar = [];
+  const bicim = (h, s, ek) => (h.length === 1 ? h + s + ek : h + '-' + s + ek);
+  let m;
+  OCR_KOD_DESENI.lastIndex = 0;
+  while ((m = OCR_KOD_DESENI.exec(m0)) !== null) {
+    const [, harf, sayi, ek] = m;
+    adaylar.push({ skor: harf.length + sayi.length, kod: bicim(harf, sayi, ek) });
+    const t = harf.match(/^(.*?)(O+)$/);
+    if (t && t[1]) {
+      const s2 = t[2].replace(/O/g, '0') + sayi;
+      adaylar.push({ skor: t[1].length + s2.length, kod: bicim(t[1], s2, ek) });
+    }
+  }
+  adaylar.sort((a, b) => b.skor - a.skor);
+  const gorulen = new Set(), sonuc = [];
+  for (const a of adaylar) {
+    if (!gorulen.has(a.kod)) { gorulen.add(a.kod); sonuc.push(a.kod); }
+  }
+  return sonuc.slice(0, 3);
 }
 
 // ─── INDEXEDDB KATMANI ───────────────────────────────────────
@@ -432,19 +531,38 @@ async function yeniKurumEkle() {
 async function yeniBirimEkle() {
   const kurumId = document.getElementById('setup-kurum').value;
   if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
-  const ad = prompt('Birim adı (örn: KMYO, Kütüphane, Veteriner Hastanesi, Daire Başkanlığı):');
-  if (!ad || !ad.trim()) return;
-  const katSayisiStr = prompt('Kaç katlı? (boş bırakırsanız tek kat "Zemin" olur)', '1');
-  let katlar = ['Zemin'];
-  const katSayisi = parseInt(katSayisiStr);
-  if (!isNaN(katSayisi) && katSayisi > 1) {
-    katlar = ['Zemin', ...Array.from({ length: katSayisi - 1 }, (_, i) => `${i + 1}.Kat`)];
-  }
-  const birim = { id: uuid(), kurumId, ad: ad.trim(), tip: 'genel', katlar, odalar: [], olusturma: new Date().toISOString() };
-  await dbEkle('birimler', birim);
-  await birimleriYukle();
-  document.getElementById('setup-birim').value = birim.id;
-  await updateFloorChipsOrOdaInput();
+
+  const profilSecenekleri = '<option value="genel">Genel / Diğer</option>' +
+    Object.entries(PROFILLER).map(([k, v]) => `<option value="${k}">${_esc(v.ad)}</option>`).join('');
+
+  showFormModal('Yeni Birim', `
+    <div class="input-group">
+      <label>Birim Adı</label>
+      <input type="text" id="form-birim-ad" placeholder="Örn: Veteriner Hastanesi">
+    </div>
+    <div class="input-group">
+      <label>Bina Tipi (alan tipi listesini belirler)</label>
+      <select id="form-birim-profil">${profilSecenekleri}</select>
+    </div>
+    <div class="input-group">
+      <label>Kaç Katlı?</label>
+      <input type="number" id="form-birim-kat" value="1" min="1">
+    </div>
+  `, async () => {
+    const ad = document.getElementById('form-birim-ad').value.trim();
+    if (!ad) { alert('Birim adı gerekli.'); return; }
+    const profil = document.getElementById('form-birim-profil').value;
+    const katSayisi = parseInt(document.getElementById('form-birim-kat').value) || 1;
+    let katlar = ['Zemin'];
+    if (katSayisi > 1) katlar = ['Zemin', ...Array.from({ length: katSayisi - 1 }, (_, i) => `${i + 1}.Kat`)];
+
+    const birim = { id: uuid(), kurumId, ad, tip: profil, katlar, odalar: [], ozelAlanlar: [], olusturma: new Date().toISOString() };
+    await dbEkle('birimler', birim);
+    closeFormModal();
+    await birimleriYukle();
+    document.getElementById('setup-birim').value = birim.id;
+    await updateFloorChipsOrOdaInput();
+  }, 'Birimi Oluştur');
 }
 
 // ─── KAT ÇİPLERİ + ODA LİSTESİ (birim altında kalıcı) ────────
@@ -509,18 +627,59 @@ async function odalariYukle() {
 async function yeniOdaEkle() {
   const birimId = document.getElementById('setup-birim').value;
   if (!birimId) { alert('Önce bir birim seçin.'); return; }
-  const ad = prompt('Oda/Alan adı veya no (örn: 203, Muayene Odası):');
-  if (!ad || !ad.trim()) return;
-
   const birim = await dbGetir('birimler', birimId);
-  if (!birim.odalar) birim.odalar = [];
-  const oda = { id: uuid(), kat: getSelectedKat(), ad: ad.trim() };
-  birim.odalar.push(oda);
-  await dbGuncelle('birimler', birim);
-  await odalariYukle();
-  document.getElementById('setup-oda').value = oda.id;
+  const alanTipleri = _birimAlanTipleri(birim);
+
+  const chipsHtml = alanTipleri.map(a =>
+    `<div class="chip" data-alan="${_escAttr(a)}" onclick="_odaFormAlanSec(this)">${_esc(a)}</div>`
+  ).join('') + `<div class="chip" onclick="_odaFormOzelAlanEkle('${birimId}')" style="border:1px dashed #999">+ Özel Tip</div>`;
+
+  showFormModal('Yeni Oda / Alan Ekle', `
+    <label>Alan Tipi</label>
+    <div class="chip-group" id="form-oda-alanlar" style="margin-bottom:15px">${chipsHtml}</div>
+    <div class="input-group">
+      <label>Oda No (opsiyonel — örn: 203)</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="form-oda-no" placeholder="Örn: 203">
+        <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="openOCR('etiket')">📷</button>
+      </div>
+      <div id="form-oda-adaylar" class="chip-group" style="margin-top:8px"></div>
+    </div>
+  `, async () => {
+    const secili = document.querySelector('#form-oda-alanlar .chip.active');
+    if (!secili) { alert('Bir alan tipi seçin.'); return; }
+    const alanTipi = secili.dataset.alan;
+    const no = document.getElementById('form-oda-no').value.trim();
+    const ad = no ? `${alanTipi} ${no}` : alanTipi;
+
+    const guncelBirim = await dbGetir('birimler', birimId);
+    if (!guncelBirim.odalar) guncelBirim.odalar = [];
+    const oda = { id: uuid(), kat: getSelectedKat(), alanTipi, no, ad };
+    guncelBirim.odalar.push(oda);
+    await dbGuncelle('birimler', guncelBirim);
+    closeFormModal();
+    await odalariYukle();
+    document.getElementById('setup-oda').value = oda.id;
+  }, 'Odayı Ekle');
 }
 if (typeof window !== 'undefined') window.yeniOdaEkle = yeniOdaEkle;
+
+function _odaFormAlanSec(el) {
+  document.querySelectorAll('#form-oda-alanlar .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+if (typeof window !== 'undefined') window._odaFormAlanSec = _odaFormAlanSec;
+
+async function _odaFormOzelAlanEkle(birimId) {
+  const ad = prompt('Yeni alan tipi adı (örn: Sunucu Odası):');
+  if (!ad || !ad.trim()) return;
+  const birim = await dbGetir('birimler', birimId);
+  if (!birim.ozelAlanlar) birim.ozelAlanlar = [];
+  birim.ozelAlanlar.push(ad.trim());
+  await dbGuncelle('birimler', birim);
+  await yeniOdaEkle();   // formu güncel liste ile yeniden aç
+}
+if (typeof window !== 'undefined') window._odaFormOzelAlanEkle = _odaFormOzelAlanEkle;
 
 // ─── DENETİM BAŞLAT ──────────────────────────────────────────
 async function startInspection() {
@@ -545,6 +704,8 @@ async function startInspection() {
     kat,
     odaId,
     oda: odaKaydi ? odaKaydi.ad : '?',
+    alanTipi: odaKaydi ? odaKaydi.alanTipi : null,
+    odaNo: odaKaydi ? odaKaydi.no : null,
     sorumlu: resp,
     baslangic: new Date().toISOString(),
     guncelleme: new Date().toISOString()
@@ -594,7 +755,10 @@ function _hayatiRiskButonGuncelle() {
 // ─── BULGU KAYDET ────────────────────────────────────────────
 async function saveFinding() {
   const text = document.getElementById('finding-manual').value.trim();
-  if (!text) { alert('Bulgu metni boş olamaz.'); return; }
+  if (!text && !aktifFotoTaslak && !aktifSesTaslak) {
+    alert('Bulgu için metin, fotoğraf veya ses notundan en az biri gerekli.');
+    return;
+  }
 
   const bulgu = {
     id: uuid(),
@@ -604,6 +768,8 @@ async function saveFinding() {
     fotoBoyut: aktifFotoTaslak ? aktifFotoTaslak.sikistirilmisBoyut : null,
     fotoGenislik: aktifFotoTaslak ? aktifFotoTaslak.genislik : null,
     fotoYukseklik: aktifFotoTaslak ? aktifFotoTaslak.yukseklik : null,
+    ses: aktifSesTaslak ? aktifSesTaslak.blob : null,
+    sesSure: aktifSesTaslak ? aktifSesTaslak.sure : null,
     hayatiRisk: hayatiRiskAktif,
     zaman: new Date().toISOString()
   };
@@ -612,8 +778,12 @@ async function saveFinding() {
   await dbGuncelle('denetimler', currentSession);
 
   aktifFotoTaslak = null;
+  aktifSesTaslak = null;
   hayatiRiskAktif = false;
   _hayatiRiskButonGuncelle();
+  _sesButonSifirla();
+  const onizleme = document.getElementById('foto-onizleme');
+  if (onizleme) onizleme.innerHTML = '';
   document.getElementById('finding-manual').value = '';
   await renderFindings();
 }
@@ -635,8 +805,10 @@ async function renderFindings() {
   list.innerHTML = sessionBulgular.map(f => `
     <div class="finding-item"${f.hayatiRisk ? ' style="border-left-color:#e74c3c"' : ''}>
       <div class="finding-meta">${new Date(f.zaman).toLocaleTimeString('tr-TR')}
-        ${f.foto ? ' 📷' : ''}${f.hayatiRisk ? ' ⚠ HAYATİ RİSK' : ''}</div>
-      <div>${_esc(f.metin)}</div>
+        ${f.foto ? ' 📷' : ''}${f.ses ? ' 🎤' : ''}${f.hayatiRisk ? ' ⚠ HAYATİ RİSK' : ''}</div>
+      ${f.metin ? `<div>${_esc(f.metin)}</div>` : ''}
+      ${f.foto ? `<img src="${URL.createObjectURL(f.foto)}" style="max-width:100px;border-radius:6px;margin-top:6px;display:block">` : ''}
+      ${f.ses ? `<audio controls src="${URL.createObjectURL(f.ses)}" style="margin-top:6px;height:32px;max-width:220px"></audio>` : ''}
       <button onclick="askDeleteFinding('${f.id}')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
         <i class="fas fa-times"></i>
       </button>
@@ -660,6 +832,8 @@ async function nextRoom() {
 
   currentSession.odaId = sonraki.id;
   currentSession.oda = sonraki.ad;
+  currentSession.alanTipi = sonraki.alanTipi;
+  currentSession.odaNo = sonraki.no;
   currentSession.id = uuid();
   currentSession.baslangic = new Date().toISOString();
   currentSession.guncelleme = currentSession.baslangic;
@@ -776,6 +950,27 @@ document.getElementById('modal-action-btn') &&
     if (cb) cb();
   });
 
+// ─── FORM MODAL (veri girişli — Yeni Birim / Yeni Oda) ───────
+function showFormModal(title, bodyHtml, onConfirm, btnText = 'Kaydet') {
+  document.getElementById('form-title').textContent = title;
+  document.getElementById('form-body').innerHTML = bodyHtml;
+  const btn = document.getElementById('form-action-btn');
+  btn.textContent = btnText;
+  formConfirmCallback = onConfirm;
+  document.getElementById('modal-form').style.display = 'flex';
+}
+
+function closeFormModal() {
+  document.getElementById('modal-form').style.display = 'none';
+  formConfirmCallback = null;
+}
+if (typeof window !== 'undefined') window.closeFormModal = closeFormModal;
+
+document.getElementById('form-action-btn') &&
+  document.getElementById('form-action-btn').addEventListener('click', async () => {
+    if (formConfirmCallback) await formConfirmCallback();
+  });
+
 // ─── GERİ / SETUP ────────────────────────────────────────────
 function goToSetup() {
   clearInterval(sessionTimer);
@@ -784,8 +979,11 @@ function goToSetup() {
   loadInspectionsList();
 }
 
-// ─── OCR ─────────────────────────────────────────────────────
-async function openOCR() {
+// ─── KAMERA — İKİ AYRI GÖREV ──────────────────────────────────
+// 'kanit'  : Bulgu Ekle ekranındaki Çek-Onayla — kanıt fotoğrafı, OCR YOK.
+// 'etiket' : Oda ekleme formundaki 📷 — kapı/pano etiketi OKUNUR, Oda No'ya yazılır.
+async function openOCR(mod = 'kanit') {
+  kameraModu = mod;
   try {
     ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     document.getElementById('video').srcObject = ocrStream;
@@ -794,6 +992,7 @@ async function openOCR() {
     alert('Kamera erişimi reddedildi: ' + e.message);
   }
 }
+if (typeof window !== 'undefined') window.openOCR = openOCR;
 
 function closeOCR() {
   if (ocrStream) ocrStream.getTracks().forEach(t => t.stop());
@@ -808,23 +1007,97 @@ async function capturePhoto() {
   canvas.getContext('2d').drawImage(video, 0, 0);
   closeOCR();
 
-  const imageData = canvas.toDataURL('image/jpeg', 0.95);
-  document.getElementById('finding-manual').value = 'OCR işleniyor...';
+  if (kameraModu === 'etiket') {
+    await _etiketOku(canvas);
+    return;
+  }
 
+  const imageData = canvas.toDataURL('image/jpeg', 0.95);
   const sonuc = await compressImage(imageData);
   aktifFotoTaslak = sonuc;
   console.log('[sıkıştırma] Kayda hazır foto:', boyutBiçimle(sonuc.sikistirilmisBoyut),
     sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');
+  _fotoOnizlemeGoster(sonuc);
+}
 
+function _fotoOnizlemeGoster(sonuc) {
+  const el = document.getElementById('foto-onizleme');
+  if (!el) return;
+  const url = sonuc.blob ? URL.createObjectURL(sonuc.blob) : sonuc.dataUrl;
+  el.innerHTML = `
+    <img src="${url}" style="max-width:120px;border-radius:8px;display:block;margin-top:8px">
+    <div style="font-size:0.75rem;color:#27ae60;margin-top:4px">
+      📷 Fotoğraf hazır (${boyutBiçimle(sonuc.sikistirilmisBoyut)}) — Kaydet'e basınca bulguya eklenecek
+    </div>`;
+}
+
+// Kapı/pano etiketi okuma: hem harf+rakam kodları (A101, Z-15) hem de
+// düz yazı etiketleri ("Teknik Servis") aday olarak sunulur.
+async function _etiketOku(canvas) {
+  const imageData = canvas.toDataURL('image/jpeg', 0.95);
+  const adayKutu = document.getElementById('form-oda-adaylar');
+  if (adayKutu) adayKutu.innerHTML = 'Okunuyor…';
   try {
-    const result = await Tesseract.recognize(imageData, 'tur', {
-      logger: m => console.log(m)
-    });
-    const text = result.data.text.trim();
-    document.getElementById('finding-manual').value = text || 'Metin okunamadı, manuel girin.';
+    const result = await Tesseract.recognize(imageData, 'tur', { logger: () => {} });
+    const hamMetin = result.data.text.trim();
+    const kodAdaylari = ocrAdaylarUret(hamMetin);
+    const tumAdaylar = [...kodAdaylari];
+    if (hamMetin && !tumAdaylar.includes(hamMetin)) tumAdaylar.push(hamMetin);
+
+    if (!adayKutu) return;
+    if (tumAdaylar.length === 0) {
+      adayKutu.innerHTML = '<span style="color:#999">Okunamadı, elle yazın.</span>';
+      return;
+    }
+    adayKutu.innerHTML = tumAdaylar.map(a =>
+      `<div class="chip" onclick="document.getElementById('form-oda-no').value='${_escAttr(a).replace(/'/g, "\\'")}'">${_esc(a)}</div>`
+    ).join('');
   } catch (e) {
-    document.getElementById('finding-manual').value = 'OCR hatası: ' + e.message;
+    if (adayKutu) adayKutu.innerHTML = `<span style="color:#e74c3c">OCR hatası: ${_esc(e.message)}</span>`;
   }
+}
+
+// ─── SES KAYDI (bulgu notu — tamamen offline, MediaRecorder) ─
+async function toggleSesKaydi() {
+  const btn = document.getElementById('btn-ses-kaydi');
+  if (sesRecorder && sesRecorder.state === 'recording') {
+    sesRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    sesChunks = [];
+    sesRecorder = new MediaRecorder(stream);
+    const baslangic = Date.now();
+    sesRecorder.ondataavailable = e => { if (e.data.size > 0) sesChunks.push(e.data); };
+    sesRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(sesChunks, { type: 'audio/webm' });
+      aktifSesTaslak = { blob, sure: Math.round((Date.now() - baslangic) / 1000) };
+      if (btn) {
+        btn.textContent = `🎤 Ses Notu Hazır (${aktifSesTaslak.sure}sn) — Değiştirmek için bas`;
+        btn.style.background = '#27ae60';
+        btn.style.color = 'white';
+      }
+    };
+    sesRecorder.start();
+    if (btn) {
+      btn.textContent = '⏺ Kaydediliyor… (durdurmak için bas)';
+      btn.style.background = '#e74c3c';
+      btn.style.color = 'white';
+    }
+  } catch (e) {
+    alert('Mikrofon erişimi reddedildi: ' + e.message);
+  }
+}
+if (typeof window !== 'undefined') window.toggleSesKaydi = toggleSesKaydi;
+
+function _sesButonSifirla() {
+  const btn = document.getElementById('btn-ses-kaydi');
+  if (!btn) return;
+  btn.textContent = '🎤 Ses Notu Kaydet';
+  btn.style.background = '#eee';
+  btn.style.color = '#333';
 }
 
 // Dışarıdan bir dosya/blob/dataURL alıp kayda hazır sıkıştırılmış veri üretir
@@ -843,21 +1116,28 @@ if (typeof window !== 'undefined') window.fotoAlVeSikistir = fotoAlVeSikistir;
 async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
   const bulgular = await dbIndexTumu('bulgular', 'denetimId', denetim.id);
   const dosyalar = [];
-  const fotoGirdileri = [];
+  const sesDosyalari = [];
+  const ekGirdiler = [];
 
   const tespitler = bulgular.map(b => {
-    let fotoAdi = null;
+    let fotoAdi = null, sesAdi = null;
     if (b.foto) {
       fotoAdi = `${denetim.id}_${b.id}.jpg`;
       dosyalar.push(fotoAdi);
-      fotoGirdileri.push({ ad: `fotolar/${fotoAdi}`, veri: b.foto });
+      ekGirdiler.push({ ad: `fotolar/${fotoAdi}`, veri: b.foto });
+    }
+    if (b.ses) {
+      sesAdi = `${denetim.id}_${b.id}.webm`;
+      sesDosyalari.push(sesAdi);
+      ekGirdiler.push({ ad: `sesler/${sesAdi}`, veri: b.ses });
     }
     return {
-      alanTipi: denetim.kat || 'genel',
+      alanTipi: denetim.alanTipi || denetim.kat || 'genel',
       konumKodu: `${denetim.bina}/${denetim.kat}/${denetim.oda}`,
       not: b.metin,
       hayatiRisk: !!b.hayatiRisk,
       fotografsiz: !b.foto,
+      sesNotu: sesAdi,
       checklist: null,
       zaman: b.zaman,
       fotolar: fotoAdi ? [fotoAdi] : []
@@ -877,12 +1157,13 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       birimAdi,
       kat: denetim.kat,
       oda: denetim.oda,
+      odaNo: denetim.odaNo || '',
       sorumlu: denetim.sorumlu
     },
     tespitler,
-    manifest: { dosyalar, fotoSayisi: dosyalar.length }
+    manifest: { dosyalar, fotoSayisi: dosyalar.length, sesDosyalari, sesSayisi: sesDosyalari.length }
   };
-  return { paket, fotoGirdileri };
+  return { paket, fotoGirdileri: ekGirdiler };
 }
 
 async function _zipVeIndir(denetimler, dosyaAdiOnEki) {

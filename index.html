@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>İSG Saha Asistanı v0.5.0</title>
+    <title>İSG Saha Asistanı v0.6.0</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -118,7 +118,7 @@
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
         <div class="header">
-            <h3>İSG Saha Asistanı <span class="version-badge">v0.5.0</span></h3>
+            <h3>İSG Saha Asistanı <span class="version-badge">v0.6.0</span></h3>
             <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
                 <i class="fas fa-sync"></i>
             </button>
@@ -205,10 +205,14 @@
 
         <div class="card">
             <h3>Bulgu Ekle</h3>
-            <button class="btn btn-primary" onclick="openOCR()" style="margin-bottom:15px; background: #8e44ad;">
-                <i class="fas fa-camera"></i> Çek-Onayla (OCR)
+            <button class="btn btn-primary" onclick="openOCR('kanit')" style="margin-bottom:10px; background: #8e44ad;">
+                <i class="fas fa-camera"></i> Çek-Onayla (Kanıt Fotoğrafı)
             </button>
-            <textarea id="finding-manual" placeholder="Bulguyu buraya yazın veya OCR kullanın..." rows="3"></textarea>
+            <div id="foto-onizleme"></div>
+            <button id="btn-ses-kaydi" class="btn" style="margin-top:10px; background:#eee; color:#333;" onclick="toggleSesKaydi()">
+                🎤 Ses Notu Kaydet
+            </button>
+            <textarea id="finding-manual" placeholder="Bulguyu buraya yazın (opsiyonel — foto/ses de tek başına yeterli)..." rows="3" style="margin-top:10px"></textarea>
             <div class="chip-group" style="margin-top:15px">
                 <div class="chip" onclick="addQuickFinding('Yangın Tüpü Eksik')">Tüp Eksik</div>
                 <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
@@ -238,6 +242,18 @@
             <div style="display:flex; gap:10px; margin-top:20px">
                 <button class="btn btn-outline" onclick="closeModal()">Vazgeç</button>
                 <button id="modal-action-btn" class="btn btn-danger">Evet, Sil</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FORM MODAL (Yeni Birim / Yeni Oda gibi veri girişli işlemler) -->
+    <div id="modal-form" class="modal">
+        <div class="modal-content" style="max-width:420px; text-align:left; max-height:85vh; overflow-y:auto;">
+            <h3 id="form-title">Başlık</h3>
+            <div id="form-body"></div>
+            <div style="display:flex; gap:10px; margin-top:20px">
+                <button class="btn btn-outline" onclick="closeFormModal()">Vazgeç</button>
+                <button id="form-action-btn" class="btn btn-primary">Kaydet</button>
             </div>
         </div>
     </div>
