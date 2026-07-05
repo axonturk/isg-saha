@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>İSG Saha Asistanı v0.10.0</title>
+    <title>İSG Saha Asistanı v0.11.0</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -118,7 +118,7 @@
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
         <div class="header">
-            <h3>İSG Saha Asistanı <span class="version-badge">v0.10.0</span></h3>
+            <h3>İSG Saha Asistanı <span class="version-badge">v0.11.0</span></h3>
             <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
                 <i class="fas fa-sync"></i>
             </button>
@@ -143,11 +143,22 @@
                     <a href="#" onclick="event.preventDefault(); birimleriYonetAc()" style="font-size:0.8rem; color:var(--accent);">Birimleri Yönet</a>
                 </label>
                 <div style="display:flex; gap:8px;">
-                    <select id="setup-birim" style="flex:1" disabled>
+                    <select id="setup-birim" style="flex:1" disabled onchange="_birimSecimDegisti()">
                         <option value="">Önce kurum seçin</option>
                     </select>
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniBirimEkle()">+</button>
                 </div>
+            </div>
+
+            <div class="input-group">
+                <label style="display:flex; justify-content:space-between;">
+                    <span>Denetim Türü</span>
+                    <a href="#" onclick="event.preventDefault(); turEkle()" style="font-size:0.8rem; color:var(--accent);">+ Ekle</a>
+                </label>
+                <select id="setup-tur" onchange="_turDegisti()">
+                    <option value="saha">Saha Denetimi</option>
+                    <option value="risk">Risk Analizi</option>
+                </select>
             </div>
 
             <div class="input-group">
@@ -183,13 +194,7 @@
         </div>
 
         <div class="card">
-            <label>Denetim Türü</label>
-            <div class="chip-group" id="kat-alan-tur-chips">
-                <div class="chip active" data-tur="saha" onclick="_turSec(this)">Saha Denetimi</div>
-                <div class="chip" data-tur="risk" onclick="_turSec(this)">Risk Analizi</div>
-            </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
                 <label style="margin-bottom:0;">Kat Seçin</label>
                 <a href="#" onclick="_katEkle(event)" style="font-size:0.85rem; color:var(--accent);">+ Kat Ekle</a>
             </div>
@@ -265,10 +270,6 @@
 
         <h3>Bu Odadaki Bulgular</h3>
         <div id="findings-list"></div>
-
-        <button class="btn btn-outline" style="margin-top:20px" onclick="nextRoom()">
-            Sonraki Oda (Otomatik Artır) <i class="fas fa-chevron-right"></i>
-        </button>
     </div>
 
     <!-- MODALLAR -->

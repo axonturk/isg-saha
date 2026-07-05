@@ -7,9 +7,9 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.10.0';
+const APP_VERSION = 'v0.11.0';
 const DB_NAME = 'isgSahaDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;   // v2: 'ayarlar' deposu eklendi (özel Denetim Türü listesi için)
 
 // ─── STATE ───────────────────────────────────────────────────
 let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
@@ -106,15 +106,27 @@ const PROFILLER = {
   yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] }
 };
 
-// Konteyner tiplerde (Rektörlük, Enstitü) hazır Daire Başkanlığı önerileri —
-// "+ Özel" ile listede olmayanlar da eklenebilir.
-const DAIRE_BASKANLIKLARI = [
-  'Strateji Geliştirme Daire Başkanlığı', 'Bilgi İşlem Daire Başkanlığı',
-  'Yapı İşleri ve Teknik Daire Başkanlığı', 'Personel Daire Başkanlığı',
-  'Öğrenci İşleri Daire Başkanlığı', 'İdari ve Mali İşler Daire Başkanlığı',
-  'Sağlık Kültür ve Spor Daire Başkanlığı', 'Kütüphane ve Dokümantasyon Daire Başkanlığı',
-  'Hukuk Müşavirliği', 'Genel Sekreterlik'
-];
+// Konteyner tiplerde (Rektörlük, Enstitü) hazır alt-birim önerileri — HER
+// TİP KENDİ LİSTESİNİ KULLANIR (ilk sürümde ikisi de aynı Daire Başkanlığı
+// listesini paylaşıyordu, Enstitü için anlamsızdı — düzeltildi).
+// "+ Özel" ile listede olmayanlar her zaman eklenebilir.
+const ALT_BIRIM_LISTELERI = {
+  rektorluk: [
+    'Strateji Geliştirme Daire Başkanlığı', 'Bilgi İşlem Daire Başkanlığı',
+    'Yapı İşleri ve Teknik Daire Başkanlığı', 'Personel Daire Başkanlığı',
+    'Öğrenci İşleri Daire Başkanlığı', 'İdari ve Mali İşler Daire Başkanlığı',
+    'Sağlık Kültür ve Spor Daire Başkanlığı', 'Kütüphane ve Dokümantasyon Daire Başkanlığı',
+    'Hukuk Müşavirliği', 'Genel Sekreterlik'
+  ],
+  enstitu: [
+    'Fen Bilimleri Enstitüsü', 'Sosyal Bilimler Enstitüsü', 'Sağlık Bilimleri Enstitüsü',
+    'Eğitim Bilimleri Enstitüsü'
+  ]
+};
+const ALT_BIRIM_ETIKETI = {
+  rektorluk: 'Alt Birim (Daire Başkanlığı)',
+  enstitu: 'Alt Birim (Enstitü)'
+};
 const KONTEYNER_TIPLER = new Set(Object.entries(PROFILLER).filter(([, v]) => v.konteyner).map(([k]) => k));
 
 function _birimAlanTipleri(birim) {
@@ -202,6 +214,9 @@ function openDB() {
       if (!db.objectStoreNames.contains('bulgular')) {
         const s = db.createObjectStore('bulgular', { keyPath: 'id' });
         s.createIndex('denetimId', 'denetimId');
+      }
+      if (!db.objectStoreNames.contains('ayarlar')) {
+        db.createObjectStore('ayarlar', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -525,6 +540,7 @@ window.addEventListener('load', () => {
   showScreen('setup');
   kurumlariYukle();
   loadInspectionsList();
+  _turListesiYukle();
   if (typeof history !== 'undefined' && history.replaceState) {
     history.replaceState({ ekran: 'kurulum' }, '');
   }
@@ -598,6 +614,7 @@ function _setupEkraninaGec() {
   showScreen('setup');
   kurumlariYukle();
   loadInspectionsList();
+  _turListesiYukle();
 }
 
 // ─── KURUM / BİRİM ───────────────────────────────────────────
@@ -622,10 +639,30 @@ async function birimleriYukle() {
   sel.disabled = false;
   const secili = sel.value;
   const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
+
+  // Ön tanımlı tip kısayolları: seçilince "Yeni Birim" formu o tiple önceden
+  // doldurulmuş açılır (bkz. _birimSecimDegisti). Gerçek birim kaydı değil.
+  const yeniKisayollari = Object.entries(PROFILLER)
+    .map(([k, v]) => `<option value="YENI:${k}">+ Yeni: ${_esc(v.ad)}</option>`).join('');
+
   sel.innerHTML = '<option value="">Seçiniz...</option>' +
-    birimler.map(b => `<option value="${b.id}">${_esc(b.ad)}</option>`).join('');
+    (birimler.length
+      ? `<optgroup label="Mevcut Birimler">${birimler.map(b => `<option value="${b.id}">${_esc(b.ad)}</option>`).join('')}</optgroup>`
+      : '') +
+    `<optgroup label="Yeni Birim Ekle">${yeniKisayollari}</optgroup>`;
   if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
 }
+
+async function _birimSecimDegisti() {
+  const sel = document.getElementById('setup-birim');
+  const deger = sel.value;
+  if (deger.startsWith('YENI:')) {
+    const tip = deger.slice(5);
+    sel.value = '';
+    await yeniBirimEkle(tip);
+  }
+}
+if (typeof window !== 'undefined') window._birimSecimDegisti = _birimSecimDegisti;
 
 async function yeniKurumEkle() {
   const ad = prompt('Kurum adı (örn: KMÜ Rektörlüğü, Veterinerlik Fakültesi):');
@@ -637,7 +674,7 @@ async function yeniKurumEkle() {
   await birimleriYukle();
 }
 
-async function yeniBirimEkle() {
+async function yeniBirimEkle(onceTip) {
   const kurumId = document.getElementById('setup-kurum').value;
   if (!kurumId) { alert('Önce bir kurum seçin.'); return; }
 
@@ -654,7 +691,7 @@ async function yeniBirimEkle() {
       <label>Bu birim nedir?</label>
       <div class="chip-group" id="form-birim-konteyner-chips">
         <div class="chip" data-secim="kendisi" onclick="_birimFormKonteynerSec(this)">Kendisi (bütün bina)</div>
-        <div class="chip" data-secim="alt" onclick="_birimFormKonteynerSec(this)">Alt Birim (Daire Başkanlığı)</div>
+        <div class="chip" data-secim="alt" id="form-birim-alt-chip" onclick="_birimFormKonteynerSec(this)">Alt Birim</div>
       </div>
       <div class="chip-group" id="form-birim-daire-chips" style="display:none; margin-top:8px;"></div>
     </div>
@@ -681,6 +718,11 @@ async function yeniBirimEkle() {
     await birimleriYukle();
     document.getElementById('setup-birim').value = birim.id;
   }, 'Birimi Oluştur');
+
+  if (onceTip) {
+    document.getElementById('form-birim-profil').value = onceTip;
+    _birimFormTipDegisti();
+  }
 }
 
 // Rektörlük/Enstitü gibi "konteyner" tipler seçilince Ad kutusu gizlenir,
@@ -699,6 +741,8 @@ function _birimFormTipDegisti() {
     konteynerWrap.style.display = 'block';
     adWrap.style.display = 'none';
     document.getElementById('form-birim-ad').value = '';
+    const altChip = document.getElementById('form-birim-alt-chip');
+    if (altChip) altChip.textContent = ALT_BIRIM_ETIKETI[tip] || 'Alt Birim';
   } else {
     konteynerWrap.style.display = 'none';
     adWrap.style.display = 'block';
@@ -723,7 +767,8 @@ function _birimFormKonteynerSec(el) {
   } else {
     adWrap.style.display = 'none';
     daireChips.style.display = 'flex';
-    daireChips.innerHTML = DAIRE_BASKANLIKLARI.map(d =>
+    const liste = ALT_BIRIM_LISTELERI[tip] || [];
+    daireChips.innerHTML = liste.map(d =>
       `<div class="chip" onclick="_birimFormDaireSec(this)">${_esc(d)}</div>`
     ).join('') + `<div class="chip" onclick="_birimFormOzelDaireEkle()" style="border:1px dashed #999">+ Özel</div>`;
   }
@@ -761,9 +806,6 @@ async function ekranKatAlanaGec() {
   const birim = await dbGetir('birimler', birimId);
   document.getElementById('kat-alan-baslik').textContent = `${kurum ? kurum.ad : ''} / ${birim ? birim.ad : ''}`;
 
-  secilenTur = 'saha';
-  document.querySelectorAll('#kat-alan-tur-chips .chip').forEach(c => c.classList.toggle('active', c.dataset.tur === 'saha'));
-
   const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
   await _katChipleriCiz(katlar, katlar[0]);
 
@@ -772,19 +814,54 @@ async function ekranKatAlanaGec() {
 }
 if (typeof window !== 'undefined') window.ekranKatAlanaGec = ekranKatAlanaGec;
 
+// ─── DENETİM TÜRÜ (Ana ekranda — Sorumlu'nun üstünde) ────────
 // Masaüstü zaten "tur" alanına göre Risk Analizi / Saha Denetimi ayırıyordu
 // (main.py'de hazırdı) — PWA bugüne kadar hep sabit "saha" gönderiyordu.
-function _turSec(el) {
-  document.querySelectorAll('#kat-alan-tur-chips .chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  secilenTur = el.dataset.tur;
+// Dropdown + "+ Ekle" ile genişletilebilir (ör. ileride ADEP eklenebilir).
+const TUR_HAZIR_LISTESI = [
+  { deger: 'saha', ad: 'Saha Denetimi' },
+  { deger: 'risk', ad: 'Risk Analizi' }
+];
+
+async function _turListesiYukle() {
+  const sel = document.getElementById('setup-tur');
+  if (!sel) return;
+  const ayar = await dbGetir('ayarlar', 'ozelTurler');
+  const ozelTurler = (ayar && ayar.degerler) || [];
+  const secili = sel.value || secilenTur;
+
+  sel.innerHTML = TUR_HAZIR_LISTESI.map(t => `<option value="${t.deger}">${_esc(t.ad)}</option>`).join('') +
+    ozelTurler.map(ad => `<option value="ozel:${_escAttr(ad)}">${_esc(ad)}</option>`).join('');
+  if (secili && [...sel.options].some(o => o.value === secili)) sel.value = secili;
+  secilenTur = sel.value;
 }
+
+function _turDegisti() {
+  secilenTur = document.getElementById('setup-tur').value;
+}
+if (typeof window !== 'undefined') window._turDegisti = _turDegisti;
+
+async function turEkle() {
+  const ad = prompt('Yeni denetim türü adı (örn: ADEP):');
+  if (!ad || !ad.trim()) return;
+  const ayar = (await dbGetir('ayarlar', 'ozelTurler')) || { id: 'ozelTurler', degerler: [] };
+  if (!ayar.degerler.includes(ad.trim())) ayar.degerler.push(ad.trim());
+  await dbGuncelle('ayarlar', ayar);
+  await _turListesiYukle();
+  document.getElementById('setup-tur').value = `ozel:${ad.trim()}`;
+  secilenTur = document.getElementById('setup-tur').value;
+}
+if (typeof window !== 'undefined') window.turEkle = turEkle;
 if (typeof window !== 'undefined') window._turSec = _turSec;
 
 // Kat çiplerini çizer + seçili katı ayarlar. Hem ilk açılışta hem "+ Kat Ekle"
 // sonrası yeniden çizimde kullanılır (tek kaynak, tekrar yok).
+// Not: Ilk surumde bu badge 16x16px'ti — gercek telefonda parmakla isabet
+// ettirmek zordu, chip'in kendisine dokunulmus gibi davraniyordu (chip'in
+// onclick'i tetikleniyordu). Dokunma hedefi buyutuldu (28x28), kirmizi renkle
+// ayristirildi, hem click hem touchstart'ta stopPropagation cagriliyor.
 function _silBadgeHtml(onclickJs) {
-  return `<span onclick="event.stopPropagation(); ${onclickJs}" style="margin-left:6px; background:rgba(0,0,0,0.15); border-radius:50%; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; font-size:0.7rem; cursor:pointer;">✕</span>`;
+  return `<span onclick="event.stopPropagation(); ${onclickJs}" ontouchstart="event.stopPropagation();" style="margin-left:6px; background:#e74c3c; color:white; border-radius:50%; width:28px; height:28px; min-width:28px; display:inline-flex; align-items:center; justify-content:center; font-size:0.85rem; cursor:pointer; flex-shrink:0;">✕</span>`;
 }
 
 async function _katChipleriCiz(katlar, secilecekKat) {
@@ -884,6 +961,15 @@ async function _katAlanMevcutOdaSec(odaId, el) {
   const birim = await dbGetir('birimler', birimId);
   const oda = (birim.odalar || []).find(o => o.id === odaId);
   if (!oda) return;
+
+  // Kendini onarma: v0.8 öncesi odalarda alanTipi/no ayrımı yoktu, sadece
+  // "ad" vardı. Şimdi kullanınca kalıcı olarak tamamlanır — bir daha sorun çıkmaz.
+  if (oda.alanTipi === undefined) {
+    oda.alanTipi = oda.ad;
+    oda.no = oda.no || '';
+    await dbGuncelle('birimler', birim);
+  }
+
   secilenMevcutOdaId = oda.id;
   secilenAlanTipi = oda.alanTipi;
   document.getElementById('kat-alan-oda-no').value = oda.no || '';
@@ -1131,34 +1217,6 @@ async function renderFindings() {
   }).join('');
 }
 
-// ─── SONRAKI ODA (birim altındaki kalıcı oda listesinde ilerler) ─
-async function nextRoom() {
-  if (!currentSession) return;
-
-  const birim = await dbGetir('birimler', currentSession.birimId);
-  const odalar = _birimOdalari(birim, currentSession.kat);
-  const suankiIndeks = odalar.findIndex(o => o.id === currentSession.odaId);
-  const sonraki = suankiIndeks >= 0 ? odalar[suankiIndeks + 1] : null;
-
-  if (!sonraki) {
-    alert('Bu kattaki son odadasınız. Yeni oda eklemek için Kurulum ekranındaki + butonunu kullanın.');
-    return;
-  }
-
-  currentSession.odaId = sonraki.id;
-  currentSession.oda = sonraki.ad;
-  currentSession.alanTipi = sonraki.alanTipi;
-  currentSession.odaNo = sonraki.no;
-  currentSession.id = uuid();
-  currentSession.baslangic = new Date().toISOString();
-  currentSession.guncelleme = currentSession.baslangic;
-  await dbEkle('denetimler', currentSession);   // yeni oda kaydı HEMEN kalıcı yazılır
-
-  sessionBulgular = [];
-  updateLocationDisplay();
-  await renderFindings();
-}
-
 // ─── GEÇMİŞ LİSTESİ ─────────────────────────────────────────
 // Geçmiş Kayıtlar birim başlığı altında gruplanır (düz liste yerine) —
 // aynı birimde çok sayıda oda ziyareti birikince okunaklı kalsın diye.
@@ -1209,9 +1267,15 @@ async function loadInspectionsList() {
 
 // Genel amaçlı yana-kaydırarak-silme: dar chip'lerde pratik değil ama geniş
 // liste satırlarında (Geçmiş Kayıtlar, Birim Yönet) doğal ve hızlı çalışır.
+// NOT: Ilk surumde `touch-action` hic ayarlanmamisti — tarayici yatay
+// suruklemeyi kendi sayfa kaydirma hareketi saniyor, JS'in touchmove'u hicbir
+// zaman anlamli bir deger almiyordu (parmakla kaydirinca "hicbir sey olmuyor"
+// hissi buradan geliyordu). `pan-y` ile dikey kaydirma tarayiciya birakilir,
+// yatay hareket JS'e ayrilir.
 function _swipeAyarla(el, onSil) {
   let basX = 0, guncelX = 0, surukleniyor = false;
   const ESIK = -70;
+  el.style.touchAction = 'pan-y';
 
   const basla = (x) => { basX = x; surukleniyor = true; el.style.transition = 'none'; };
   const tasi = (x) => {
