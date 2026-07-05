@@ -7,7 +7,7 @@
 //             (harici kütüphane yok — dahili store-only ZIP yazıcı).
 // ============================================================
 
-const APP_VERSION = 'v0.8.0';
+const APP_VERSION = 'v0.9.0';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 1;
 
@@ -19,8 +19,8 @@ let modalCallback     = null;
 let formConfirmCallback = null;
 let ocrStream         = null;
 let kameraModu        = 'kanit';  // 'kanit' (bulgu fotoğrafı) | 'etiket' (oda etiketi okuma)
-let aktifFotoTaslak   = null;   // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış foto
-let aktifSesTaslak    = null;   // ses kaydından gelen {blob, sure}
+let aktifFotolarTaslak = [];    // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış fotolar (sınırsız)
+let aktifSeslerTaslak  = [];    // ses kayıtlarından gelen [{blob, sure}, ...] (sınırsız)
 let hayatiRiskAktif   = false;
 let sesRecorder       = null;
 let sesChunks         = [];
@@ -534,15 +534,6 @@ function _ekraniPushEt(ekranAdi) {
   }
 }
 
-// Kat-Alan ekranından İnceleme'ye geçişte kullanılır: 'kat-alan' seviyesini
-// yığına EKLEMEK yerine YERİNE koyar — böylece İnceleme'den geri tuşu
-// doğrudan Kurulum'a döner (Kat-Alan adımı atlanır, tekrar tekrar seçim
-// yapılmaz), tasarım kararına uygun.
-function _ekraniDegistirEt(ekranAdi) {
-  if (typeof history === 'undefined' || !history.replaceState) return;
-  history.replaceState({ ekran: ekranAdi }, '');
-}
-
 function _geriTikla(oncekiEkranId) {
   const oncekiAktifMi = document.getElementById(oncekiEkranId).classList.contains('active');
   if (typeof history !== 'undefined' && history.back) history.back();
@@ -554,7 +545,30 @@ function _geriTikla(oncekiEkranId) {
   }, 250);
 }
 
+function _modalAcikMi() {
+  return document.getElementById('modal-confirm').style.display === 'flex' ||
+         document.getElementById('modal-form').style.display === 'flex';
+}
+
+// Modal açık halde geri tuşuna basılırsa: sadece modalı kapat, ekranı DEĞİŞTİRME.
+// (Modal aç/kapat kendi history seviyesini kullanır — bkz. _modalHistoryAc/Kapat.)
+function _modalHistoryAc() {
+  if (typeof history === 'undefined' || !history.pushState) return;
+  const mevcutEkran = (history.state && history.state.ekran) || 'kurulum';
+  history.pushState({ ekran: mevcutEkran, modal: true }, '');
+}
+
+function _modalHistoryKapat() {
+  if (typeof history !== 'undefined' && history.state && history.state.modal && history.back) {
+    history.back();
+  }
+}
+
 window.addEventListener('popstate', (e) => {
+  if (_modalAcikMi()) {
+    closeModal();
+    closeFormModal();
+  }
   const ekran = e.state && e.state.ekran;
   if (ekran === 'kat-alan') {
     showScreen('kat-alan');
@@ -661,11 +675,21 @@ async function ekranKatAlanaGec() {
   document.getElementById('kat-alan-baslik').textContent = `${kurum ? kurum.ad : ''} / ${birim ? birim.ad : ''}`;
 
   const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
+  await _katChipleriCiz(katlar, katlar[0]);
+
+  showScreen('kat-alan');
+  _ekraniPushEt('kat-alan');
+}
+if (typeof window !== 'undefined') window.ekranKatAlanaGec = ekranKatAlanaGec;
+
+// Kat çiplerini çizer + seçili katı ayarlar. Hem ilk açılışta hem "+ Kat Ekle"
+// sonrası yeniden çizimde kullanılır (tek kaynak, tekrar yok).
+async function _katChipleriCiz(katlar, secilecekKat) {
   const chips = document.getElementById('kat-alan-kat-chips');
   chips.innerHTML = '';
-  katlar.forEach((kat, i) => {
+  katlar.forEach(kat => {
     const c = document.createElement('div');
-    c.className = 'chip' + (i === 0 ? ' active' : '');
+    c.className = 'chip' + (kat === secilecekKat ? ' active' : '');
     c.textContent = kat;
     c.onclick = () => {
       chips.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
@@ -679,7 +703,7 @@ async function ekranKatAlanaGec() {
     };
     chips.appendChild(c);
   });
-  secilenKat = katlar[0];
+  secilenKat = secilecekKat;
   secilenAlanTipi = null;
   secilenMevcutOdaId = null;
   document.getElementById('kat-alan-oda-no').value = '';
@@ -687,11 +711,21 @@ async function ekranKatAlanaGec() {
 
   await _katAlanMevcutOdalariGoster();
   await _katAlanAlanTipleriGoster();
-
-  showScreen('kat-alan');
-  _ekraniPushEt('kat-alan');
 }
-if (typeof window !== 'undefined') window.ekranKatAlanaGec = ekranKatAlanaGec;
+
+async function _katEkle(e) {
+  e.preventDefault();
+  const ad = prompt('Yeni kat adı (örn: Bodrum, Çatı, Asma Kat):');
+  if (!ad || !ad.trim()) return;
+  const birimId = document.getElementById('setup-birim').value;
+  const birim = await dbGetir('birimler', birimId);
+  if (!birim.katlar) birim.katlar = ['Zemin'];
+  if (birim.katlar.includes(ad.trim())) { alert('Bu kat zaten var.'); return; }
+  birim.katlar.push(ad.trim());
+  await dbGuncelle('birimler', birim);
+  await _katChipleriCiz(birim.katlar, ad.trim());
+}
+if (typeof window !== 'undefined') window._katEkle = _katEkle;
 
 async function _katAlanMevcutOdalariGoster() {
   const birimId = document.getElementById('setup-birim').value;
@@ -719,18 +753,19 @@ async function _katAlanMevcutOdaSec(odaId, el) {
   document.getElementById('kat-alan-oda-no').value = oda.no || '';
   document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
   if (el) el.classList.add('active');
-  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('#kat-alan-hizli-chips .chip').forEach(c => c.classList.remove('active'));
   document.getElementById('kat-alan-alan-dropdown').value = oda.alanTipi;
 }
 if (typeof window !== 'undefined') window._katAlanMevcutOdaSec = _katAlanMevcutOdaSec;
 
+// Alan Tipi seçimi SADECE iki yoldan olur: 6 hızlı chip (görünür) + tam liste
+// dropdown (aynı verinin ikinci bir chip-grid'i YOK — fazlalıktı, kaldırıldı).
 async function _katAlanAlanTipleriGoster() {
   const birimId = document.getElementById('setup-birim').value;
   const birim = await dbGetir('birimler', birimId);
   const hizli = _birimHizliAlanlar(birim);
   const ozel = (birim && birim.ozelAlanlar) || [];
   const tumAlanlar = _birimAlanTipleri(birim);
-  const diger = tumAlanlar.filter(a => !hizli.includes(a));
 
   const chipHtml = a => `<div class="chip" data-alan="${_escAttr(a)}" onclick="_katAlanChipSec(this)">${_esc(a)}</div>`;
   document.getElementById('kat-alan-hizli-chips').innerHTML =
@@ -740,12 +775,10 @@ async function _katAlanAlanTipleriGoster() {
   const sel = document.getElementById('kat-alan-alan-dropdown');
   sel.innerHTML = '<option value="">— Açılır listeden seçin (tüm bölümler) —</option>' +
     tumAlanlar.map(a => `<option value="${_escAttr(a)}">${_esc(a)}</option>`).join('');
-  document.getElementById('kat-alan-diger-alanlar').innerHTML = diger.map(chipHtml).join('');
 }
 
 function _katAlanChipSec(el) {
-  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip')
-    .forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('#kat-alan-hizli-chips .chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
   secilenAlanTipi = el.dataset.alan;
   secilenMevcutOdaId = null;
@@ -759,7 +792,7 @@ function _katAlanDropdownDegisti() {
   if (!deger) return;
   secilenAlanTipi = deger;
   secilenMevcutOdaId = null;
-  document.querySelectorAll('#kat-alan-hizli-chips .chip, #kat-alan-diger-alanlar .chip').forEach(c => {
+  document.querySelectorAll('#kat-alan-hizli-chips .chip').forEach(c => {
     c.classList.toggle('active', c.dataset.alan === deger);
   });
   document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
@@ -836,7 +869,7 @@ async function startInspection() {
   sessionBulgular = [];
   updateLocationDisplay();
   showScreen('inspection');
-  _ekraniDegistirEt('inceleme');
+  _ekraniPushEt('inceleme');   // Kat-Alan ekranı yığında kalır — geri tuşu ORAYA döner (Kurulum'a atlamaz)
   startTimer();
   await renderFindings();
 }
@@ -873,10 +906,10 @@ function _hayatiRiskButonGuncelle() {
   btn.textContent = hayatiRiskAktif ? '⚠ Hayati Risk: AÇIK' : '⚠ Hayati Risk İşaretle';
 }
 
-// ─── BULGU KAYDET ────────────────────────────────────────────
+// ─── BULGU KAYDET (çoklu fotoğraf + çoklu ses, sınırsız) ─────
 async function saveFinding() {
   const text = document.getElementById('finding-manual').value.trim();
-  if (!text && !aktifFotoTaslak && !aktifSesTaslak) {
+  if (!text && aktifFotolarTaslak.length === 0 && aktifSeslerTaslak.length === 0) {
     alert('Bulgu için metin, fotoğraf veya ses notundan en az biri gerekli.');
     return;
   }
@@ -885,12 +918,10 @@ async function saveFinding() {
     id: uuid(),
     denetimId: currentSession.id,
     metin: text,
-    foto: aktifFotoTaslak ? aktifFotoTaslak.blob : null,
-    fotoBoyut: aktifFotoTaslak ? aktifFotoTaslak.sikistirilmisBoyut : null,
-    fotoGenislik: aktifFotoTaslak ? aktifFotoTaslak.genislik : null,
-    fotoYukseklik: aktifFotoTaslak ? aktifFotoTaslak.yukseklik : null,
-    ses: aktifSesTaslak ? aktifSesTaslak.blob : null,
-    sesSure: aktifSesTaslak ? aktifSesTaslak.sure : null,
+    fotolar: aktifFotolarTaslak.map(f => ({
+      blob: f.blob, boyut: f.sikistirilmisBoyut, genislik: f.genislik, yukseklik: f.yukseklik
+    })),
+    sesler: aktifSeslerTaslak.map(s => ({ blob: s.blob, sure: s.sure })),
     hayatiRisk: hayatiRiskAktif,
     zaman: new Date().toISOString()
   };
@@ -898,13 +929,13 @@ async function saveFinding() {
   currentSession.guncelleme = bulgu.zaman;
   await dbGuncelle('denetimler', currentSession);
 
-  aktifFotoTaslak = null;
-  aktifSesTaslak = null;
+  aktifFotolarTaslak = [];
+  aktifSeslerTaslak = [];
   hayatiRiskAktif = false;
   _hayatiRiskButonGuncelle();
   _sesButonSifirla();
-  const onizleme = document.getElementById('foto-onizleme');
-  if (onizleme) onizleme.innerHTML = '';
+  _fotoOnizlemeGoster();
+  _sesOnizlemeGoster();
   document.getElementById('finding-manual').value = '';
   await renderFindings();
 }
@@ -923,18 +954,30 @@ async function renderFindings() {
     list.innerHTML = '<p style="color:#999">Henüz bulgu eklenmedi.</p>';
     return;
   }
-  list.innerHTML = sessionBulgular.map(f => `
+  list.innerHTML = sessionBulgular.map(f => {
+    const fotolar = f.fotolar || [];
+    const sesler = f.sesler || [];
+    return `
     <div class="finding-item"${f.hayatiRisk ? ' style="border-left-color:#e74c3c"' : ''}>
       <div class="finding-meta">${new Date(f.zaman).toLocaleTimeString('tr-TR')}
-        ${f.foto ? ' 📷' : ''}${f.ses ? ' 🎤' : ''}${f.hayatiRisk ? ' ⚠ HAYATİ RİSK' : ''}</div>
+        ${fotolar.length ? ` 📷×${fotolar.length}` : ''}${sesler.length ? ` 🎤×${sesler.length}` : ''}${f.hayatiRisk ? ' ⚠ HAYATİ RİSK' : ''}</div>
       ${f.metin ? `<div>${_esc(f.metin)}</div>` : ''}
-      ${f.foto ? `<img src="${URL.createObjectURL(f.foto)}" style="max-width:100px;border-radius:6px;margin-top:6px;display:block">` : ''}
-      ${f.ses ? `<audio controls src="${URL.createObjectURL(f.ses)}" style="margin-top:6px;height:32px;max-width:220px"></audio>` : ''}
+      ${fotolar.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+        ${fotolar.map((foto, i) => `<div style="position:relative;">
+          <img src="${URL.createObjectURL(foto.blob)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;display:block">
+          <span style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);color:white;font-size:0.7rem;padding:1px 5px;border-radius:8px;">${i + 1}</span>
+        </div>`).join('')}
+      </div>` : ''}
+      ${sesler.length ? sesler.map((ses, i) => `
+        <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+          <span style="font-size:0.75rem; color:#666;">🎤${i + 1}</span>
+          <audio controls src="${URL.createObjectURL(ses.blob)}" style="height:32px;max-width:200px"></audio>
+        </div>`).join('') : ''}
       <button onclick="askDeleteFinding('${f.id}')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
         <i class="fas fa-times"></i>
       </button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ─── SONRAKI ODA (birim altındaki kalıcı oda listesinde ilerler) ─
@@ -966,6 +1009,8 @@ async function nextRoom() {
 }
 
 // ─── GEÇMİŞ LİSTESİ ─────────────────────────────────────────
+// Geçmiş Kayıtlar birim başlığı altında gruplanır (düz liste yerine) —
+// aynı birimde çok sayıda oda ziyareti birikince okunaklı kalsın diye.
 async function loadInspectionsList() {
   const denetimler = await dbTumu('denetimler');
   const list = document.getElementById('inspections-list');
@@ -974,20 +1019,37 @@ async function loadInspectionsList() {
     return;
   }
   denetimler.sort((a, b) => b.baslangic.localeCompare(a.baslangic));
-  const satirlar = await Promise.all(denetimler.map(async d => {
-    const bulgular = await dbIndexTumu('bulgular', 'denetimId', d.id);
+
+  const gruplar = new Map();   // birimId -> { birimAdi, kayitlar: [] }
+  for (const d of denetimler) {
+    const key = d.birimId || '?';
+    if (!gruplar.has(key)) gruplar.set(key, { birimAdi: d.bina || 'Bilinmeyen Birim', kayitlar: [] });
+    gruplar.get(key).kayitlar.push(d);
+  }
+
+  const gruplarHtml = await Promise.all([...gruplar.values()].map(async (grup) => {
+    const satirlar = await Promise.all(grup.kayitlar.map(async d => {
+      const bulgular = await dbIndexTumu('bulgular', 'denetimId', d.id);
+      return `
+      <div class="finding-item" style="cursor:pointer" onclick="resumeSession('${d.id}')">
+        <div class="finding-meta">${new Date(d.baslangic).toLocaleString('tr-TR')}</div>
+        <div class="finding-loc">${_esc(d.kat || '')} / Oda ${_esc(d.oda)}</div>
+        <div style="font-size:0.85rem;color:#666">${bulgular.length} bulgu</div>
+        <button onclick="event.stopPropagation(); askDeleteSession('${d.id}')"
+          style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>`;
+    }));
     return `
-    <div class="finding-item" style="cursor:pointer" onclick="resumeSession('${d.id}')">
-      <div class="finding-meta">${new Date(d.baslangic).toLocaleString('tr-TR')}</div>
-      <div class="finding-loc">${_esc(d.bina)} / ${_esc(d.kat || '')} / Oda ${_esc(d.oda)}</div>
-      <div style="font-size:0.85rem;color:#666">${bulgular.length} bulgu</div>
-      <button onclick="event.stopPropagation(); askDeleteSession('${d.id}')"
-        style="position:absolute;top:10px;right:10px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;">
-        <i class="fas fa-trash"></i>
-      </button>
-    </div>`;
+    <details class="card" style="margin-bottom:12px;" open>
+      <summary style="cursor:pointer; font-weight:bold; color:var(--primary);">
+        ${_esc(grup.birimAdi)} <span style="font-weight:normal; color:#999; font-size:0.85rem;">(${grup.kayitlar.length} kayıt)</span>
+      </summary>
+      <div style="margin-top:10px;">${satirlar.join('')}</div>
+    </details>`;
   }));
-  list.innerHTML = satirlar.join('');
+  list.innerHTML = gruplarHtml.join('');
 }
 
 async function resumeSession(id) {
@@ -1058,11 +1120,13 @@ function showModal(title, text, onConfirm, btnText = 'Onayla', btnClass = 'btn-p
   btn.className   = `btn ${btnClass}`;
   modalCallback   = onConfirm;
   document.getElementById('modal-confirm').style.display = 'flex';
+  _modalHistoryAc();
 }
 
 function closeModal() {
   document.getElementById('modal-confirm').style.display = 'none';
   modalCallback = null;
+  _modalHistoryKapat();
 }
 
 document.getElementById('modal-action-btn') &&
@@ -1080,11 +1144,13 @@ function showFormModal(title, bodyHtml, onConfirm, btnText = 'Kaydet') {
   btn.textContent = btnText;
   formConfirmCallback = onConfirm;
   document.getElementById('modal-form').style.display = 'flex';
+  _modalHistoryAc();
 }
 
 function closeFormModal() {
   document.getElementById('modal-form').style.display = 'none';
   formConfirmCallback = null;
+  _modalHistoryKapat();
 }
 if (typeof window !== 'undefined') window.closeFormModal = closeFormModal;
 
@@ -1133,22 +1199,39 @@ async function capturePhoto() {
 
   const imageData = canvas.toDataURL('image/jpeg', 0.95);
   const sonuc = await compressImage(imageData);
-  aktifFotoTaslak = sonuc;
+  aktifFotolarTaslak.push(sonuc);   // ÜZERİNE YAZMAZ — listeye eklenir, sınırsız
   console.log('[sıkıştırma] Kayda hazır foto:', boyutBiçimle(sonuc.sikistirilmisBoyut),
     sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');
-  _fotoOnizlemeGoster(sonuc);
+  _fotoOnizlemeGoster();
 }
 
-function _fotoOnizlemeGoster(sonuc) {
+// Bekleyen (henüz kaydedilmemiş) tüm fotoğrafları numaralı gösterir;
+// her birinin yanında ✕ ile kayıttan önce çıkarma imkânı var.
+function _fotoOnizlemeGoster() {
   const el = document.getElementById('foto-onizleme');
   if (!el) return;
-  const url = sonuc.blob ? URL.createObjectURL(sonuc.blob) : sonuc.dataUrl;
+  if (aktifFotolarTaslak.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML = `
-    <img src="${url}" style="max-width:120px;border-radius:8px;display:block;margin-top:8px">
+    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+      ${aktifFotolarTaslak.map((sonuc, i) => {
+        const url = sonuc.blob ? URL.createObjectURL(sonuc.blob) : sonuc.dataUrl;
+        return `<div style="position:relative;">
+          <img src="${url}" style="width:70px;height:70px;object-fit:cover;border-radius:6px;display:block">
+          <span style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.6);color:white;font-size:0.7rem;padding:1px 5px;border-radius:8px;">${i + 1}</span>
+          <button onclick="_fotoTaslakSil(${i})" style="position:absolute;top:-6px;right:-6px;background:#e74c3c;color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:0.75rem;cursor:pointer;">✕</button>
+        </div>`;
+      }).join('')}
+    </div>
     <div style="font-size:0.75rem;color:#27ae60;margin-top:4px">
-      📷 Fotoğraf hazır (${boyutBiçimle(sonuc.sikistirilmisBoyut)}) — Kaydet'e basınca bulguya eklenecek
+      📷 ${aktifFotolarTaslak.length} fotoğraf hazır — Kaydet'e basınca bulguya eklenecek
     </div>`;
 }
+
+function _fotoTaslakSil(index) {
+  aktifFotolarTaslak.splice(index, 1);
+  _fotoOnizlemeGoster();
+}
+if (typeof window !== 'undefined') window._fotoTaslakSil = _fotoTaslakSil;
 
 // Kapı/pano etiketi okuma: hem harf+rakam kodları (A101, Z-15) hem de
 // düz yazı etiketleri ("Teknik Servis") aday olarak sunulur.
@@ -1192,12 +1275,9 @@ async function toggleSesKaydi() {
     sesRecorder.onstop = () => {
       stream.getTracks().forEach(t => t.stop());
       const blob = new Blob(sesChunks, { type: 'audio/webm' });
-      aktifSesTaslak = { blob, sure: Math.round((Date.now() - baslangic) / 1000) };
-      if (btn) {
-        btn.textContent = `🎤 Ses Notu Hazır (${aktifSesTaslak.sure}sn) — Değiştirmek için bas`;
-        btn.style.background = '#27ae60';
-        btn.style.color = 'white';
-      }
+      aktifSeslerTaslak.push({ blob, sure: Math.round((Date.now() - baslangic) / 1000) });  // ÜZERİNE YAZMAZ
+      _sesButonSifirla();
+      _sesOnizlemeGoster();
     };
     sesRecorder.start();
     if (btn) {
@@ -1219,11 +1299,32 @@ function _sesButonSifirla() {
   btn.style.color = '#333';
 }
 
+// Bekleyen (henüz kaydedilmemiş) tüm ses notlarını numaralı gösterir,
+// her birinin yanında ✕ ile kayıttan önce çıkarma imkânı var.
+function _sesOnizlemeGoster() {
+  const el = document.getElementById('ses-onizleme');
+  if (!el) return;
+  if (aktifSeslerTaslak.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = aktifSeslerTaslak.map((s, i) => `
+    <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+      <span style="font-size:0.75rem; color:#666;">🎤${i + 1} (${s.sure}sn)</span>
+      <audio controls src="${URL.createObjectURL(s.blob)}" style="height:28px;max-width:180px"></audio>
+      <button onclick="_sesTaslakSil(${i})" style="background:#e74c3c;color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:0.75rem;cursor:pointer;">✕</button>
+    </div>`).join('');
+}
+
+function _sesTaslakSil(index) {
+  aktifSeslerTaslak.splice(index, 1);
+  _sesOnizlemeGoster();
+}
+if (typeof window !== 'undefined') window._sesTaslakSil = _sesTaslakSil;
+
 // Dışarıdan bir dosya/blob/dataURL alıp kayda hazır sıkıştırılmış veri üretir
-// (galeri/dosya seçme akışı için — aktif taslağa yazar).
+// (galeri/dosya seçme akışı için — aktif taslak listesine EKLENİR).
 async function fotoAlVeSikistir(kaynak) {
   const sonuc = await compressImage(kaynak);
-  aktifFotoTaslak = sonuc;
+  aktifFotolarTaslak.push(sonuc);
+  _fotoOnizlemeGoster();
   return sonuc;
 }
 if (typeof window !== 'undefined') window.fotoAlVeSikistir = fotoAlVeSikistir;
@@ -1239,27 +1340,30 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
   const ekGirdiler = [];
 
   const tespitler = bulgular.map(b => {
-    let fotoAdi = null, sesAdi = null;
-    if (b.foto) {
-      fotoAdi = `${denetim.id}_${b.id}.jpg`;
-      dosyalar.push(fotoAdi);
-      ekGirdiler.push({ ad: `fotolar/${fotoAdi}`, veri: b.foto });
-    }
-    if (b.ses) {
-      sesAdi = `${denetim.id}_${b.id}.webm`;
-      sesDosyalari.push(sesAdi);
-      ekGirdiler.push({ ad: `sesler/${sesAdi}`, veri: b.ses });
-    }
+    const bFotolar = b.fotolar || [];
+    const bSesler = b.sesler || [];
+    const fotoAdlari = bFotolar.map((foto, i) => {
+      const ad = `${denetim.id}_${b.id}_${i + 1}.jpg`;
+      dosyalar.push(ad);
+      ekGirdiler.push({ ad: `fotolar/${ad}`, veri: foto.blob });
+      return ad;
+    });
+    const sesAdlari = bSesler.map((ses, i) => {
+      const ad = `${denetim.id}_${b.id}_${i + 1}.webm`;
+      sesDosyalari.push(ad);
+      ekGirdiler.push({ ad: `sesler/${ad}`, veri: ses.blob });
+      return ad;
+    });
     return {
       alanTipi: denetim.alanTipi || denetim.kat || 'genel',
       konumKodu: `${denetim.bina}/${denetim.kat}/${denetim.oda}`,
       not: b.metin,
       hayatiRisk: !!b.hayatiRisk,
-      fotografsiz: !b.foto,
-      sesNotu: sesAdi,
+      fotografsiz: fotoAdlari.length === 0,
+      sesNotlari: sesAdlari,
       checklist: null,
       zaman: b.zaman,
-      fotolar: fotoAdi ? [fotoAdi] : []
+      fotolar: fotoAdlari
     };
   });
 
