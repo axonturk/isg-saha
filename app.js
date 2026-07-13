@@ -672,7 +672,10 @@ function _dofOfsUclusuGecerliMi(o, f, s) {
 /** Kanonik bir DÖF kaydının mevcut yerel takip taslağını okur. Dönen
  * nesne HER ZAMAN yeni bir kopyadır (yalnız primitive değerler içerir) --
  * çağıran taraf üzerinde mutasyon yapsa bile IndexedDB'deki gerçek kayıt
- * ETKİLENMEZ. Kayıt yoksa `DofImportHatasi('DOF_BULUNAMADI', ...)`. */
+ * ETKİLENMEZ. Kayıt yoksa `DofImportHatasi('DOF_BULUNAMADI', ...)`. Kayıt
+ * varsa ama kanonik replay-v2 şeklinde DEĞİLSE (legacy/WIP -- bkz.
+ * `_dofKanonikMi`) `DofImportHatasi('KANONIK_DOF_DEGIL', ...)` -- legacy
+ * kaydın içeriği veya varsa kendi taslağı HİÇBİR biçimde dışarı sızmaz. */
 async function dofTakipTaslagiGetir(dofUuid) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -682,6 +685,10 @@ async function dofTakipTaslagiGetir(dofUuid) {
       const kayit = getReq.result;
       if (!kayit) {
         reject(new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`));
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        reject(new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`));
         return;
       }
       const taslak = { ..._dofBosTaslak(), ...(kayit.takipTaslagi || {}) };
@@ -801,6 +808,15 @@ async function dofTakipTaslagiTemizle(dofUuid) {
       const kayit = getReq.result;
       if (!kayit) {
         hata = new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        // Legacy/WIP kayıt -- kanoniklik kontrolü ÖNCE yapılır, bu yüzden
+        // legacy kayıtta `takipTaslagi`/`taslakGuncellenmeZamani` bulunsa
+        // BİLE (normalde Guncelle bunları hiç yazmaz, ama savunma amaçlı)
+        // silinmez, kayıt tamamen dokunulmadan kalır.
+        hata = new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
         tx.abort();
         return;
       }

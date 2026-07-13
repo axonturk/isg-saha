@@ -4,6 +4,7 @@
 //
 // Test paralelliği aynı origin'de DB çakışması yaratabileceği için bu
 // dosya SERIAL çalışır (önceki dosyalarla aynı desen).
+const crypto = require('crypto');
 const { test, expect } = require('@playwright/test');
 const { dbTemizle } = require('./migration-helpers');
 const { dofIceriAktarDene } = require('./dof-import-helpers');
@@ -357,5 +358,132 @@ test.describe('N. DÖF takip taslağı (izinli 8 alan)', () => {
       if (alan === 'takipTaslagi' || alan === 'taslakGuncellenmeZamani') continue;
       expect(sonKayit[alan], alan).toEqual(oncekiKayit[alan]);
     }
+  });
+
+  // ── PWA Commit 4A-1: Getir/Temizle de Guncelle ile AYNI kanoniklik
+  // sınırına tabi -- aşağıdaki testler bu düzeltmeyi kilitler. ──────────
+
+  test('P. Legacy kayıttan taslak getirme reddi -- KANONIK_DOF_DEGIL, legacy taslağı da sızdırmaz', async ({ page }) => {
+    const wipKayit1 = {
+      id: 'dof_wip_p1', dofId: 201, bulguKodu: 'B-1',
+      durum: 'bekliyor', sonuc: null, kontrolNotu: null, birimId: 'birim-wip',
+    };
+    await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), wipKayit1);
+
+    const sonuc1 = await taslakGetirDene(page, 'dof_wip_p1');
+    expect(sonuc1.basarili).toBe(false);
+    expect(sonuc1.kod).toBe('KANONIK_DOF_DEGIL');
+    const kayit1Sonra = await dofKaydiGetir(page, 'dof_wip_p1');
+    expect(kayit1Sonra).toEqual(wipKayit1);
+
+    // Legacy kayıt (savunma amaçlı senaryo -- normalde Guncelle bunu asla
+    // yazmaz) ÜZERİNDE bir takipTaslagi taşısa BİLE dışarı sızmamalı.
+    const wipKayit2 = {
+      id: 'dof_wip_p2', dofId: 202, bulguKodu: 'B-2', durum: 'bekliyor', birimId: 'birim-wip',
+      takipTaslagi: {
+        sorumlu: 'SIZMAMALI', planlanan_tarih: null, gerceklesen_faaliyet: null,
+        etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null, yeni_o: null, yeni_f: null, yeni_s: null,
+      },
+      taslakGuncellenmeZamani: '2026-01-01T00:00:00.000Z',
+    };
+    await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), wipKayit2);
+
+    const sonuc2 = await taslakGetirDene(page, 'dof_wip_p2');
+    expect(sonuc2.basarili).toBe(false);
+    expect(sonuc2.kod).toBe('KANONIK_DOF_DEGIL');
+    const kayit2Sonra = await dofKaydiGetir(page, 'dof_wip_p2');
+    expect(kayit2Sonra).toEqual(wipKayit2);   // legacy taslağı birebir korunmuş, hiç okunmamış gibi
+  });
+
+  test('Q. Legacy kayıtta taslak temizleme reddi -- KANONIK_DOF_DEGIL, iki alan silinmez', async ({ page }) => {
+    const wipKayit = {
+      id: 'dof_wip_q1', dofId: 203, bulguKodu: 'B-3', durum: 'bekliyor', birimId: 'birim-wip',
+      takipTaslagi: {
+        sorumlu: 'Test', planlanan_tarih: null, gerceklesen_faaliyet: null,
+        etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null, yeni_o: null, yeni_f: null, yeni_s: null,
+      },
+      taslakGuncellenmeZamani: '2026-01-01T00:00:00.000Z',
+    };
+    await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), wipKayit);
+
+    const sonuc = await taslakTemizleDene(page, 'dof_wip_q1');
+    expect(sonuc.basarili).toBe(false);
+    expect(sonuc.kod).toBe('KANONIK_DOF_DEGIL');
+
+    const kayitSonra = await dofKaydiGetir(page, 'dof_wip_q1');
+    expect(kayitSonra).toEqual(wipKayit);   // iki alan SİLİNMEDİ, kayıt birebir aynı
+  });
+
+  test('R. Eksik replay kimlikli kayıt -- id===dofUuid ama kimlik alanı eksik, Getir ve Temizle ikisi de reddeder', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+    const temelKayit = await dofKaydiGetir(page, dofUuid);
+
+    const eksikAlanlar = ['exportUuid', 'paketUuid', 'baseStateHash', 'aktifTurSirasi'];
+    for (const alan of eksikAlanlar) {
+      const yeniUuid = crypto.randomUUID();
+      const eksikKayit = { ...temelKayit, id: yeniUuid, dofUuid: yeniUuid };
+      delete eksikKayit[alan];
+      await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), eksikKayit);
+
+      const getirSonucu = await taslakGetirDene(page, yeniUuid);
+      expect(getirSonucu.basarili, `Getir: ${alan} eksik`).toBe(false);
+      expect(getirSonucu.kod, `Getir: ${alan} eksik`).toBe('KANONIK_DOF_DEGIL');
+
+      const temizleSonucu = await taslakTemizleDene(page, yeniUuid);
+      expect(temizleSonucu.basarili, `Temizle: ${alan} eksik`).toBe(false);
+      expect(temizleSonucu.kod, `Temizle: ${alan} eksik`).toBe('KANONIK_DOF_DEGIL');
+    }
+  });
+
+  test('S. Kanonik kayıt regresyonu -- düzeltme sonrası Getir/Temizle hâlâ doğru çalışır', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+    const oncekiKayit = await dofKaydiGetir(page, dofUuid);
+
+    await taslakGuncelleDene(page, dofUuid, { sorumlu: 'Ahmet' });
+
+    const getirSonucu = await taslakGetirDene(page, dofUuid);
+    expect(getirSonucu.basarili).toBe(true);
+    // Dönen nesnenin mutasyonu DB'yi etkilemez.
+    const mutasyonDenemesi = await page.evaluate(async (u) => {
+      const t1 = await window._dofImport.dofTakipTaslagiGetir(u);
+      t1.takipTaslagi.sorumlu = 'MUTASYON';
+      const t2 = await window._dofImport.dofTakipTaslagiGetir(u);
+      return t2.takipTaslagi.sorumlu;
+    }, dofUuid);
+    expect(mutasyonDenemesi).toBe('Ahmet');
+
+    const temizleSonucu = await taslakTemizleDene(page, dofUuid);
+    expect(temizleSonucu.basarili).toBe(true);
+    expect(temizleSonucu.sonuc.durum).toBe('temizlendi');
+
+    const ikinciTemizle = await taslakTemizleDene(page, dofUuid);
+    expect(ikinciTemizle.basarili).toBe(true);
+    expect(ikinciTemizle.sonuc.durum).toBe('degismedi');   // idempotent no-op
+
+    const sonKayit = await dofKaydiGetir(page, dofUuid);
+    for (const alan of Object.keys(oncekiKayit)) {
+      expect(sonKayit[alan], alan).toEqual(oncekiKayit[alan]);   // kimlik/snapshot değişmedi
+    }
+  });
+
+  test('T. Bulunamayan kayıt -- Getir ve Temizle ikisi de DOF_BULUNAMADI, yeni kayıt oluşmaz', async ({ page }) => {
+    const bilinmeyenUuid = '00000000-0000-4000-8000-000000088888';
+
+    const getirSonucu = await taslakGetirDene(page, bilinmeyenUuid);
+    expect(getirSonucu.basarili).toBe(false);
+    expect(getirSonucu.kod).toBe('DOF_BULUNAMADI');
+
+    const temizleSonucu = await taslakTemizleDene(page, bilinmeyenUuid);
+    expect(temizleSonucu.basarili).toBe(false);
+    expect(temizleSonucu.kod).toBe('DOF_BULUNAMADI');
+
+    const kayit = await dofKaydiGetir(page, bilinmeyenUuid);
+    expect(kayit).toBeUndefined();
+    const tumKayitlar = await page.evaluate(async () => window._idb.dbTumu('dofler'));
+    expect(tumKayitlar).toEqual([]);
   });
 });
