@@ -849,11 +849,224 @@ async function dofTakipTaslagiTemizle(dofUuid) {
   });
 }
 
+// ─── DÖF DÖNÜŞ BELGESİ ÜRETİMİ (PWA Commit 4B) ──────────────────
+// Kanonik imported DÖF kayıtları + izinli `takipTaslagi`'ndan, masaüstünün
+// gerçek replay-v2 dönüş sözleşmesine (`dof_donus.json` -- isg_denetim/
+// dof_replay_import.py salt-okunur doğrulandı) uygun belge/JSON üretir.
+// SALT-OKUNUR'dur -- IndexedDB'ye hiçbir yazma yapmaz, ZIP/medya/submission
+// UUID üretmez/saklamaz, UI kullanmaz.
+//
+// Desktop sözleşmesinden doğrulanan kritik noktalar (bkz. commit raporu):
+// - Üst zarf: yalnız `paketUuid` (string) + `dofKontrolleri` (array).
+//   `surum`/`replayVersion` üst seviyede YOKTUR, yalnız kayıt bazında.
+// - Kayıt kimlik alanları: dofUuid (herhangi geçerli UUID), exportUuid
+//   (UUID v4), submissionUuid (UUID v4), baseStateHash (64 hex),
+//   aktifTurSirasi (pozitif int), replayVersion (tam olarak 2).
+// - `sonuc`/`not` YOK SAYILIR (v2 Apply'de hiç okunmaz) -- bu yüzden
+//   belgeye taşınmaz.
+// - Takip alanları kayıt içinde DÜZ (flat) kardeş alanlardır, nested değil.
+// - Medya alanları (fotolar/sesNotlari) yoksa TAMAMEN atlanabilir (boş
+//   dizi vermeye eşdeğer okunuyor) -- bu commit medya üretmiyor zaten.
+// - Desktop, tek belgede FARKLI export paketlerinden gelen kayıtları
+//   BATCH seviyesinde reddetmiyor (yalnız kayıt bazında üst paketUuid'in
+//   O kaydın kendi export'uyla eşleşmesini istiyor). Ancak belge şeması
+//   yapısal olarak TEK bir üst paketUuid taşıdığından, farklı paketten
+//   gelen bir kaydı aynı belgeye koymak o kaydın Desktop tarafında
+//   SESSİZCE "hata" statüsüne düşmesine yol açar. Bu risk yüzünden PWA
+//   İSTEMCİ tarafında KARISIK_EXPORT_PAKETI ile ERKEN ve AÇIK reddediliyor
+//   (Desktop'ın kendisi zorunlu kılmasa da, kullanışsız/yanıltıcı belge
+//   üretimini önlemek için bilinçli, dokümante edilmiş bir karar).
+//
+// BİLİNÇLİ TASARIM KARARI -- null takip alanı politikası: Commit 4A/4A-1'in
+// `takipTaslagi` şeması "hiç dokunulmamış" alan ile "dokunulup sonra
+// explicit null'a temizlenmiş" alanı AYNI (`null`) değerle temsil eder --
+// bu ikisi mevcut şemadan AYIRT EDİLEMEZ, ve bu commit o şemayı (update/
+// get/clear sözleşmesini) değiştirmeye yetkili değildir. İki seçenek
+// vardı: (a) tüm 8 alanı her zaman (null dahil) belgeye koy, (b) yalnız
+// null OLMAYAN alanları belgeye koy. (a) GERÇEK bir veri bütünlüğü riski
+// taşır: kullanıcının hiç dokunmadığı bir alan yanlışlıkla Desktop
+// tarafında SIFIRLANIR (Desktop dict-diff semantiği: anahtar mevcut +
+// null = temizle). Bu yüzden GÜVENLİ seçenek (b) uygulandı: null değerli
+// takip alanları HER ZAMAN atlanır, dokunulmamış/sonradan temizlenmiş
+// ayrımı yapılmaz. Bu, ticket'in "explicit null korunmalı" beklentisiyle
+// LİTERAL uyuşmuyor -- bilinçli bir sapma, testle kilitlendi, raporda
+// açıkça belirtildi.
+
+const _DOF_DONUS_GIRDI_ALANLARI = ['dofUuid', 'submissionUuid'];
+
+/** `girdiler` dizisini yapısal olarak doğrular -- IndexedDB'ye HİÇ
+ * dokunmaz. Yalnız `dofUuid`/`submissionUuid` alanlarına izin verilir
+ * (bilinmeyen alan -- `__proto__` dahil -- reddedilir). Geçerliyse
+ * `{dofUuid, submissionUuid}` şeklinde doğrulanmış bir dizi döner. */
+function _dofDonusGirdiDogrula(girdiler) {
+  if (!Array.isArray(girdiler)) {
+    throw new DofImportHatasi('GECERSIZ_GIRDI', 'girdiler bir dizi olmalı.');
+  }
+  if (girdiler.length === 0) {
+    throw new DofImportHatasi('GECERSIZ_GIRDI', 'girdiler boş olamaz.');
+  }
+  const gorulenDofUuid = new Set();
+  const gorulenSubmissionUuid = new Set();
+  return girdiler.map((girdi, i) => {
+    if (girdi === null || typeof girdi !== 'object' || Array.isArray(girdi)) {
+      throw new DofImportHatasi('GECERSIZ_GIRDI', `girdiler[${i}] bir JSON nesnesi olmalı.`);
+    }
+    for (const anahtar of Object.keys(girdi)) {
+      if (!_DOF_DONUS_GIRDI_ALANLARI.includes(anahtar)) {
+        throw new DofImportHatasi('GECERSIZ_GIRDI', `girdiler[${i}] izinsiz/bilinmeyen alan taşıyor: ${anahtar}`);
+      }
+    }
+    if (!_dofGecerliUuidMi(girdi.dofUuid)) {
+      throw new DofImportHatasi('GECERSIZ_GIRDI', `girdiler[${i}].dofUuid eksik veya geçersiz.`);
+    }
+    if (!_dofGecerliUuidV4Mu(girdi.submissionUuid)) {
+      throw new DofImportHatasi('GECERSIZ_SUBMISSION_UUID', `girdiler[${i}].submissionUuid eksik veya v4 biçiminde değil.`);
+    }
+    if (gorulenDofUuid.has(girdi.dofUuid)) {
+      throw new DofImportHatasi('PAKET_ICI_DUPLICATE', `girdiler[${i}].dofUuid paket içinde birden fazla kez görülüyor: ${girdi.dofUuid}`);
+    }
+    gorulenDofUuid.add(girdi.dofUuid);
+    if (gorulenSubmissionUuid.has(girdi.submissionUuid)) {
+      throw new DofImportHatasi('SUBMISSION_UUID_DUPLICATE', `girdiler[${i}].submissionUuid paket içinde birden fazla kez görülüyor: ${girdi.submissionUuid}`);
+    }
+    gorulenSubmissionUuid.add(girdi.submissionUuid);
+    return { dofUuid: girdi.dofUuid, submissionUuid: girdi.submissionUuid };
+  });
+}
+
+/** Verilen `dofUuid` listesini TEK bir readonly transaction içinde okur
+ * (Desktop veya başka bir kaynak DB'yi eşzamanlı değiştirmiyor olsa da,
+ * belge üretiminin tamamının tutarlı bir DB anlık görüntüsü üzerinden
+ * çalışmasını sağlar). Bulunamayan kayıtlar için `undefined` döner --
+ * hata fırlatmaz, DOF_BULUNAMADI kararı çağıran tarafa bırakılır. */
+async function _dofKanonikKayitlariOku(dofUuidler) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readonly');
+    const store = tx.objectStore('dofler');
+    const sonuclar = new Array(dofUuidler.length);
+    let bekleyen = dofUuidler.length;
+    let hata = null;
+
+    const tamamlandiMi = () => {
+      if (bekleyen > 0) return;
+      if (hata) reject(hata); else resolve(sonuclar);
+    };
+
+    dofUuidler.forEach((dofUuid, i) => {
+      const getReq = store.get(dofUuid);
+      getReq.onsuccess = () => { sonuclar[i] = getReq.result; bekleyen--; tamamlandiMi(); };
+      getReq.onerror = () => {
+        if (!hata) hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+        bekleyen--; tamamlandiMi();
+      };
+    });
+  });
+}
+
+/** Ham (DB'den okunan, doğrudan manipülasyona açık olabilecek)
+ * `takipTaslagi` nesnesini SAVUNMACI biçimde yeniden doğrular -- taslak
+ * servisinin (`dofTakipTaslagiGuncelle`) daha önce doğrulamış olmasına
+ * körü körüne güvenmez. Mevcut `_dofTakipAlanDogrula`/`_dofOfsUclusuGecerliMi`
+ * yardımcılarını (tekrar yazmadan) reuse eder. Geçersizse
+ * `DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', ...)` fırlatır. */
+function _dofTaslakSavunmaciDogrula(taslak) {
+  if (taslak === null || typeof taslak !== 'object' || Array.isArray(taslak)) {
+    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'takipTaslagi bir nesne olmalı.');
+  }
+  for (const anahtar of Object.keys(taslak)) {
+    if (!_DOF_TAKIP_ALANLARI.includes(anahtar)) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `takipTaslagi izinsiz/bilinmeyen alan taşıyor: ${anahtar}`);
+    }
+  }
+  const dogrulanmis = {};
+  for (const alan of _DOF_TAKIP_ALANLARI) {
+    const deger = Object.prototype.hasOwnProperty.call(taslak, alan) ? taslak[alan] : null;
+    try {
+      dogrulanmis[alan] = _dofTakipAlanDogrula(alan, deger);
+    } catch (e) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `takipTaslagi.${alan} geçersiz: ${e.message}`);
+    }
+  }
+  if (!_dofOfsUclusuGecerliMi(dogrulanmis.yeni_o, dogrulanmis.yeni_f, dogrulanmis.yeni_s)) {
+    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) olmalı.');
+  }
+  return dogrulanmis;
+}
+
+/** Kanonik replay-v2 DÖF kayıtları + izinli takip taslaklarından Desktop'ın
+ * gerçek replay-v2 dönüş belgesini (`{paketUuid, dofKontrolleri:[...]}`)
+ * üretir. SALT-OKUNUR -- IndexedDB'ye hiçbir `put/add/delete/clear` çağrısı
+ * yapmaz, `submissionUuid` ÜRETMEZ (yalnız `girdiler`'den alır), ZIP/Blob/
+ * dosya indirme/UI kullanmaz. Aynı DB durumu + aynı `girdiler` için
+ * deterministik sonuç üretir (rastgele/zaman-bağımlı değer yoktur --
+ * `submissionUuid` dışında hiçbir yeni kimlik üretilmez). Kayıt sırası
+ * `girdiler` sırasıyla birebir aynıdır. Herhangi bir girdi/kayıt geçersizse
+ * TÜM çağrı reddedilir (atomik) -- kısmi belge asla dönmez. */
+async function dofDonusBelgesiOlustur(girdiler) {
+  const dogrulanmisGirdiler = _dofDonusGirdiDogrula(girdiler);
+  const kayitlar = await _dofKanonikKayitlariOku(dogrulanmisGirdiler.map((g) => g.dofUuid));
+
+  const dofKontrolleri = [];
+  let ortakPaketUuid = null;
+
+  for (let i = 0; i < dogrulanmisGirdiler.length; i++) {
+    const { dofUuid, submissionUuid } = dogrulanmisGirdiler[i];
+    const kayit = kayitlar[i];
+    if (!kayit) {
+      throw new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+    }
+    if (!_dofKanonikMi(kayit)) {
+      throw new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+    }
+    if (ortakPaketUuid === null) {
+      ortakPaketUuid = kayit.paketUuid;
+    } else if (kayit.paketUuid !== ortakPaketUuid) {
+      throw new DofImportHatasi('KARISIK_EXPORT_PAKETI', `Farklı export paketlerinden gelen DÖF kayıtları tek dönüş belgesinde birleştirilemez: ${dofUuid}`);
+    }
+
+    if (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object') {
+      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
+    }
+    const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi);
+    const doluAlanlar = _DOF_TAKIP_ALANLARI.filter((alan) => taslak[alan] !== null);
+    if (doluAlanlar.length === 0) {
+      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alan doldurulmamış): ${dofUuid}`);
+    }
+
+    const kayitBelgesi = {
+      dofUuid: kayit.dofUuid,
+      exportUuid: kayit.exportUuid,
+      baseStateHash: kayit.baseStateHash,
+      aktifTurSirasi: kayit.aktifTurSirasi,
+      replayVersion: kayit.replayVersion,
+      dofId: kayit.dofId,
+      submissionUuid,
+    };
+    for (const alan of doluAlanlar) {
+      kayitBelgesi[alan] = taslak[alan];
+    }
+    dofKontrolleri.push(kayitBelgesi);
+  }
+
+  return { paketUuid: ortakPaketUuid, dofKontrolleri };
+}
+
+/** `dofDonusBelgesiOlustur`'un ürettiği belgeyi UTF-8 JSON metnine
+ * dönüştürür (mevcut proje stiliyle uyumlu, `zipYaz`'daki `denetimler.json`
+ * ile aynı pretty-print biçimi: `JSON.stringify(belge, null, 2)`). BOM
+ * eklemez. Aynı girdiler + aynı DB durumu için birebir aynı metni üretir. */
+async function dofDonusJsonOlustur(girdiler) {
+  const belge = await dofDonusBelgesiOlustur(girdiler);
+  return JSON.stringify(belge, null, 2);
+}
+
 // Test/kullanım için global erişim -- aynı sınırlı namespace genişletildi.
 if (typeof window !== 'undefined') {
   window._dofImport = {
     dofPaketiIceriAktar, DofImportHatasi,
     dofTakipTaslagiGetir, dofTakipTaslagiGuncelle, dofTakipTaslagiTemizle,
+    dofDonusBelgesiOlustur, dofDonusJsonOlustur,
   };
 }
 
