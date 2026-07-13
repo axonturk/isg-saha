@@ -27,7 +27,11 @@ window.addEventListener('error', (e) => {
 
 const APP_VERSION = 'v0.11.2';
 const DB_NAME = 'isgSahaDB';
-const DB_VERSION = 2;   // v2: 'ayarlar' deposu eklendi (özel Denetim Türü listesi için)
+const DB_VERSION = 4;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
+                        // committed-olmayan bir denemede kullanılmıştı,
+                        // kanonik değildi); v4: 'dofler' deposu + birimId/
+                        // dofUuid index'leri (PWA Commit 3A, replay-v2
+                        // temeli -- bkz. AI/knowledge veya commit mesajı)
 
 // ─── STATE ───────────────────────────────────────────────────
 let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
@@ -235,6 +239,28 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('ayarlar')) {
         db.createObjectStore('ayarlar', { keyPath: 'id' });
+      }
+
+      // v4 (PWA Commit 3A): 'dofler' deposu -- masaüstü DÖF replay-v2
+      // round-trip temeli. Store ZATEN VARSA (ör. yereldeki committed
+      // olmayan bir denemenin bıraktığı v3 veritabanı) SİLİNMEZ/yeniden
+      // OLUŞTURULMAZ -- mevcut kayıtlar korunur, yalnız eksik index'ler
+      // tamamlanır. Sürüm numarasına körlemesine güvenilmez (`if (oldVersion
+      // < 3)` gibi) -- gerçek object store/index varlığı kontrol edilir.
+      let dofStore;
+      if (!db.objectStoreNames.contains('dofler')) {
+        dofStore = db.createObjectStore('dofler', { keyPath: 'id' });
+      } else {
+        dofStore = e.target.transaction.objectStore('dofler');
+      }
+      if (!dofStore.indexNames.contains('birimId')) {
+        dofStore.createIndex('birimId', 'birimId', { unique: false });
+      }
+      // Bilerek unique:false -- yerel/eski kayıtlarda dofUuid hiç
+      // olmayabilir veya eksik olabilir; tekilleştirme/upsert politikası
+      // Commit 3B'nin kapsamıdır, bu migration veri korumayı önceliklendirir.
+      if (!dofStore.indexNames.contains('dofUuid')) {
+        dofStore.createIndex('dofUuid', 'dofUuid', { unique: false });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);

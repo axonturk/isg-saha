@@ -21,12 +21,20 @@ test.describe('A. Uygulama başlangıcı', () => {
     expect(konsolHatalari, `Konsol hataları: ${JSON.stringify(konsolHatalari)}`).toEqual([]);
   });
 
-  test('IndexedDB isgSahaDB acilir, committed baseline object store listesi dofler icermez', async ({ page }) => {
+  // PWA Commit 3A (bilinçli güncelleme): bu test Commit 2'de "committed
+  // baseline'da dofler store'u YOKTUR" (DB_VERSION=2) davranışını
+  // kilitliyordu. Commit 3A bunu KASITLI olarak değiştirdi -- IndexedDB
+  // artık v4'e yükseliyor ve kanonik `dofler` store'unu oluşturuyor (bkz.
+  // app.js::openDB, tests/l-indexeddb-migration.spec.js -- migration'ın
+  // KENDİSİ orada ayrıntılı doğrulanıyor). Bu test yalnız "temiz kurulumda
+  // GÜNCEL beklenen son durum" özetini korur, negatif assertion SESSİZCE
+  // silinmedi -- pozitife çevrildi.
+  test('IndexedDB v4 temiz kurulumda kanonik dofler store\'unu oluşturur', async ({ page }) => {
     await page.goto('/index.html');
     const { adlar, versiyon } = await storeAdlari(page);
 
-    expect(versiyon).toBe(2);
-    expect(adlar.sort()).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'kurumlar'].sort());
-    expect(adlar).not.toContain('dofler');
+    expect(versiyon).toBe(4);
+    expect(adlar.sort()).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofler', 'kurumlar'].sort());
+    expect(adlar).toContain('dofler');
   });
 });
