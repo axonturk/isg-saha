@@ -328,6 +328,234 @@ if (typeof window !== 'undefined') {
   window._idb = { dbEkle, dbGuncelle, dbSil, dbGetir, dbTumu, dbIndexTumu, openDB };
 }
 
+// ─── DÖF REPLAY-V2 İÇE AKTARMA (PWA Commit 3B) ─────────────────
+// Masaüstü (isg_denetim) `dof_disa_aktar()` çıktısını ("isg_dof_paketi")
+// doğrulayıp `dofler` store'una atomik + idempotent biçimde yazar. Bu
+// commit'te UI YOKTUR -- yalnız sonraki bir UI commit'inin çağıracağı
+// production servis fonksiyonudur. Sözleşme isg_denetim reposundaki
+// dof_islemleri.py (`dof_disa_aktar`) ve dof_replay_state.py (`baseStateHash`
+// üretimi) salt-okunur incelenerek doğrulanmıştır -- tahmin edilmemiştir.
+
+class DofImportHatasi extends Error {
+  constructor(kod, mesaj) {
+    super(mesaj);
+    this.name = 'DofImportHatasi';
+    this.kod = kod;
+  }
+}
+
+const _DOF_UUID_DESENI = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const _DOF_UUID_V4_DESENI = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const _DOF_HEX64_DESENI = /^[0-9a-f]{64}$/;
+
+function _dofGecerliUuidMi(v) { return typeof v === 'string' && _DOF_UUID_DESENI.test(v); }
+function _dofGecerliUuidV4Mu(v) { return typeof v === 'string' && _DOF_UUID_V4_DESENI.test(v); }
+function _dofPozitifTamsayiMi(v) { return typeof v === 'number' && Number.isInteger(v) && v >= 1; }
+
+/** Paketin/kayıtların YAPISINI doğrular -- IndexedDB'ye hiç dokunmaz.
+ * Geçersizse `DofImportHatasi` fırlatır (`.kod` ile ayırt edilebilir).
+ * Geçerliyse `{ paketUuid, kayitlar }` döner (`kayitlar` henüz yerel
+ * şemaya eşlenmemiş, ham ama doğrulanmış export kayıtlarıdır). */
+function _dofPaketiYapisalDogrula(paket) {
+  if (paket === null || typeof paket !== 'object' || Array.isArray(paket)) {
+    throw new DofImportHatasi('GECERSIZ_PAKET', 'Paket bir JSON nesnesi olmalı.');
+  }
+  // Yanlış paket aileleri -- kesin ret. `dofKontrolleri` PWA→Desktop DÖF
+  // DÖNÜŞ paketinin (veya legacy denetim ZIP'inin) imzasıdır, Desktop
+  // EXPORT paketinde asla bulunmaz (bkz. dof_islemleri.py:992-996).
+  if (Object.prototype.hasOwnProperty.call(paket, 'dofKontrolleri')) {
+    throw new DofImportHatasi('GECERSIZ_PAKET', 'Bu paket bir DÖF DÖNÜŞ paketi (dofKontrolleri) -- masaüstü EXPORT paketi bekleniyor.');
+  }
+  if (['denetim', 'tespitler', 'manifest'].some((k) => Object.prototype.hasOwnProperty.call(paket, k))) {
+    throw new DofImportHatasi('GECERSIZ_PAKET', 'Bu paket normal saha denetim ZIP zarfına benziyor -- DÖF export paketi bekleniyor.');
+  }
+  if (paket.tur !== 'isg_dof_paketi') {
+    throw new DofImportHatasi('GECERSIZ_PAKET', `Beklenmeyen paket türü: ${JSON.stringify(paket.tur)}`);
+  }
+  if (paket.surum !== 1) {
+    throw new DofImportHatasi('DESTEKLENMEYEN_SURUM', `Desteklenmeyen paket sürümü: ${JSON.stringify(paket.surum)}`);
+  }
+  if (typeof paket.paketUuid !== 'string' || paket.paketUuid.length === 0) {
+    throw new DofImportHatasi('GECERSIZ_PAKET', 'paketUuid boş olmayan bir kimlik olmalı.');
+  }
+  if (!Array.isArray(paket.tehlikeler)) {
+    throw new DofImportHatasi('GECERSIZ_PAKET', 'tehlikeler bir dizi olmalı.');
+  }
+
+  const gorulenDofUuid = new Set();
+  const kayitlar = paket.tehlikeler.map((kayit, i) => {
+    if (kayit === null || typeof kayit !== 'object' || Array.isArray(kayit)) {
+      throw new DofImportHatasi('GECERSIZ_PAKET', `tehlikeler[${i}] bir JSON nesnesi olmalı.`);
+    }
+    if (!_dofGecerliUuidMi(kayit.dofUuid)) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].dofUuid eksik veya geçersiz.`);
+    }
+    if (!_dofGecerliUuidV4Mu(kayit.exportUuid)) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].exportUuid eksik veya v4 biçiminde değil.`);
+    }
+    if (typeof kayit.baseStateHash !== 'string' || !_DOF_HEX64_DESENI.test(kayit.baseStateHash)) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].baseStateHash eksik veya 64 haneli hex biçiminde değil.`);
+    }
+    if (!_dofPozitifTamsayiMi(kayit.aktifTurSirasi)) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].aktifTurSirasi eksik veya pozitif tam sayı değil.`);
+    }
+    if (kayit.dofId === undefined || kayit.dofId === null) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].dofId eksik.`);
+    }
+    if (kayit.replayVersion === undefined || kayit.replayVersion === null) {
+      throw new DofImportHatasi('EKSIK_KIMLIK', `tehlikeler[${i}].replayVersion eksik.`);
+    }
+    if (kayit.replayVersion !== 2) {
+      throw new DofImportHatasi('DESTEKLENMEYEN_REPLAY_VERSION', `tehlikeler[${i}].replayVersion desteklenmiyor: ${JSON.stringify(kayit.replayVersion)}`);
+    }
+    if (gorulenDofUuid.has(kayit.dofUuid)) {
+      throw new DofImportHatasi('PAKET_ICI_DUPLICATE', `tehlikeler[${i}].dofUuid paket içinde birden fazla kez görülüyor: ${kayit.dofUuid}`);
+    }
+    gorulenDofUuid.add(kayit.dofUuid);
+    return kayit;
+  });
+
+  return { paketUuid: paket.paketUuid, kayitlar };
+}
+
+/** Ham (doğrulanmış) export kaydını yerel `dofler` şemasına EXPLICIT
+ * allowlist ile eşler -- kaynak nesne asla `{...kayit}` ile yayılmaz, bu
+ * yüzden `durum`/`sonuc`/`kontrolNotu`/`fotolar`/`dofKontrolleri` veya
+ * başka bilinmeyen/yetkisiz bir alan asla yerel kayda taşınmaz. Yerel
+ * kimlik `id = dofUuid` -- bir ana DÖF için tek kanonik yerel kayıt,
+ * idempotent import ve doğrudan `store.get(dofUuid)` sağlar. */
+function _dofYerelKayitOlustur(kayit, paketUuid) {
+  return {
+    id: kayit.dofUuid,
+    dofUuid: kayit.dofUuid,
+    exportUuid: kayit.exportUuid,
+    paketUuid,
+    replayVersion: kayit.replayVersion,
+    baseStateHash: kayit.baseStateHash,
+    aktifTurSirasi: kayit.aktifTurSirasi,
+    dofId: kayit.dofId,
+    kurumId: kayit.pwaKurumId ?? null,
+    birimId: kayit.pwaBirimId ?? null,
+    odaId: kayit.pwaOdaId ?? null,
+    kat: kayit.kat ?? '',
+    oda: kayit.oda ?? '',
+    alanTipi: kayit.alanTipi ?? '',
+    bulguKodu: kayit.bulguKodu ?? '',
+    riskKodu: kayit.riskKodu ?? null,
+    tehlikeNo: kayit.tehlikeNo ?? null,
+    tehlikeTanimi: kayit.tehlikeTanimi ?? '',
+    riskDuzeyi: kayit.riskDuzeyi ?? null,
+    r: kayit.r ?? null,
+    duzelticiFaaliyet: kayit.duzelticiFaaliyet ?? '',
+    aksiyonSuresi: kayit.aksiyonSuresi ?? '',
+    iceAktarilmaZamani: new Date().toISOString(),
+  };
+}
+
+/** Masaüstü DÖF replay-v2 export paketini (`isg_dof_paketi`) doğrular ve
+ * `dofler` store'una ATOMİK + IDEMPOTENT biçimde kaydeder.
+ *
+ * - DOM'a bağımlı DEĞİLDİR, UI render ETMEZ, prompt/alert/modal AÇMAZ.
+ * - `paketVeyaJsonMetni`: JS nesnesi veya JSON metni (string) kabul eder.
+ * - Başarıda `{ toplam, eklenen, degismeyen }` döner.
+ * - Geçersiz/çelişkili pakette `DofImportHatasi` fırlatır (`.kod`):
+ *   GECERSIZ_JSON, GECERSIZ_PAKET, DESTEKLENMEYEN_SURUM,
+ *   DESTEKLENMEYEN_REPLAY_VERSION, EKSIK_KIMLIK, PAKET_ICI_DUPLICATE,
+ *   IMPORT_CONFLICT, VERITABANI_HATASI. Hata durumunda IndexedDB'ye
+ *   HİÇBİR kayıt yazılmaz (paket bazında atomik -- readwrite transaction
+ *   içinde tüm conflict kontrolleri tamamlanmadan hiçbir `put` çağrılmaz,
+ *   herhangi bir conflict tüm transaction'ı `abort()` eder).
+ */
+async function dofPaketiIceriAktar(paketVeyaJsonMetni) {
+  let paket = paketVeyaJsonMetni;
+  if (typeof paketVeyaJsonMetni === 'string') {
+    try {
+      paket = JSON.parse(paketVeyaJsonMetni);
+    } catch (e) {
+      throw new DofImportHatasi('GECERSIZ_JSON', `Paket geçerli bir JSON metni değil: ${e.message}`);
+    }
+  }
+
+  const { paketUuid, kayitlar } = _dofPaketiYapisalDogrula(paket);
+  const yereller = kayitlar.map((k) => _dofYerelKayitOlustur(k, paketUuid));
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const sonuclar = new Array(yereller.length);
+    let hata = null;
+    let bekleyen = yereller.length;
+
+    const hepsiOkunduMu = () => {
+      if (bekleyen > 0) return;
+      if (hata) {
+        tx.abort();
+        return;
+      }
+      sonuclar.forEach(({ kayit, aksiyon }) => {
+        if (aksiyon === 'ekle') store.put(kayit);
+      });
+    };
+
+    yereller.forEach((kayit, i) => {
+      const getReq = store.get(kayit.id);
+      getReq.onsuccess = () => {
+        const mevcut = getReq.result;
+        if (!mevcut) {
+          sonuclar[i] = { kayit, aksiyon: 'ekle' };
+        } else {
+          const ayniMi = mevcut.exportUuid === kayit.exportUuid
+            && mevcut.baseStateHash === kayit.baseStateHash
+            && mevcut.aktifTurSirasi === kayit.aktifTurSirasi
+            && mevcut.replayVersion === kayit.replayVersion;
+          if (ayniMi) {
+            sonuclar[i] = { kayit, aksiyon: 'degismeyen' };
+          } else {
+            sonuclar[i] = { kayit, aksiyon: 'conflict' };
+            if (!hata) {
+              hata = new DofImportHatasi('IMPORT_CONFLICT', `dofUuid ${kayit.dofUuid} için mevcut kayıtla çelişki (exportUuid/baseStateHash/aktifTurSirasi/replayVersion farklı).`);
+            }
+          }
+        }
+        bekleyen--;
+        hepsiOkunduMu();
+      };
+      getReq.onerror = () => {
+        if (!hata) {
+          hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+        }
+        bekleyen--;
+        hepsiOkunduMu();
+      };
+    });
+
+    // Boş `tehlikeler` dizisi: gerçek Desktop kaynağında bunu açıkça
+    // yasaklayan bir kural bulunamadı (bkz. commit raporu) -- zararsız
+    // no-op olarak kabul edilir. `yereller.length === 0` ise yukarıdaki
+    // forEach hiç request issue etmez, transaction otomatik `oncomplete`
+    // ile tamamlanır.
+
+    tx.oncomplete = () => {
+      if (hata) return; // abort edilmiş olmalı -- onabort reddedecek
+      const eklenen = sonuclar.filter((s) => s.aksiyon === 'ekle').length;
+      const degismeyen = sonuclar.filter((s) => s.aksiyon === 'degismeyen').length;
+      resolve({ toplam: sonuclar.length, eklenen, degismeyen });
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
+// Test/kullanım için global erişim.
+if (typeof window !== 'undefined') {
+  window._dofImport = { dofPaketiIceriAktar, DofImportHatasi };
+}
+
 // ─── RESİM SIKIŞTIRMA (değişmedi — v0.4'te test edilip doğrulandı) ──
 const RESIM_SIKISTIRMA = {
   maxKenar:  1920,
