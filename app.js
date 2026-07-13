@@ -707,7 +707,19 @@ async function dofTakipTaslagiGetir(dofUuid) {
  * Kaynak nesne asla `{...kayit, ...degisiklikler}` ile yayılmaz -- her
  * izinli alan tek tek, doğrulanmış biçimde işlenir. Tek `readwrite`
  * transaction içinde get→doğrula→(gerekiyorsa) put yapılır; herhangi bir
- * doğrulama hatasında transaction `abort()` edilir, kısmi yazma OLMAZ. */
+ * doğrulama hatasında transaction `abort()` edilir, kısmi yazma OLMAZ.
+ *
+ * PWA Commit 4A-2 (kök düzeltme): `takipTaslagi` artık SPARSE/PARTIAL bir
+ * nesnedir -- yalnız kullanıcının GERÇEKTEN dokunduğu (bu veya önceki bir
+ * çağrıda anahtar olarak geçirdiği) alanlar own-property olarak saklanır.
+ * Önceki tasarım (`_dofBosTaslak()` ile tüm 8 alanı ön-doldurup birleştirme)
+ * "hiç dokunulmamış" ile "dokunulup null'a temizlenmiş" alanı storage'da
+ * AYNI (own-property + null) hâle getiriyordu -- bu ayrım artık
+ * `Object.prototype.hasOwnProperty` ile güvenle korunur (bkz. commit
+ * raporu). `dofTakipTaslagiGetir` bu sparse veriyi KENDİ `_dofBosTaslak()`
+ * birleştirmesiyle (değişmedi) hâlâ dolu 8-alanlı biçimde GÖSTERİR --
+ * yalnız iç storage formatı değişti, Getir/Temizle'nin dış sözleşmesi
+ * AYNI kaldı (ikisi de değişmedi). */
 async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
   if (degisiklikler === null || typeof degisiklikler !== 'object' || Array.isArray(degisiklikler)) {
     throw new DofImportHatasi('GECERSIZ_DEGISIKLIK', 'degisiklikler bir düz (plain) nesne olmalı.');
@@ -747,32 +759,52 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
         return;
       }
 
-      const mevcutTaslak = { ..._dofBosTaslak(), ...(kayit.takipTaslagi || {}) };
+      // SPARSE birleştirme -- `_dofBosTaslak()` ile ön-doldurma YOK. Yalnız
+      // daha önce GERÇEKTEN dokunulmuş alanlar (mevcutTaslak'ın own-
+      // property'leri) + bu çağrıda dokunulan alanlar own-property olarak
+      // kalır; hiç dokunulmamış alanlar own-property OLMAZ.
+      const mevcutTaslak = kayit.takipTaslagi || {};
       const yeniTaslak = { ...mevcutTaslak };
       for (const anahtar of anahtarlar) {
         yeniTaslak[anahtar] = dogrulanmisDegisiklikler[anahtar];
       }
 
-      if (!_dofOfsUclusuGecerliMi(yeniTaslak.yeni_o, yeniTaslak.yeni_f, yeniTaslak.yeni_s)) {
+      // O/F/S üçlü own-property kuralı: biri own-property ise üçü de
+      // own-property olmalı (değeri null olsa bile) -- yalnız BİRİ
+      // dokunulmuşsa (diğer ikisi hiç dokunulmamışsa) reddedilir.
+      const ofsOwnAlanlar = _DOF_OFS_ALANLARI.filter((a) => Object.prototype.hasOwnProperty.call(yeniTaslak, a));
+      if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < 3) {
+        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', 'yeni_o/yeni_f/yeni_s üçü de dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.');
+        tx.abort();
+        return;
+      }
+      if (ofsOwnAlanlar.length === 3 && !_dofOfsUclusuGecerliMi(yeniTaslak.yeni_o, yeniTaslak.yeni_f, yeniTaslak.yeni_s)) {
         hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) girilmelidir.');
         tx.abort();
         return;
       }
 
+      // Dönen değer (`sonucDegeri.takipTaslagi`) -- Getir'in kendi
+      // `_dofBosTaslak()` birleştirmesiyle AYNI, dolu 8-alanlı GÖSTERİM
+      // biçimi (dış sözleşme/geriye uyumluluk için). STORAGE'a yazılan
+      // (`store.put`) ise SPARSE `yeniTaslak`'ın kendisidir -- bu ikisi
+      // kasıtlı olarak farklıdır.
+      const gosterimTaslak = { ..._dofBosTaslak(), ...yeniTaslak };
+
       const degisti = JSON.stringify(yeniTaslak) !== JSON.stringify(mevcutTaslak);
       if (!degisti) {
         // No-op: hiçbir put YOK, taslakGuncellenmeZamani DEĞİŞMEZ.
-        sonucDegeri = { durum: 'degismedi', dofUuid, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null };
+        sonucDegeri = { durum: 'degismedi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null };
         return;
       }
 
       const yeniZaman = new Date().toISOString();
       // Güvenli spread: `kayit` GÜVENİLİR (az önce DB'den okunan, kendi
       // ürettiğimiz kanonik kayıt) -- kullanıcı girdisi `degisiklikler`
-      // buraya asla doğrudan yayılmaz, yalnız doğrulanmış `yeniTaslak`
-      // nested alanı eklenir.
+      // buraya asla doğrudan yayılmaz, yalnız doğrulanmış (sparse)
+      // `yeniTaslak` nested alanı eklenir.
       store.put({ ...kayit, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: yeniZaman });
-      sonucDegeri = { durum: 'guncellendi', dofUuid, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: yeniZaman };
+      sonucDegeri = { durum: 'guncellendi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: yeniZaman };
     };
     getReq.onerror = () => {
       hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);

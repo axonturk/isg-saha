@@ -486,4 +486,88 @@ test.describe('N. DÖF takip taslağı (izinli 8 alan)', () => {
     const tumKayitlar = await page.evaluate(async () => window._idb.dbTumu('dofler'));
     expect(tumKayitlar).toEqual([]);
   });
+
+  // ── PWA Commit 4A-2: takipTaslagi artık SPARSE/PARTIAL -- yalnız
+  // gerçekten dokunulan alanlar own-property'dir. Aşağıdaki testler bu
+  // kök düzeltmeyi kilitler (bkz. commit raporu, Commit 4B-1'in ihtiyaç
+  // duyduğu absent/explicit-null ayrımının önkoşulu). ──────────────────
+
+  test('U. Sparse storage -- absent alan own-property değildir, explicit null own-property olarak kalır', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    await taslakGuncelleDene(page, dofUuid, { sorumlu: 'Ahmet' });
+    let kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.keys(kayit.takipTaslagi)).toEqual(['sorumlu']);
+    expect(Object.prototype.hasOwnProperty.call(kayit.takipTaslagi, 'gerceklesen_faaliyet')).toBe(false);
+
+    await taslakGuncelleDene(page, dofUuid, { gerceklesen_faaliyet: null });
+    kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.prototype.hasOwnProperty.call(kayit.takipTaslagi, 'gerceklesen_faaliyet')).toBe(true);
+    expect(kayit.takipTaslagi.gerceklesen_faaliyet).toBe(null);
+    expect(Object.keys(kayit.takipTaslagi).sort()).toEqual(['gerceklesen_faaliyet', 'sorumlu'].sort());
+    for (const alan of ['planlanan_tarih', 'etkinlik_kontrol_tarihi', 'gozlem_degerlendirme', 'yeni_o', 'yeni_f', 'yeni_s']) {
+      expect(Object.prototype.hasOwnProperty.call(kayit.takipTaslagi, alan), alan).toBe(false);
+    }
+  });
+
+  test('V. Sparse partial merge -- ayrı çağrılarla dokunulan alanlar korunur, O/F/S own-property üçlüsü çağrılar arası da geçerli', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    // Önce başka (OFS-dışı) bir alana dokun, sonra O/F/S üçlüsünü BİRLİKTE
+    // ekle (tek başına 2/3 gönderme -- bu artık GECERSIZ_TAKIP_DEGERI ile
+    // reddedilir, ayrı bir davranıştır ve zaten önceki testlerde -- H --
+    // kilitlenmiştir).
+    await taslakGuncelleDene(page, dofUuid, { sorumlu: 'Ahmet' });
+    await taslakGuncelleDene(page, dofUuid, { yeni_o: 0.2, yeni_f: 3, yeni_s: 1 });
+    let kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.keys(kayit.takipTaslagi).sort()).toEqual(['sorumlu', 'yeni_o', 'yeni_f', 'yeni_s'].sort());
+
+    // Sonraki bir çağrıda YALNIZ tek bir O/F/S alanına dokunmak -- diğer
+    // ikisi ÖNCEKİ çağrıdan own-property olarak zaten mevcut olduğundan
+    // üçlü kural hâlâ sağlanır (own-property'nin ÇAĞRILAR ARASI kalıcılığı).
+    const sonuc = await taslakGuncelleDene(page, dofUuid, { yeni_o: 0.5 });
+    expect(sonuc.basarili).toBe(true);
+    kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.keys(kayit.takipTaslagi).sort()).toEqual(['sorumlu', 'yeni_o', 'yeni_f', 'yeni_s'].sort());
+    expect(kayit.takipTaslagi).toEqual({ sorumlu: 'Ahmet', yeni_o: 0.5, yeni_f: 3, yeni_s: 1 });
+  });
+
+  test('W. Sparse no-op idempotency -- ilk explicit null gerçek değişikliktir, ikinci aynı çağrı no-op', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    const ilk = await taslakGuncelleDene(page, dofUuid, { sorumlu: null });
+    expect(ilk.sonuc.durum).toBe('guncellendi');   // ilk kez null atama -- YENİ own-property, gerçek değişiklik
+    const zaman = ilk.sonuc.taslakGuncellenmeZamani;
+
+    const ikinci = await taslakGuncelleDene(page, dofUuid, { sorumlu: null });
+    expect(ikinci.sonuc.durum).toBe('degismedi');
+    expect(ikinci.sonuc.taslakGuncellenmeZamani).toBe(zaman);
+
+    const kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.keys(kayit.takipTaslagi)).toEqual(['sorumlu']);
+    expect(kayit.takipTaslagi.sorumlu).toBe(null);
+  });
+
+  test('X. Sekiz alan regresyonu -- tamamı dokunulunca tamamı own-property olur (null olanlar dahil)', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    const tamDegisiklik = {
+      planlanan_tarih: null, sorumlu: 'Ahmet', gerceklesen_faaliyet: null,
+      etkinlik_kontrol_tarihi: '2026-09-05', gozlem_degerlendirme: null,
+      yeni_o: null, yeni_f: null, yeni_s: null,
+    };
+    const sonuc = await taslakGuncelleDene(page, dofUuid, tamDegisiklik);
+    expect(sonuc.basarili).toBe(true);
+    const kayit = await dofKaydiGetir(page, dofUuid);
+    expect(Object.keys(kayit.takipTaslagi).sort()).toEqual(Object.keys(tamDegisiklik).sort());
+    expect(kayit.takipTaslagi).toEqual(tamDegisiklik);
+  });
 });
