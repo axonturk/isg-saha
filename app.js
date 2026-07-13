@@ -551,9 +551,294 @@ async function dofPaketiIceriAktar(paketVeyaJsonMetni) {
   });
 }
 
-// Test/kullanım için global erişim.
+// ─── DÖF TAKİP TASLAĞI (PWA Commit 4A) ──────────────────────────
+// İzinli sekiz public takip alanı (isg_denetim/dof_takip_contract.py +
+// dof_islemleri.py::_dof_takip_guncelle_core salt-okunur doğrulanmıştır)
+// için yerel taslak katmanı. Kanonik imported DÖF kaydından mantıksal
+// olarak AYRI, nested `takipTaslagi` alanında saklanır -- import
+// kimlikleri/snapshot alanları hiçbir zaman bu katman tarafından
+// değiştirilmez. Bu commit'te UI/replay ZIP/medya YOKTUR.
+
+const _DOF_TARIH_ALANLARI = ['planlanan_tarih', 'etkinlik_kontrol_tarihi'];
+const _DOF_METIN_ALANLARI = ['sorumlu', 'gerceklesen_faaliyet', 'gozlem_degerlendirme'];
+const _DOF_OFS_ALANLARI = ['yeni_o', 'yeni_f', 'yeni_s'];
+const _DOF_TAKIP_ALANLARI = [..._DOF_TARIH_ALANLARI, ..._DOF_METIN_ALANLARI, ..._DOF_OFS_ALANLARI];
+
+// Fine-Kinney kanonik değer kümeleri -- isg_denetim/fine_kinney.py'den
+// salt-okunur doğrulandı (OLASILIK/FREKANS/SIDDET).
+const _DOF_FINE_KINNEY_KUMELERI = {
+  yeni_o: new Set([10, 6, 3, 1, 0.5, 0.2]),
+  yeni_f: new Set([10, 6, 3, 2, 1, 0.5]),
+  yeni_s: new Set([100, 40, 15, 7, 3, 1]),
+};
+
+const _DOF_TARIH_DESENI = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** `date.fromisoformat` (Python) ile aynı katılıkta: sıkı `YYYY-MM-DD`,
+ * gerçek takvim geçerliliği (ay/gün sınırları, artık yıl dahil). */
+function _dofGecerliTarihMi(v) {
+  const eslesme = typeof v === 'string' && v.match(_DOF_TARIH_DESENI);
+  if (!eslesme) return false;
+  const y = Number(eslesme[1]);
+  const m = Number(eslesme[2]);
+  const d = Number(eslesme[3]);
+  if (m < 1 || m > 12) return false;
+  const ayGunSayisi = new Date(y, m, 0).getDate();
+  return d >= 1 && d <= ayGunSayisi;
+}
+
+function _dofBosTaslak() {
+  return {
+    planlanan_tarih: null, sorumlu: null, gerceklesen_faaliyet: null,
+    etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null,
+    yeni_o: null, yeni_f: null, yeni_s: null,
+  };
+}
+
+/** Kayıt kanonik replay-v2 mi? (`dofPaketiIceriAktar`'ın ürettiği şekil).
+ * Yalnız bu şekildeki kayıtlar taslak düzenlemesine AÇIKTIR -- WIP/legacy
+ * kayıtlar (random id, replay-v2 kimlik seti eksik) reddedilir. */
+function _dofKanonikMi(kayit) {
+  return !!kayit
+    && kayit.id === kayit.dofUuid
+    && kayit.replayVersion === 2
+    && _dofGecerliUuidV4Mu(kayit.exportUuid)
+    && typeof kayit.baseStateHash === 'string' && _DOF_HEX64_DESENI.test(kayit.baseStateHash)
+    && _dofPozitifTamsayiMi(kayit.aktifTurSirasi)
+    && typeof kayit.paketUuid === 'string' && kayit.paketUuid.length > 0;
+}
+
+/** Tek bir takip alanının DEĞERİNİ, gerçek Desktop sözleşmesine göre
+ * doğrular/normalize eder ve normalize edilmiş değeri döner. Geçersizse
+ * `DofImportHatasi('GECERSIZ_TAKIP_DEGERI', ...)` fırlatır. Bu fonksiyon
+ * yalnız DEĞER doğrular -- alan adının allowlist'te olup olmadığını
+ * ÇAĞIRAN taraf önceden kontrol etmiş olmalıdır. */
+function _dofTakipAlanDogrula(alan, deger) {
+  if (_DOF_TARIH_ALANLARI.includes(alan)) {
+    if (deger === null) return null;
+    if (typeof deger !== 'string') {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} bir metin (YYYY-MM-DD) veya null olmalı.`);
+    }
+    // Desktop ile aynı: baş/son boşluk kırpılır, kırpma sonrası boş ->
+    // null (dof_islemleri.py::_tarih_normalize ile aynı davranış).
+    const kirpilmis = deger.trim();
+    if (kirpilmis === '') return null;
+    if (!_dofGecerliTarihMi(kirpilmis)) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} geçerli bir YYYY-MM-DD tarihi değil: ${JSON.stringify(deger)}`);
+    }
+    return kirpilmis;
+  }
+  if (_DOF_METIN_ALANLARI.includes(alan)) {
+    if (deger === null) return null;
+    // Desktop kaynağında bu metin alanları için isinstance(str) reddi
+    // KANITLANMADI (bkz. commit raporu) -- ancak ticket'in kendi §10/
+    // Test-G talimatı, kanıtlanmamış iş kuralları için PWA tarafında
+    // "kanıtlanabilen temel tip" doğrulaması uygulanmasını İSTİYOR. Bu
+    // yüzden object/array/number/boolean burada BİLİNÇLİ olarak, Desktop'ın
+    // kendisinden DAHA SIKI biçimde reddedilir (rapora not düşülmüştür).
+    if (typeof deger !== 'string') {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} bir metin veya null olmalı.`);
+    }
+    const kirpilmis = deger.trim();
+    return kirpilmis === '' ? null : kirpilmis;
+  }
+  if (_DOF_OFS_ALANLARI.includes(alan)) {
+    if (deger === null) return null;
+    // `typeof deger !== 'number'` boolean'ı DA reddeder (typeof true ===
+    // 'boolean'), ayrıca NaN/Infinity/-Infinity Number.isFinite ile reddedilir.
+    if (typeof deger !== 'number' || !Number.isFinite(deger)) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} sonlu bir sayı veya null olmalı.`);
+    }
+    if (!_DOF_FINE_KINNEY_KUMELERI[alan].has(deger)) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} Fine-Kinney kanonik değer kümesinde değil: ${deger}`);
+    }
+    return deger;
+  }
+  // Buraya asla ulaşılmamalı -- çağıran taraf allowlist kontrolünü
+  // önceden yapar. Savunma amaçlı.
+  throw new DofImportHatasi('IZINSIZ_TAKIP_ALANI', `Bilinmeyen takip alanı: ${alan}`);
+}
+
+/** `yeni_o`/`yeni_f`/`yeni_s` ÜÇLÜSÜ birlikte değerlendirilir (Desktop
+ * `_artik_risk_dogrula` ile aynı kural): ya üçü de null (henüz
+ * değerlendirilmemiş), ya da üçü de dolu -- kısmi (1 veya 2 dolu) durum
+ * GEÇERSİZ. */
+function _dofOfsUclusuGecerliMi(o, f, s) {
+  const hepsiNull = o === null && f === null && s === null;
+  const hepsiDolu = o !== null && f !== null && s !== null;
+  return hepsiNull || hepsiDolu;
+}
+
+/** Kanonik bir DÖF kaydının mevcut yerel takip taslağını okur. Dönen
+ * nesne HER ZAMAN yeni bir kopyadır (yalnız primitive değerler içerir) --
+ * çağıran taraf üzerinde mutasyon yapsa bile IndexedDB'deki gerçek kayıt
+ * ETKİLENMEZ. Kayıt yoksa `DofImportHatasi('DOF_BULUNAMADI', ...)`. */
+async function dofTakipTaslagiGetir(dofUuid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readonly');
+    const getReq = tx.objectStore('dofler').get(dofUuid);
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        reject(new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`));
+        return;
+      }
+      const taslak = { ..._dofBosTaslak(), ...(kayit.takipTaslagi || {}) };
+      resolve({ dofUuid, takipTaslagi: taslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null });
+    };
+    getReq.onerror = () => {
+      reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
+    };
+  });
+}
+
+/** Kanonik bir DÖF kaydının yerel takip taslağını PARTIAL biçimde
+ * günceller. Yalnız sekiz allowlist alanına izin verilir (bilinmeyen/
+ * yetkisiz herhangi bir anahtar -- `__proto__`/`constructor`/`prototype`
+ * dahil -- `IZINSIZ_TAKIP_ALANI` ile REDDEDİLİR, sessizce düşürülmez).
+ * Kaynak nesne asla `{...kayit, ...degisiklikler}` ile yayılmaz -- her
+ * izinli alan tek tek, doğrulanmış biçimde işlenir. Tek `readwrite`
+ * transaction içinde get→doğrula→(gerekiyorsa) put yapılır; herhangi bir
+ * doğrulama hatasında transaction `abort()` edilir, kısmi yazma OLMAZ. */
+async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
+  if (degisiklikler === null || typeof degisiklikler !== 'object' || Array.isArray(degisiklikler)) {
+    throw new DofImportHatasi('GECERSIZ_DEGISIKLIK', 'degisiklikler bir düz (plain) nesne olmalı.');
+  }
+  const anahtarlar = Object.keys(degisiklikler);
+  for (const anahtar of anahtarlar) {
+    if (!_DOF_TAKIP_ALANLARI.includes(anahtar)) {
+      throw new DofImportHatasi('IZINSIZ_TAKIP_ALANI', `İzinsiz/bilinmeyen takip alanı: ${anahtar}`);
+    }
+  }
+  // Değer doğrulama/normalizasyon -- DB durumundan bağımsız, bu yüzden
+  // transaction AÇILMADAN ÖNCE yapılabilir (yalnız yeni_o/f/s ÜÇLÜ
+  // tamlık kuralı mevcut kayda bağlıdır, o kontrol transaction içinde).
+  const dogrulanmisDegisiklikler = {};
+  for (const anahtar of anahtarlar) {
+    dogrulanmisDegisiklikler[anahtar] = _dofTakipAlanDogrula(anahtar, degisiklikler[anahtar]);
+  }
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const getReq = store.get(dofUuid);
+    let sonucDegeri = null;
+    let hata = null;
+
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        hata = new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        hata = new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+
+      const mevcutTaslak = { ..._dofBosTaslak(), ...(kayit.takipTaslagi || {}) };
+      const yeniTaslak = { ...mevcutTaslak };
+      for (const anahtar of anahtarlar) {
+        yeniTaslak[anahtar] = dogrulanmisDegisiklikler[anahtar];
+      }
+
+      if (!_dofOfsUclusuGecerliMi(yeniTaslak.yeni_o, yeniTaslak.yeni_f, yeniTaslak.yeni_s)) {
+        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) girilmelidir.');
+        tx.abort();
+        return;
+      }
+
+      const degisti = JSON.stringify(yeniTaslak) !== JSON.stringify(mevcutTaslak);
+      if (!degisti) {
+        // No-op: hiçbir put YOK, taslakGuncellenmeZamani DEĞİŞMEZ.
+        sonucDegeri = { durum: 'degismedi', dofUuid, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null };
+        return;
+      }
+
+      const yeniZaman = new Date().toISOString();
+      // Güvenli spread: `kayit` GÜVENİLİR (az önce DB'den okunan, kendi
+      // ürettiğimiz kanonik kayıt) -- kullanıcı girdisi `degisiklikler`
+      // buraya asla doğrudan yayılmaz, yalnız doğrulanmış `yeniTaslak`
+      // nested alanı eklenir.
+      store.put({ ...kayit, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: yeniZaman });
+      sonucDegeri = { durum: 'guncellendi', dofUuid, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: yeniZaman };
+    };
+    getReq.onerror = () => {
+      hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+      tx.abort();
+    };
+
+    tx.oncomplete = () => {
+      if (hata) return; // abort edilmiş olmalı -- onabort reddedecek
+      resolve(sonucDegeri);
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
+/** Yerel takip taslağını (ve taslak zaman bilgisini) kaldırır. İmport
+ * edilmiş DÖF kaydını SİLMEZ, kimlik/snapshot alanlarına DOKUNMAZ. Taslak
+ * zaten yoksa idempotent no-op'tur (`put` çağrılmaz). */
+async function dofTakipTaslagiTemizle(dofUuid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const getReq = store.get(dofUuid);
+    let sonucDegeri = null;
+    let hata = null;
+
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        hata = new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      const taslakVarMi = kayit.takipTaslagi !== undefined || kayit.taslakGuncellenmeZamani !== undefined;
+      if (!taslakVarMi) {
+        sonucDegeri = { durum: 'degismedi', dofUuid };
+        return; // idempotent no-op -- put yok
+      }
+      // Yalnız iki nested taslak alanını KALDIRIR -- diğer tüm alanlar
+      // (kimlik/snapshot dahil) birebir korunur.
+      const { takipTaslagi, taslakGuncellenmeZamani, ...kalanKayit } = kayit;
+      store.put(kalanKayit);
+      sonucDegeri = { durum: 'temizlendi', dofUuid };
+    };
+    getReq.onerror = () => {
+      hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+      tx.abort();
+    };
+
+    tx.oncomplete = () => {
+      if (hata) return;
+      resolve(sonucDegeri);
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
+// Test/kullanım için global erişim -- aynı sınırlı namespace genişletildi.
 if (typeof window !== 'undefined') {
-  window._dofImport = { dofPaketiIceriAktar, DofImportHatasi };
+  window._dofImport = {
+    dofPaketiIceriAktar, DofImportHatasi,
+    dofTakipTaslagiGetir, dofTakipTaslagiGuncelle, dofTakipTaslagiTemizle,
+  };
 }
 
 // ─── RESİM SIKIŞTIRMA (değişmedi — v0.4'te test edilip doğrulandı) ──
