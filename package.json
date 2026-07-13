@@ -1,0 +1,12 @@
+{
+  "name": "isg-saha-asistani-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PWA Commit 1 -- Playwright Chromium test altyapisi (uygulama kodu icermez).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}
