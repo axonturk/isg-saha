@@ -1780,11 +1780,157 @@ async function _dofPaketDosyaSecildi(input) {
     btn.disabled = false;
     input.disabled = false;
     input.value = '';   // aynı dosyanın tekrar seçilebilmesi için
+    // Sonuç ne olursa olsun (başarı/duplicate/conflict/geçersiz) listeyi
+    // GERÇEK DB durumundan yeniden yükle -- bu, "conflict/invalid import
+    // sonrası liste bozulmaz" garantisini AYRI bir dallanma yazmadan,
+    // doğrudan DB'nin kendisinden doğrular.
+    _dofListesiYukle();
   }
 }
 
 if (typeof window !== 'undefined') {
   window._dofPaketDosyaSecildi = _dofPaketDosyaSecildi;
+}
+
+// ─── DÖF LİSTE / DETAY (PWA Commit 4G) ──────────────────────────
+// Yalnız OKUNUR görünüm -- düzenleme/replay hazırlık/ZIP/medya UI'ı
+// YOKTUR (sonraki commit'lerin kapsamı). Yalnız kanonik replay-v2
+// kayıtlar (`_dofKanonikMi`) listelenir -- legacy/WIP kayıtlar hiç
+// gösterilmez, değiştirilmez, silinmez.
+
+let _dofListeKayitlari = [];
+let _dofListeSeciliId = null;
+
+/** UUID'yi sahada okunabilir kısa hale getirir (ilk 8 hane + …). */
+function _dofKisaUuid(uuid) {
+  return (typeof uuid === 'string' && uuid.length > 8) ? `${uuid.slice(0, 8)}…` : 'Bilgi yok';
+}
+
+/** null/undefined/boş string için tutarlı fallback -- eksik alanlarda
+ * uygulama kırılmaz, kısa "Bilgi yok" gösterilir. */
+function _dofDeger(deger, yerTutucu = 'Bilgi yok') {
+  return (deger === null || deger === undefined || deger === '') ? yerTutucu : deger;
+}
+
+// Takip taslağı yalnız OKUNUR özet için -- input/textarea/select YOK.
+const _DOF_TAKIP_ETIKETLERI = {
+  planlanan_tarih: 'Planlanan Tarih',
+  sorumlu: 'Sorumlu',
+  gerceklesen_faaliyet: 'Gerçekleşen Faaliyet',
+  etkinlik_kontrol_tarihi: 'Etkinlik Kontrol Tarihi',
+  gozlem_degerlendirme: 'Gözlem/Değerlendirme',
+  yeni_o: 'Yeni O',
+  yeni_f: 'Yeni F',
+  yeni_s: 'Yeni S',
+};
+
+/** DÖF listesini IndexedDB'den (yeniden) yükler ve render eder. Sayfa
+ * açılışında ve her import denemesi (başarı/duplicate/conflict/geçersiz)
+ * sonrasında çağrılır -- her seferinde GERÇEK DB durumunu yansıtır. */
+async function _dofListesiYukle() {
+  const durumEl = document.getElementById('dof-liste-durum');
+  const listeEl = document.getElementById('dof-liste');
+  if (!durumEl || !listeEl) return;   // DÖF kartı DOM'da yoksa sessizce çık
+  durumEl.textContent = 'DÖF listesi yükleniyor...';
+
+  let tumKayitlar;
+  try {
+    tumKayitlar = await dbTumu('dofler');
+  } catch (e) {
+    durumEl.textContent = 'DÖF detayı yüklenemedi.';
+    listeEl.innerHTML = '';
+    return;
+  }
+
+  _dofListeKayitlari = tumKayitlar
+    .filter((k) => _dofKanonikMi(k))
+    .sort((a, b) => (a.dofId ?? 0) - (b.dofId ?? 0));
+
+  if (_dofListeKayitlari.length === 0) {
+    durumEl.textContent = 'Henüz içe aktarılmış DÖF yok.';
+    listeEl.innerHTML = '';
+    _dofListeSeciliId = null;
+    _dofDetayGoster(null);
+    return;
+  }
+
+  durumEl.textContent = '';
+  if (_dofListeSeciliId && !_dofListeKayitlari.some((k) => k.id === _dofListeSeciliId)) {
+    _dofListeSeciliId = null;   // seçili kayıt artık listede yok (ör. legacy'e dönüşmedi ama olası durum)
+  }
+  listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
+  _dofDetayGoster(_dofListeSeciliId);
+}
+
+function _dofListeKartHtml(k) {
+  const secili = k.id === _dofListeSeciliId;
+  const konum = _dofDeger([k.kat, k.oda].filter((v) => v).join(' / ') || null);
+  const risk = k.riskDuzeyi ? `${k.riskDuzeyi}${k.r !== null && k.r !== undefined ? ` (R=${k.r})` : ''}` : 'Bilgi yok';
+  return `
+    <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
+      onclick="_dofDetaySec('${_escAttr(k.id)}')"
+      style="display:block; width:100%; text-align:left; margin-bottom:8px; padding:12px; border-radius:8px; cursor:pointer;
+             border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};">
+      <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span></div>
+      <div style="font-size:0.85rem; color:#666; margin-top:4px;">${_esc(risk)} · ${_esc(konum)} · Tur: ${_esc(_dofDeger(k.aktifTurSirasi))}</div>
+      <div style="font-size:0.85rem; margin-top:4px;">${_esc(_dofDeger(k.tehlikeTanimi))}</div>
+    </button>`;
+}
+
+/** Liste kartına tıklanınca/klavyeyle etkinleştirilince çağrılır --
+ * seçimi günceller, listeyi (seçili görünüm için) ve detayı yeniden çizer. */
+function _dofDetaySec(dofId) {
+  _dofListeSeciliId = dofId;
+  const listeEl = document.getElementById('dof-liste');
+  if (listeEl) listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
+  _dofDetayGoster(dofId);
+}
+
+function _dofDetayGoster(dofId) {
+  const kart = document.getElementById('dof-detay-kart');
+  const el = document.getElementById('dof-detay');
+  if (!kart || !el) return;
+  if (!dofId) {
+    kart.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const k = _dofListeKayitlari.find((x) => x.id === dofId);
+  if (!k) {
+    kart.style.display = 'block';
+    el.innerHTML = '<p>DÖF detayı yüklenemedi.</p>';
+    return;
+  }
+  kart.style.display = 'block';
+
+  let taslakHtml = '';
+  if (k.takipTaslagi && typeof k.takipTaslagi === 'object') {
+    const dokunulanlar = Object.keys(k.takipTaslagi).filter((alan) => _DOF_TAKIP_ETIKETLERI[alan]);
+    if (dokunulanlar.length > 0) {
+      taslakHtml = `<h3 style="margin-top:15px; font-size:1rem;">Takip Taslağı (okunur)</h3>` +
+        dokunulanlar.map((alan) => `<div><strong>${_esc(_DOF_TAKIP_ETIKETLERI[alan])}:</strong> ${_esc(_dofDeger(k.takipTaslagi[alan]))}</div>`).join('');
+    }
+  }
+
+  const konum = _dofDeger([k.kat, k.oda, k.alanTipi].filter((v) => v).join(' / ') || null);
+  el.innerHTML = `
+    <div><strong>DÖF UUID:</strong> ${_esc(_dofKisaUuid(k.dofUuid))}</div>
+    <div><strong>Export UUID:</strong> ${_esc(_dofKisaUuid(k.exportUuid))}</div>
+    <div><strong>Paket UUID:</strong> ${_esc(_dofKisaUuid(k.paketUuid))}</div>
+    <div><strong>Aktif Tur:</strong> ${_esc(_dofDeger(k.aktifTurSirasi))}</div>
+    <div><strong>Risk Düzeyi:</strong> ${_esc(_dofDeger(k.riskDuzeyi))}</div>
+    <div><strong>R Değeri:</strong> ${_esc(_dofDeger(k.r))}</div>
+    <div><strong>Tehlike Tanımı:</strong> ${_esc(_dofDeger(k.tehlikeTanimi))}</div>
+    <div><strong>Düzeltici Faaliyet:</strong> ${_esc(_dofDeger(k.duzelticiFaaliyet))}</div>
+    <div><strong>Aksiyon Süresi:</strong> ${_esc(_dofDeger(k.aksiyonSuresi))}</div>
+    <div><strong>Konum:</strong> ${_esc(konum)}</div>
+    <div><strong>İçe Aktarılma Zamanı:</strong> ${_esc(_dofDeger(k.iceAktarilmaZamani))}</div>
+    ${taslakHtml}`;
+}
+
+if (typeof window !== 'undefined') {
+  window._dofDetaySec = _dofDetaySec;
+  window._dofListesiYukle = _dofListesiYukle;
 }
 
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
@@ -1794,6 +1940,7 @@ window.addEventListener('load', () => {
   kurumlariYukle();
   loadInspectionsList();
   _turListesiYukle();
+  _dofListesiYukle();
   if (typeof history !== 'undefined' && history.replaceState) {
     history.replaceState({ ekran: 'kurulum' }, '');
   }
