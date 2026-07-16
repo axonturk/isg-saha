@@ -1700,6 +1700,93 @@ async function zipYaz(girdiler) {
 }
 if (typeof window !== 'undefined') window.zipYaz = zipYaz;
 
+// ─── DÖF PAKET IMPORT UI (PWA Commit 4F) ────────────────────────
+// Yalnız JSON dosya seçimi desteklenir. ZIP OKUMA bu commit'in kapsamı
+// dışında bırakıldı -- mevcut altyapıda yalnız `zipYaz` (YAZICI) var, ZIP
+// OKUYUCU yok; yeni bir bağımlılık eklemek yerine kapsam JSON ile
+// sınırlandı (bkz. commit raporu -- ayrı bir commit'te ele alınabilir).
+// Servis katmanına (`dofPaketiIceriAktar`) HİÇBİR değişiklik yapılmadı --
+// bu bölüm yalnız gerçek hata kodlarına Türkçe durum metni eşler.
+
+let _dofImportDevamEdiyor = false;
+
+const _DOF_IMPORT_HATA_METINLERI = {
+  GECERSIZ_JSON: 'Geçersiz dosya veya JSON',
+  GECERSIZ_PAKET: 'Geçersiz paket',
+  DESTEKLENMEYEN_SURUM: 'Geçersiz paket (desteklenmeyen sürüm)',
+  DESTEKLENMEYEN_REPLAY_VERSION: 'Geçersiz paket (desteklenmeyen sürüm)',
+  EKSIK_KIMLIK: 'Geçersiz paket (eksik kimlik)',
+  PAKET_ICI_DUPLICATE: 'Geçersiz paket (yinelenen kayıt)',
+  IMPORT_CONFLICT: 'Çakışma var',
+  VERITABANI_HATASI: 'Veritabanı hatası',
+};
+
+function _dofImportDosyaOku(dosya) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Dosya okunamadı.'));
+    fr.readAsText(dosya, 'utf-8');
+  });
+}
+
+/** Özet satırlarını doldurur/gösterir. `dofPaketiIceriAktar` yalnız
+ * `{toplam, eklenen, degismeyen}` döner (atomik -- kısmi başarı YOK) --
+ * `cakisan`/`hatali` yalnız BAŞARISIZ tüm-paket denemesini 1 olarak
+ * işaretler, servis sözleşmesinde var olmayan bir per-kayıt kırılım
+ * UYDURULMAZ. */
+function _dofImportOzetGoster({ toplam = 0, eklenen = 0, degismeyen = 0, cakisan = 0, hatali = 0 }) {
+  document.getElementById('dof-import-toplam').textContent = String(toplam);
+  document.getElementById('dof-import-eklenen').textContent = String(eklenen);
+  document.getElementById('dof-import-degismeyen').textContent = String(degismeyen);
+  document.getElementById('dof-import-cakisan').textContent = String(cakisan);
+  document.getElementById('dof-import-hatali').textContent = String(hatali);
+  document.getElementById('dof-import-ozet').style.display = 'block';
+}
+
+/** Dosya seçme input'unun `onchange` işleyicisi. Dosyayı metin olarak
+ * okur, gerçek `dofPaketiIceriAktar` servisine (değiştirilmeden) verir,
+ * sonucu/hatayı kullanıcıya gösterir. Çift tetiklemeye karşı korumalı
+ * (`_dofImportDevamEdiyor` bayrağı + buton/input geçici disable). Ham
+ * JSON içeriği ekranda gösterilmez, localStorage/sessionStorage'a
+ * yazılmaz. */
+async function _dofPaketDosyaSecildi(input) {
+  const dosya = input.files && input.files[0];
+  if (!dosya) return;
+  if (_dofImportDevamEdiyor) return;   // çift tetikleme koruması
+  _dofImportDevamEdiyor = true;
+
+  const btn = document.getElementById('dof-import-btn');
+  const durum = document.getElementById('dof-import-durum');
+  const dosyaAdiEl = document.getElementById('dof-import-dosya-adi');
+  btn.disabled = true;
+  input.disabled = true;
+  dosyaAdiEl.textContent = dosya.name;
+  durum.textContent = 'İçe aktarılıyor...';
+  document.getElementById('dof-import-ozet').style.display = 'none';
+
+  try {
+    const metin = await _dofImportDosyaOku(dosya);
+    const sonuc = await dofPaketiIceriAktar(metin);
+    const zatenVardi = sonuc.toplam > 0 && sonuc.eklenen === 0 && sonuc.degismeyen === sonuc.toplam;
+    durum.textContent = zatenVardi ? 'Paket zaten içe aktarılmış' : 'İçe aktarma tamamlandı';
+    _dofImportOzetGoster(sonuc);
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_IMPORT_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+    _dofImportOzetGoster(kod === 'IMPORT_CONFLICT' ? { cakisan: 1 } : { hatali: 1 });
+  } finally {
+    _dofImportDevamEdiyor = false;
+    btn.disabled = false;
+    input.disabled = false;
+    input.value = '';   // aynı dosyanın tekrar seçilebilmesi için
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window._dofPaketDosyaSecildi = _dofPaketDosyaSecildi;
+}
+
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
 window.addEventListener('load', () => {
   console.log(`İSG Saha Asistanı ${APP_VERSION} başlatıldı`);
