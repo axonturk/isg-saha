@@ -909,20 +909,22 @@ async function dofTakipTaslagiTemizle(dofUuid) {
 //   (Desktop'ın kendisi zorunlu kılmasa da, kullanışsız/yanıltıcı belge
 //   üretimini önlemek için bilinçli, dokümante edilmiş bir karar).
 //
-// BİLİNÇLİ TASARIM KARARI -- null takip alanı politikası: Commit 4A/4A-1'in
-// `takipTaslagi` şeması "hiç dokunulmamış" alan ile "dokunulup sonra
-// explicit null'a temizlenmiş" alanı AYNI (`null`) değerle temsil eder --
-// bu ikisi mevcut şemadan AYIRT EDİLEMEZ, ve bu commit o şemayı (update/
-// get/clear sözleşmesini) değiştirmeye yetkili değildir. İki seçenek
-// vardı: (a) tüm 8 alanı her zaman (null dahil) belgeye koy, (b) yalnız
-// null OLMAYAN alanları belgeye koy. (a) GERÇEK bir veri bütünlüğü riski
-// taşır: kullanıcının hiç dokunmadığı bir alan yanlışlıkla Desktop
-// tarafında SIFIRLANIR (Desktop dict-diff semantiği: anahtar mevcut +
-// null = temizle). Bu yüzden GÜVENLİ seçenek (b) uygulandı: null değerli
-// takip alanları HER ZAMAN atlanır, dokunulmamış/sonradan temizlenmiş
-// ayrımı yapılmaz. Bu, ticket'in "explicit null korunmalı" beklentisiyle
-// LİTERAL uyuşmuyor -- bilinçli bir sapma, testle kilitlendi, raporda
-// açıkça belirtildi.
+// NULL SEMANTİĞİ (PWA Commit 4B-1, 4A-2 sparse storage üzerine): storage
+// artık own-property tabanlı sparse/partial olduğundan "hiç dokunulmamış"
+// ile "dokunulup explicit null'a temizlenmiş" alan güvenle ayırt edilir:
+//   Anahtar own-property olarak YOK   -> belgeye HİÇ eklenmez
+//     (Desktop dict-diff semantiği: anahtar yok = mevcut değer korunur).
+//   Anahtar VAR ve değeri null        -> belgeye alan:null olarak eklenir
+//     (Desktop: anahtar mevcut + null = alanı temizle; dof_islemleri.py
+//     :136-138 dict-diff, salt-okunur doğrulandı).
+//   Anahtar VAR ve non-null değer     -> aynı tip/içerikle eklenir
+//     (yeniden trim/format/dönüşüm YOK).
+// `dofId` belgeye TAŞINMAZ: dof_replay_import.py:255 payload hash'inden
+// açıkça HARİÇ tutuyor, :578-580/:939 authoritative dof_id'nin HER ZAMAN
+// exportUuid'den çözüldüğünü ve payload'daki numeric dofId ile hiçbir
+// eşleştirme yapılmadığını, :1139-1141 alanın otorite olmadığını belirtir
+// -- Desktop importer bu alanı hiç okumaz/doğrulamaz/beklemez. Imported
+// yerel IndexedDB kaydında kalmaya devam eder.
 
 const _DOF_DONUS_GIRDI_ALANLARI = ['dofUuid', 'submissionUuid'];
 
@@ -1001,7 +1003,15 @@ async function _dofKanonikKayitlariOku(dofUuidler) {
  * servisinin (`dofTakipTaslagiGuncelle`) daha önce doğrulamış olmasına
  * körü körüne güvenmez. Mevcut `_dofTakipAlanDogrula`/`_dofOfsUclusuGecerliMi`
  * yardımcılarını (tekrar yazmadan) reuse eder. Geçersizse
- * `DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', ...)` fırlatır. */
+ * `DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', ...)` fırlatır.
+ *
+ * PWA Commit 4B-1: 4A-2'nin SPARSE own-property semantiğini KORUR --
+ * eksik alanları null ile DOLDURMAZ, yalnız gerçekten own-property olan
+ * izinli alanları doğrular ve aynı sparse yapıyla döner. Değerin, kanonik
+ * taslak servisinin üreteceği normalize biçimle BİREBİR aynı olması da
+ * istenir (ör. trim edilmemiş " x " veya "" -- servis bunları asla
+ * yazmaz) -- sapma, doğrudan DB manipülasyonu demektir ve sessizce
+ * düzeltilmek yerine reddedilir. */
 function _dofTaslakSavunmaciDogrula(taslak) {
   if (taslak === null || typeof taslak !== 'object' || Array.isArray(taslak)) {
     throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'takipTaslagi bir nesne olmalı.');
@@ -1013,14 +1023,27 @@ function _dofTaslakSavunmaciDogrula(taslak) {
   }
   const dogrulanmis = {};
   for (const alan of _DOF_TAKIP_ALANLARI) {
-    const deger = Object.prototype.hasOwnProperty.call(taslak, alan) ? taslak[alan] : null;
+    if (!Object.prototype.hasOwnProperty.call(taslak, alan)) continue;   // absent = absent kalır
+    const deger = taslak[alan];
+    let normalize;
     try {
-      dogrulanmis[alan] = _dofTakipAlanDogrula(alan, deger);
+      normalize = _dofTakipAlanDogrula(alan, deger);
     } catch (e) {
       throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `takipTaslagi.${alan} geçersiz: ${e.message}`);
     }
+    if (normalize !== deger) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `takipTaslagi.${alan} kanonik normalize biçimde değil (doğrudan DB manipülasyonu olabilir).`);
+    }
+    dogrulanmis[alan] = deger;
   }
-  if (!_dofOfsUclusuGecerliMi(dogrulanmis.yeni_o, dogrulanmis.yeni_f, dogrulanmis.yeni_s)) {
+  // O/F/S üçlü own-property kuralı (4A-2 storage kuralıyla aynı): biri
+  // own-property ise üçü de own-property olmalı; üçü de own ise değerler
+  // ya hep null ya hep geçerli Fine-Kinney olmalı.
+  const ofsOwnAlanlar = _DOF_OFS_ALANLARI.filter((a) => Object.prototype.hasOwnProperty.call(dogrulanmis, a));
+  if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < 3) {
+    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'yeni_o/yeni_f/yeni_s üçü de dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.');
+  }
+  if (ofsOwnAlanlar.length === 3 && !_dofOfsUclusuGecerliMi(dogrulanmis.yeni_o, dogrulanmis.yeni_f, dogrulanmis.yeni_s)) {
     throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) olmalı.');
   }
   return dogrulanmis;
@@ -1061,21 +1084,25 @@ async function dofDonusBelgesiOlustur(girdiler) {
       throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
     }
     const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi);
-    const doluAlanlar = _DOF_TAKIP_ALANLARI.filter((alan) => taslak[alan] !== null);
-    if (doluAlanlar.length === 0) {
-      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alan doldurulmamış): ${dofUuid}`);
+    // Sparse own-property mapping (4B-1): yalnız kullanıcının gerçekten
+    // dokunduğu alanlar belgeye girer -- explicit null (temizleme talebi)
+    // DAHİL. Hiç dokunulmamış alan (own-property değil) belgeye GİRMEZ.
+    const dokunulanAlanlar = _DOF_TAKIP_ALANLARI.filter((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
+    if (dokunulanAlanlar.length === 0) {
+      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alana dokunulmamış): ${dofUuid}`);
     }
 
+    // `dofId` bilerek YOK -- Desktop importer okumaz/doğrulamaz/beklemez
+    // (bkz. bölüm başındaki sözleşme notu).
     const kayitBelgesi = {
       dofUuid: kayit.dofUuid,
       exportUuid: kayit.exportUuid,
       baseStateHash: kayit.baseStateHash,
       aktifTurSirasi: kayit.aktifTurSirasi,
       replayVersion: kayit.replayVersion,
-      dofId: kayit.dofId,
       submissionUuid,
     };
-    for (const alan of doluAlanlar) {
+    for (const alan of dokunulanAlanlar) {
       kayitBelgesi[alan] = taslak[alan];
     }
     dofKontrolleri.push(kayitBelgesi);

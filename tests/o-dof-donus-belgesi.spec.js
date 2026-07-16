@@ -93,7 +93,10 @@ test.describe('O. DÖF dönüş belgesi üretimi (replay-v2, medyasız)', () => 
     expect(k.baseStateHash).toBe(kayit.baseStateHash);
     expect(k.aktifTurSirasi).toBe(kayit.aktifTurSirasi);
     expect(k.replayVersion).toBe(2);
-    expect(k.dofId).toBe(kayit.dofId);
+    // PWA Commit 4B-1: `dofId` belgeden KALDIRILDI -- Desktop importer bu
+    // alanı okumaz/doğrulamaz (dof_replay_import.py:255 hash'ten hariç,
+    // :578-580 authoritative dof_id her zaman exportUuid'den çözülür).
+    expect(Object.prototype.hasOwnProperty.call(k, 'dofId')).toBe(false);
     expect(k.submissionUuid).toBe(submissionUuid);
     for (const alan of Object.keys(tamDegerler)) {
       expect(k[alan], alan).toBe(tamDegerler[alan]);
@@ -118,17 +121,12 @@ test.describe('O. DÖF dönüş belgesi üretimi (replay-v2, medyasız)', () => 
     }
   });
 
-  test('C. Null takip alanı politikası (bilinçli tasarım kararı) -- null HER ZAMAN atlanır', async ({ page }) => {
-    // BİLİNÇLİ SAPMA: Commit 4A/4A-1'in `takipTaslagi` şeması "hiç
-    // dokunulmamış" ile "dokunulup sonra explicit null'a temizlenmiş"
-    // alanı AYNI (`null`) değerle temsil eder -- bu ikisi mevcut şemadan
-    // AYIRT EDİLEMEZ, ve bu commit o şemayı değiştirmeye yetkili değil.
-    // "Tüm alanları (null dahil) her zaman belgeye koy" seçeneği GERÇEK
-    // bir veri bütünlüğü riski taşırdı (kullanıcının hiç dokunmadığı bir
-    // alanı yanlışlıkla Desktop tarafında sıfırlardı -- Desktop dict-diff
-    // semantiği: anahtar mevcut + null = temizle). Bu yüzden GÜVENLİ
-    // seçenek uygulandı: null değerli takip alanları HER ZAMAN atlanır.
-    // Bu test, bu bilinçli davranışı kilitler -- bkz. commit raporu.
+  test('C. Explicit null replay belgesine girer -- temizleme talebi korunur (4B-1)', async ({ page }) => {
+    // PWA Commit 4B-1: 4A-2'nin sparse own-property storage'ı sayesinde
+    // "dokunulup null'a temizlenmiş" alan artık "hiç dokunulmamış"tan
+    // ayırt edilebilir -- explicit null belgeye alan:null olarak taşınır
+    // (Desktop dict-diff: anahtar mevcut + null = temizle). Eski "null
+    // her zaman atlanır" politikası İPTAL edildi.
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dofIceriAktarDene(page, paket);
     const dofUuid = paket.tehlikeler[0].dofUuid;
@@ -139,8 +137,130 @@ test.describe('O. DÖF dönüş belgesi üretimi (replay-v2, medyasız)', () => 
     const sonuc = await donusBelgesiDene(page, [{ dofUuid, submissionUuid: crypto.randomUUID() }]);
     expect(sonuc.basarili).toBe(true);
     const k = sonuc.belge.dofKontrolleri[0];
-    expect(Object.prototype.hasOwnProperty.call(k, 'sorumlu')).toBe(false);   // null -> atlandı, temizlenmiş VEYA hiç dokunulmamış ayrımı yapılmıyor
+    expect(Object.prototype.hasOwnProperty.call(k, 'sorumlu')).toBe(true);   // temizleme talebi KORUNUR
+    expect(k.sorumlu).toBe(null);
     expect(k.gerceklesen_faaliyet).toBe('Kalici deger');
+    // Hiç dokunulmamış alanlar own property DEĞİL.
+    expect(Object.prototype.hasOwnProperty.call(k, 'planlanan_tarih')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(k, 'gozlem_degerlendirme')).toBe(false);
+  });
+
+  test('C2. Absent ile explicit null aynı değildir -- iki DÖF yapısal olarak farklı çıktı üretir', async ({ page }) => {
+    const paket = gecerliDofPaketi();   // 2 kayıt, aynı paketUuid
+    await dofIceriAktarDene(page, paket);
+    const uuidAbsent = paket.tehlikeler[0].dofUuid;
+    const uuidNull = paket.tehlikeler[1].dofUuid;
+
+    // Birincide `sorumlu`ya hiç dokunulmaz, ikincide explicit null ile temizlenir.
+    await taslakGuncelleDene(page, uuidAbsent, { gerceklesen_faaliyet: 'X' });
+    await taslakGuncelleDene(page, uuidNull, { gerceklesen_faaliyet: 'Y', sorumlu: null });
+
+    const sonuc = await donusBelgesiDene(page, [
+      { dofUuid: uuidAbsent, submissionUuid: crypto.randomUUID() },
+      { dofUuid: uuidNull, submissionUuid: crypto.randomUUID() },
+    ]);
+    expect(sonuc.basarili).toBe(true);
+    const [kAbsent, kNull] = sonuc.belge.dofKontrolleri;
+    expect(Object.prototype.hasOwnProperty.call(kAbsent, 'sorumlu')).toBe(false);   // dokunulmadı -> alan YOK
+    expect(Object.prototype.hasOwnProperty.call(kNull, 'sorumlu')).toBe(true);      // temizlendi -> alan:null VAR
+    expect(kNull.sorumlu).toBe(null);
+  });
+
+  test('C3. Tarih alanlarında explicit null -- planlanan_tarih/etkinlik_kontrol_tarihi null korunur', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    await taslakGuncelleDene(page, dofUuid, { planlanan_tarih: '2026-07-15', etkinlik_kontrol_tarihi: '2026-09-05' });
+    await taslakGuncelleDene(page, dofUuid, { planlanan_tarih: null, etkinlik_kontrol_tarihi: null });
+
+    const sonuc = await donusBelgesiDene(page, [{ dofUuid, submissionUuid: crypto.randomUUID() }]);
+    expect(sonuc.basarili).toBe(true);
+    const k = sonuc.belge.dofKontrolleri[0];
+    expect(Object.prototype.hasOwnProperty.call(k, 'planlanan_tarih')).toBe(true);
+    expect(k.planlanan_tarih).toBe(null);
+    expect(Object.prototype.hasOwnProperty.call(k, 'etkinlik_kontrol_tarihi')).toBe(true);
+    expect(k.etkinlik_kontrol_tarihi).toBe(null);
+  });
+
+  test('C4. O/F/S tam null üçlüsü -- üçü de belgede explicit null bulunur', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+
+    await taslakGuncelleDene(page, dofUuid, { yeni_o: null, yeni_f: null, yeni_s: null });
+
+    const sonuc = await donusBelgesiDene(page, [{ dofUuid, submissionUuid: crypto.randomUUID() }]);
+    expect(sonuc.basarili).toBe(true);
+    const k = sonuc.belge.dofKontrolleri[0];
+    for (const alan of ['yeni_o', 'yeni_f', 'yeni_s']) {
+      expect(Object.prototype.hasOwnProperty.call(k, alan), alan).toBe(true);
+      expect(k[alan], alan).toBe(null);
+    }
+  });
+
+  test('C5. Kesin alan kümesi (exact key set) -- tam taslak belgesi yalnız sözleşme alanlarını içerir', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+    await taslakGuncelleDene(page, dofUuid, {
+      planlanan_tarih: '2026-07-15', sorumlu: 'Ahmet', gerceklesen_faaliyet: 'Pano kapatildi',
+      etkinlik_kontrol_tarihi: '2026-09-05', gozlem_degerlendirme: 'Uygun.',
+      yeni_o: 0.2, yeni_f: 3, yeni_s: 1,
+    });
+
+    const sonuc = await donusBelgesiDene(page, [{ dofUuid, submissionUuid: crypto.randomUUID() }]);
+    expect(sonuc.basarili).toBe(true);
+
+    expect(Object.keys(sonuc.belge).sort()).toEqual(['dofKontrolleri', 'paketUuid']);
+    const beklenenAnahtarlar = [
+      'dofUuid', 'exportUuid', 'baseStateHash', 'aktifTurSirasi', 'replayVersion', 'submissionUuid',
+      'planlanan_tarih', 'sorumlu', 'gerceklesen_faaliyet', 'etkinlik_kontrol_tarihi', 'gozlem_degerlendirme',
+      'yeni_o', 'yeni_f', 'yeni_s',
+    ].sort();
+    expect(Object.keys(sonuc.belge.dofKontrolleri[0]).sort()).toEqual(beklenenAnahtarlar);
+    // `dofId` kesinlikle yok (Desktop importer kullanmıyor, kanıt: commit raporu).
+  });
+
+  test('C6. JSON round-trip -- explicit null alanlar parse sonrasında da own property ve null', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+    await taslakGuncelleDene(page, dofUuid, { sorumlu: null, gerceklesen_faaliyet: 'Dolu deger' });
+
+    const sonuc = await donusJsonDene(page, [{ dofUuid, submissionUuid: crypto.randomUUID() }]);
+    expect(sonuc.basarili).toBe(true);
+    const parseEdilen = JSON.parse(sonuc.json);
+    const k = parseEdilen.dofKontrolleri[0];
+    expect(Object.prototype.hasOwnProperty.call(k, 'sorumlu')).toBe(true);
+    expect(k.sorumlu).toBe(null);
+    expect(k.gerceklesen_faaliyet).toBe('Dolu deger');
+    expect(Object.prototype.hasOwnProperty.call(k, 'planlanan_tarih')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(k, 'dofId')).toBe(false);
+  });
+
+  test('C7. Explicit null ile determinizm ve salt-okunur davranış', async ({ page }) => {
+    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+    await dofIceriAktarDene(page, paket);
+    const dofUuid = paket.tehlikeler[0].dofUuid;
+    await taslakGuncelleDene(page, dofUuid, { sorumlu: null, yeni_o: null, yeni_f: null, yeni_s: null });
+
+    const oncekiTumKayitlar = await tumDoflerGetir(page);
+
+    const submissionUuid = crypto.randomUUID();
+    const girdi = [{ dofUuid, submissionUuid }];
+    const sonuc1 = await donusBelgesiDene(page, girdi);
+    const sonuc2 = await donusBelgesiDene(page, girdi);
+    expect(sonuc1.basarili).toBe(true);
+    expect(sonuc1.belge).toEqual(sonuc2.belge);
+
+    const json1 = await donusJsonDene(page, girdi);
+    const json2 = await donusJsonDene(page, girdi);
+    expect(json1.json).toBe(json2.json);
+
+    // Salt-okunur: taslak/timestamp/kimlikler dahil hiçbir kayıt değişmedi.
+    const sonrakiTumKayitlar = await tumDoflerGetir(page);
+    expect(sonrakiTumKayitlar).toEqual(oncekiTumKayitlar);
   });
 
   test('D. Birden fazla DÖF -- aynı paketUuid, girdi sırası korunur, kayıtlar birbirini etkilemez', async ({ page }) => {
@@ -292,8 +412,13 @@ test.describe('O. DÖF dönüş belgesi üretimi (replay-v2, medyasız)', () => 
     const bozukTaslaklar = [
       { ad: 'bilinmeyen alan', taslak: { sorumlu: 'x', bilinmeyenAlan: 'y' } },
       { ad: 'geçersiz sayısal değer', taslak: { yeni_o: 99, yeni_f: 3, yeni_s: 1 } },
-      { ad: 'kısmi O/F/S üçlüsü', taslak: { yeni_o: 0.2, yeni_f: null, yeni_s: null } },
+      { ad: 'karışık null/değer O/F/S üçlüsü', taslak: { yeni_o: 0.2, yeni_f: null, yeni_s: null } },
+      { ad: 'biri null diğerleri sayı O/F/S', taslak: { yeni_o: 3, yeni_f: null, yeni_s: 15 } },
+      { ad: 'yalnız yeni_o own property (4B-1)', taslak: { yeni_o: 0.2 } },
+      { ad: 'yalnız iki O/F/S alanı own property (4B-1)', taslak: { yeni_o: 3, yeni_f: 2 } },
+      { ad: 'biri eksik O/F/S (4B-1)', taslak: { yeni_o: 3, yeni_s: 15 } },
       { ad: 'object tipli metin', taslak: { sorumlu: { x: 1 } } },
+      { ad: 'normalize edilmemiş metin (trim edilmemiş, DB manipülasyonu)', taslak: { sorumlu: '  x  ' } },
     ];
 
     for (const { ad, taslak } of bozukTaslaklar) {
