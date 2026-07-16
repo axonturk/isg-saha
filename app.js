@@ -1369,6 +1369,76 @@ async function dofDonusGirdileriHazirla(dofUuidListesi) {
   });
 }
 
+// ─── DÖF REPLAY ZIP ÜRETİMİ (PWA Commit 4D, medyasız) ───────────
+// Kanonik zincir: dofler kaydı -> takipTaslagi -> replayHazirlik.
+// submissionUuid -> dof_donus.json -> ZIP. Mevcut `zipYaz` (store-only,
+// harici kütüphanesiz) DEĞİŞTİRİLMEDEN kullanılır. ZIP'te tek entry
+// vardır: `dof_donus.json` (Desktop `_replay_json_adaylari` öncelik-0
+// adı). Otomatik indirme/UI/medya YOKTUR; fonksiyon test edilebilir bir
+// Blob döndürür. IndexedDB'ye HİÇBİR yazma yapılmaz, submission UUID
+// ÜRETİLMEZ (hazırlık üretimi Commit 4C'nin sorumluluğudur -- hazırlık
+// yoksa/eskiyse ZIP reddedilir, otomatik oluşturma/yenileme YAPILMAZ).
+// Not: `zipYaz` DOS zaman damgası yazdığından ZIP BYTE çıktısı çağrılar
+// arasında farklı olabilir -- deterministik olan, içindeki
+// `dof_donus.json` METNİDİR (testle kilitlendi).
+
+/** Medyasız replay ZIP paketi üretir. Her seçili DÖF için:
+ * 1) mevcut `replayHazirlik.submissionUuid` kullanılır (yoksa
+ *    `REPLAY_HAZIRLIK_YOK`),
+ * 2) güncel `takipTaslagi` parmak izi hazırlıktakiyle karşılaştırılır --
+ *    farklıysa `REPLAY_HAZIRLIK_ESKI` (eski submission kimliği eski
+ *    içeriğe aittir; önce `dofReplayHazirlikHazirla` yeniden çalışmalı),
+ * 3) `dofDonusBelgesiOlustur` zinciriyle kanonik belge üretilir
+ *    (duplicate/karışık paket/bozuk taslak retleri orada),
+ * 4) `zipYaz` ile tek entry'li (`dof_donus.json`) ZIP Blob'u yazılır.
+ * Başarıda `{ zipBlob, dosyaAdi, dofSayisi, paketUuid }` döner. */
+async function dofReplayZipOlustur(dofUuidListesi) {
+  // Girdi doğrulama + hazırlık varlığı (GECERSIZ_GIRDI/DOF_BULUNAMADI/
+  // KANONIK_DOF_DEGIL/REPLAY_HAZIRLIK_YOK) -- salt-okunur.
+  const girdiler = await dofDonusGirdileriHazirla(dofUuidListesi);
+
+  // Eskilik kontrolü: güncel taslağın SHA-256 parmak izi, hazırlıkta
+  // saklanan parmak iziyle birebir aynı olmalı. (Taslak burada savunmacı
+  // olarak da doğrulanır -- bozuk taslak GECERSIZ_TAKIP_TASLAGI verir.)
+  const kayitlar = await _dofKanonikKayitlariOku(dofUuidListesi);
+  for (let i = 0; i < dofUuidListesi.length; i++) {
+    const dofUuid = dofUuidListesi[i];
+    const kayit = kayitlar[i];
+    const dogrulama = _dofHazirlikKayitDogrula(kayit, dofUuid);
+    if (!kayit.replayHazirlik || typeof kayit.replayHazirlik.taslakParmakIzi !== 'string') {
+      throw new DofImportHatasi('REPLAY_HAZIRLIK_YOK', `dofUuid için replay hazırlığı yapılmamış: ${dofUuid}`);
+    }
+    const guncelParmakIzi = await _dofSha256Hex(dogrulama.kanonikJson);
+    if (guncelParmakIzi !== kayit.replayHazirlik.taslakParmakIzi) {
+      throw new DofImportHatasi('REPLAY_HAZIRLIK_ESKI', `Takip taslağı hazırlıktan sonra değişmiş -- önce dofReplayHazirlikHazirla yeniden çağrılmalı: ${dofUuid}`);
+    }
+  }
+
+  // Kanonik belge + JSON metni (dofDonusJsonOlustur ile AYNI biçim:
+  // JSON.stringify(belge, null, 2) -- aynı DB durumu için birebir aynı).
+  const belge = await dofDonusBelgesiOlustur(girdiler);
+  const jsonMetni = JSON.stringify(belge, null, 2);
+  if (typeof belge.paketUuid !== 'string' || belge.paketUuid.length === 0) {
+    throw new DofImportHatasi('ZIP_URETIM_HATASI', 'Belge paketUuid içermiyor -- dosya adı üretilemez.');
+  }
+
+  let zipBlob;
+  try {
+    zipBlob = await zipYaz([{ ad: 'dof_donus.json', veri: jsonMetni }]);
+  } catch (e) {
+    throw new DofImportHatasi('ZIP_URETIM_HATASI', `ZIP üretimi başarısız: ${e && e.message}`);
+  }
+
+  return {
+    zipBlob,
+    // paketUuid kanonik import doğrulamasından geçmiş bir UUID metnidir
+    // (kullanıcı girdisi değildir) -- path ayracı/tehlikeli karakter içermez.
+    dosyaAdi: `dof_replay_${belge.paketUuid}.zip`,
+    dofSayisi: belge.dofKontrolleri.length,
+    paketUuid: belge.paketUuid,
+  };
+}
+
 // Test/kullanım için global erişim -- aynı sınırlı namespace genişletildi.
 if (typeof window !== 'undefined') {
   window._dofImport = {
@@ -1376,7 +1446,7 @@ if (typeof window !== 'undefined') {
     dofTakipTaslagiGetir, dofTakipTaslagiGuncelle, dofTakipTaslagiTemizle,
     dofDonusBelgesiOlustur, dofDonusJsonOlustur,
     dofReplayHazirlikGetir, dofReplayHazirlikHazirla, dofReplayHazirlikTemizle,
-    dofDonusGirdileriHazirla,
+    dofDonusGirdileriHazirla, dofReplayZipOlustur,
   };
 }
 
