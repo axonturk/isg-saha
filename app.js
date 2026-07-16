@@ -1120,12 +1120,263 @@ async function dofDonusJsonOlustur(girdiler) {
   return JSON.stringify(belge, null, 2);
 }
 
+// ─── DÖF REPLAY HAZIRLIK KİMLİĞİ (PWA Commit 4C) ────────────────
+// `submissionUuid` yaşam döngüsü: aynı takip taslağı için AYNI submission
+// kimliği korunur (Desktop `submission_uuid` global-unique idempotency
+// koruması bozulmaz -- aynı taslağın tekrar denenen ZIP hazırlığı yeni
+// submission ÜRETMEZ), taslak anlamlı biçimde değişirse YENİ UUIDv4
+// üretilir. Kimlik, kanonik `dofler` kaydında `replayHazirlik` nested
+// metadata alanında saklanır -- imported kimlikler / `takipTaslagi` /
+// `taslakGuncellenmeZamani` / `iceAktarilmaZamani` / snapshot alanlarına
+// asla dokunulmaz. ZIP/medya/UI bu commit'te YOKTUR.
+//
+// Taslak parmak izi: sparse `takipTaslagi`'nın KANONİK JSON'unun (izinli
+// alanlar alfabetik sırada, yalnız own-property olanlar -- absent ile
+// explicit null bu sayede FARKLI serileşir) SHA-256 hex özeti. Girdisinde
+// zaman/rastgelelik/locale yoktur -- aynı semantik taslak her zaman aynı
+// parmak izini üretir, anahtar sırasından etkilenmez.
+
+/** Sparse (doğrulanmış) taslağın kanonik JSON metni: yalnız own-property
+ * izinli alanlar, alfabetik anahtar sırası. `{}` !== `{"sorumlu":null}` --
+ * absent/null ayrımı korunur. */
+function _dofTaslakKanonikJson(taslak) {
+  const sirali = {};
+  for (const alan of [..._DOF_TAKIP_ALANLARI].sort()) {
+    if (Object.prototype.hasOwnProperty.call(taslak, alan)) sirali[alan] = taslak[alan];
+  }
+  return JSON.stringify(sirali);
+}
+
+/** Web Crypto ile SHA-256 (lowercase hex). Deterministik. */
+async function _dofSha256Hex(metin) {
+  const ozet = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(metin));
+  return Array.from(new Uint8Array(ozet)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Kaydı okuyup kanoniklik + taslak doğrulaması yapar (ortak ön kontrol).
+ * Geçerliyse `{ kayit, taslak, kanonikJson }` döner. */
+function _dofHazirlikKayitDogrula(kayit, dofUuid) {
+  if (!kayit) {
+    throw new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+  }
+  if (!_dofKanonikMi(kayit)) {
+    throw new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+  }
+  if (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object') {
+    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
+  }
+  const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi);
+  const dokunulan = _DOF_TAKIP_ALANLARI.some((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
+  if (!dokunulan) {
+    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alana dokunulmamış): ${dofUuid}`);
+  }
+  return { kayit, taslak, kanonikJson: _dofTaslakKanonikJson(taslak) };
+}
+
+/** Kanonik bir DÖF kaydının replay hazırlık metadata'sını okur (salt-
+ * okunur). Hazırlık yoksa `replayHazirlik: null` döner; varsa bağımsız
+ * kopya döner (mutasyonu DB'yi etkilemez). */
+async function dofReplayHazirlikGetir(dofUuid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readonly');
+    const getReq = tx.objectStore('dofler').get(dofUuid);
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        reject(new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`));
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        reject(new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`));
+        return;
+      }
+      const h = kayit.replayHazirlik;
+      resolve({ dofUuid, replayHazirlik: h ? { ...h } : null });
+    };
+    getReq.onerror = () => {
+      reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
+    };
+  });
+}
+
+/** Replay hazırlığını oluşturur/korur/yeniler:
+ * - hazırlık yoksa yeni UUIDv4 `submissionUuid` üretir (`durum:'olusturuldu'`),
+ * - mevcut hazırlığın parmak izi güncel taslakla AYNI ise hiçbir yazma
+ *   yapmadan mevcut kimliği aynen döndürür (`durum:'degismedi'` --
+ *   `guncellenmeZamani` DEĞİŞMEZ),
+ * - taslak parmak izi değişmişse YENİ UUIDv4 üretir (`durum:'yenilendi'`,
+ *   `olusturulmaZamani` korunur, `guncellenmeZamani` güncellenir).
+ * UUIDv4 üretimi YALNIZ bu fonksiyondadır (`dofDonusBelgesiOlustur` hâlâ
+ * üretmez, yalnız dışarıdan alır).
+ *
+ * SHA-256 (Web Crypto) async olduğundan ve IndexedDB transaction'ları
+ * bekleyen istek kalmayınca otomatik kapandığından, parmak izi asıl
+ * `readwrite` transaction AÇILMADAN ÖNCE hesaplanır; transaction içinde
+ * kayıt yeniden okunur ve kanonik JSON'un hâlâ aynı olduğu senkron
+ * doğrulanır (eşzamanlı değişiklik varsa yazmadan reddedilir) -- yetkili
+ * read-modify-write tek transaction içindedir, kısmi yazma olamaz. */
+async function dofReplayHazirlikHazirla(dofUuid) {
+  // Ön aşama (tx dışı): oku + doğrula + parmak izini hesapla.
+  const onKayit = await new Promise((resolve, reject) => {
+    openDB().then((db) => {
+      const getReq = db.transaction('dofler', 'readonly').objectStore('dofler').get(dofUuid);
+      getReq.onsuccess = () => resolve(getReq.result);
+      getReq.onerror = () => reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
+    }, reject);
+  });
+  const onDogrulama = _dofHazirlikKayitDogrula(onKayit, dofUuid);   // DOF_BULUNAMADI/KANONIK_DOF_DEGIL/taslak hataları burada
+  const parmakIzi = await _dofSha256Hex(onDogrulama.kanonikJson);
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const getReq = store.get(dofUuid);
+    let sonucDegeri = null;
+    let hata = null;
+
+    getReq.onsuccess = () => {
+      let dogrulama;
+      try {
+        dogrulama = _dofHazirlikKayitDogrula(getReq.result, dofUuid);
+      } catch (e) {
+        hata = e;
+        tx.abort();
+        return;
+      }
+      const { kayit, kanonikJson } = dogrulama;
+      if (kanonikJson !== onDogrulama.kanonikJson) {
+        // Ön aşama ile transaction arasında taslak değişti (tek kullanıcılı
+        // uygulamada pratikte imkânsız) -- kısmi/yanlış yazmaktansa reddet.
+        hata = new DofImportHatasi('VERITABANI_HATASI', `Hazırlık sırasında takip taslağı eşzamanlı değişti, yeniden deneyin: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+
+      const mevcut = kayit.replayHazirlik;
+      if (mevcut && mevcut.taslakParmakIzi === parmakIzi) {
+        // Aynı taslak -> aynı submission kimliği, HİÇBİR yazma yok.
+        sonucDegeri = { durum: 'degismedi', dofUuid, replayHazirlik: { ...mevcut } };
+        return;
+      }
+
+      const simdi = new Date().toISOString();
+      const yeniHazirlik = {
+        submissionUuid: crypto.randomUUID(),   // yalnız burada üretilir
+        taslakParmakIzi: parmakIzi,
+        olusturulmaZamani: mevcut ? mevcut.olusturulmaZamani : simdi,
+        guncellenmeZamani: simdi,
+      };
+      store.put({ ...kayit, replayHazirlik: yeniHazirlik });
+      sonucDegeri = { durum: mevcut ? 'yenilendi' : 'olusturuldu', dofUuid, replayHazirlik: { ...yeniHazirlik } };
+    };
+    getReq.onerror = () => {
+      hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+      tx.abort();
+    };
+
+    tx.oncomplete = () => {
+      if (hata) return;
+      resolve(sonucDegeri);
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
+/** Yalnız `replayHazirlik` metadata'sını kaldırır -- `takipTaslagi`,
+ * imported kimlikler ve diğer tüm alanlar birebir korunur. Hazırlık zaten
+ * yoksa idempotent no-op'tur (`put` çağrılmaz). Kanonik olmayan kayıtları
+ * reddeder. */
+async function dofReplayHazirlikTemizle(dofUuid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const getReq = store.get(dofUuid);
+    let sonucDegeri = null;
+    let hata = null;
+
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        hata = new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        hata = new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      if (kayit.replayHazirlik === undefined) {
+        sonucDegeri = { durum: 'degismedi', dofUuid };
+        return; // idempotent no-op -- put yok
+      }
+      const { replayHazirlik, ...kalanKayit } = kayit;
+      store.put(kalanKayit);
+      sonucDegeri = { durum: 'temizlendi', dofUuid };
+    };
+    getReq.onerror = () => {
+      hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+      tx.abort();
+    };
+
+    tx.oncomplete = () => {
+      if (hata) return;
+      resolve(sonucDegeri);
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
+/** Hazırlığı yapılmış DÖF'ler için `dofDonusBelgesiOlustur` girdi dizisini
+ * (`[{dofUuid, submissionUuid}]`) üretir -- SALT-OKUNUR, DB'ye yazmaz,
+ * UUID üretmez. Sıra, girdi listesi sırasıyla birebir aynıdır. Hazırlığı
+ * olmayan kayıt için `REPLAY_HAZIRLIK_YOK` fırlatır. */
+async function dofDonusGirdileriHazirla(dofUuidListesi) {
+  if (!Array.isArray(dofUuidListesi) || dofUuidListesi.length === 0) {
+    throw new DofImportHatasi('GECERSIZ_GIRDI', 'dofUuidListesi boş olmayan bir dizi olmalı.');
+  }
+  for (let i = 0; i < dofUuidListesi.length; i++) {
+    if (!_dofGecerliUuidMi(dofUuidListesi[i])) {
+      throw new DofImportHatasi('GECERSIZ_GIRDI', `dofUuidListesi[${i}] geçerli bir UUID değil.`);
+    }
+  }
+  const kayitlar = await _dofKanonikKayitlariOku(dofUuidListesi);
+  return dofUuidListesi.map((dofUuid, i) => {
+    const kayit = kayitlar[i];
+    if (!kayit) {
+      throw new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+    }
+    if (!_dofKanonikMi(kayit)) {
+      throw new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+    }
+    if (!kayit.replayHazirlik || typeof kayit.replayHazirlik.submissionUuid !== 'string') {
+      throw new DofImportHatasi('REPLAY_HAZIRLIK_YOK', `dofUuid için replay hazırlığı yapılmamış (önce dofReplayHazirlikHazirla çağrılmalı): ${dofUuid}`);
+    }
+    return { dofUuid, submissionUuid: kayit.replayHazirlik.submissionUuid };
+  });
+}
+
 // Test/kullanım için global erişim -- aynı sınırlı namespace genişletildi.
 if (typeof window !== 'undefined') {
   window._dofImport = {
     dofPaketiIceriAktar, DofImportHatasi,
     dofTakipTaslagiGetir, dofTakipTaslagiGuncelle, dofTakipTaslagiTemizle,
     dofDonusBelgesiOlustur, dofDonusJsonOlustur,
+    dofReplayHazirlikGetir, dofReplayHazirlikHazirla, dofReplayHazirlikTemizle,
+    dofDonusGirdileriHazirla,
   };
 }
 
