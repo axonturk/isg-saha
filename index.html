@@ -345,6 +345,11 @@
             <button class="btn btn-primary" onclick="openOCR('kanit')" style="margin-bottom:10px; background: #8e44ad;">
                 <i class="fas fa-camera"></i> Çek-Onayla (Kanıt Fotoğrafı)
             </button>
+            <input type="file" id="galeri-foto-input" accept="image/*" style="display:none" onchange="_galeriDosyaSecildi(this)">
+            <button class="btn btn-outline" style="margin-bottom:10px;" onclick="document.getElementById('galeri-foto-input').click()">
+                <i class="fas fa-image"></i> Resim Yükle
+            </button>
+            <div id="galeri-foto-durum" style="font-size:0.8rem; color:#666;"></div>
             <div id="foto-onizleme"></div>
             <button id="btn-ses-kaydi" class="btn" style="margin-top:10px; background:#eee; color:#333;" onclick="toggleSesKaydi()">
                 🎤 Ses Notu Kaydet

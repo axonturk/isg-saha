@@ -89,13 +89,14 @@ test.describe('F. Fotoğraf davranışı (gerçek kamera akışı, sanal donanı
   });
 });
 
-test.describe('F. Galeri desteği (negatif karakterizasyon)', () => {
-  test('committed baseline denetim ekraninda ayri bir galeriden yukleme UI kontrolu icermez', async ({ page }) => {
+test.describe('F. Galeri desteği', () => {
+  test('PWA Commit 4L ile galeriden yükleme input\'u denetim ekranında mevcuttur', async ({ page }) => {
     await _denetimBaslat(page);
-    // Bu temiz worktree (852764c) tabanında `type="file"` bir input HİÇ YOK
-    // -- yalnız `getUserMedia` tabanlı kamera akışı var. (WIP'in DÖF JSON
-    // input'u bu branch'e taşınmadı, bkz. commit planı §2.)
+    // PWA Commit 4L öncesi burada `type="file"` bir input HİÇ YOKTU (yalnız
+    // `getUserMedia` tabanlı kamera akışı vardı) -- bu negatif karakterizasyon
+    // artık pozitife döndü (bkz. tests/x-gallery-image-upload.spec.js, kapsamlı
+    // galeri davranışı orada test edilir, burada yalnız varlığı doğrulanır).
     const dosyaInputlari = await page.locator('#screen-inspection input[type="file"]').count();
-    expect(dosyaInputlari, 'Galeriden bağımsız yükleme UI\'ı committed baseline\'da bulunmuyor.').toBe(0);
+    expect(dosyaInputlari, 'Galeriden yükleme input\'u PWA Commit 4L ile eklendi.').toBe(1);
   });
 });

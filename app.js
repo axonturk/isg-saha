@@ -3306,6 +3306,29 @@ async function fotoAlVeSikistir(kaynak) {
 }
 if (typeof window !== 'undefined') window.fotoAlVeSikistir = fotoAlVeSikistir;
 
+// Galeri/dosya seçici ile "Resim Yükle" butonu (PWA Commit 4L). Kamera
+// akışını hiç değiştirmez -- yalnız aynı aktifFotolarTaslak/fotoAlVeSikistir
+// hattına, ayrı bir dosya kaynağından besler.
+async function _galeriDosyaSecildi(input) {
+  const dosya = input.files && input.files[0];
+  const durum = document.getElementById('galeri-foto-durum');
+  if (!dosya) return;   // seçim iptal edildi -- no-op
+  input.value = '';     // aynı dosya tekrar seçilebilsin
+
+  if (!dosya.type || !dosya.type.startsWith('image/')) {
+    if (durum) durum.textContent = 'Yalnız görsel dosyası yüklenebilir.';
+    return;
+  }
+  try {
+    await _resmiYukle(dosya);   // DB'ye eklemeden önce gerçekten çözümlenebildiğini doğrula
+    await fotoAlVeSikistir(dosya);
+    if (durum) durum.textContent = 'Resim denetime eklendi.';
+  } catch (e) {
+    if (durum) durum.textContent = 'Görsel okunamadı.';
+  }
+}
+if (typeof window !== 'undefined') window._galeriDosyaSecildi = _galeriDosyaSecildi;
+
 // ─── ZIP DIŞA AKTARMA (Birim / Kurum) ────────────────────────
 // Ortak format: denetimler.json (array) + fotolar/ (düz, `${denetimId}_${bulguId}.jpg`)
 // Bu format tek denetimli (birim) ve çok denetimli (kurum) ihracatta AYNIDIR.
