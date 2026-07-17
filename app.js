@@ -2283,10 +2283,22 @@ function _ekraniPushEt(ekranAdi) {
   }
 }
 
+// PWA Commit 4M: aynı konuma hızlı geri-dönüş senaryosunda (mevcut denetime
+// devam ederken) bu 250ms fallback ESKİ (stale) bir çağrıdan kalıp, ARADAN
+// başka bir _geriTikla çağrısı geçtikten SONRA tetiklenip o an TAMAMEN
+// alakasız bir nedenle (ör. ikinci kez ekranKatAlanaGec()/startInspection()
+// ile inceleme ekranına dönülmüş olması) `oncekiEkranId`in class'ı yeniden
+// "active" olduğu için YANLIŞLIKLA devreye girip kullanıcıyı kurulum
+// ekranına fırlatabiliyordu. Jeton (generation) ile YALNIZ EN SON
+// _geriTikla çağrısının fallback'i geçerli sayılır -- ara navigasyon
+// olduysa eski zamanlayıcı sessizce iptal olur.
+let _geriTiklaJetonu = 0;
 function _geriTikla(oncekiEkranId) {
+  const jeton = ++_geriTiklaJetonu;
   const oncekiAktifMi = document.getElementById(oncekiEkranId).classList.contains('active');
   if (typeof history !== 'undefined' && history.back) history.back();
   setTimeout(() => {
+    if (jeton !== _geriTiklaJetonu) return;   // aradan yeni bir geri-tıklama geçti -- bu zamanlayıcı geçersiz
     // popstate 250ms içinde gelmediyse (bazı gömülü tarayıcılar) manuel düş.
     if (oncekiAktifMi && document.getElementById(oncekiEkranId).classList.contains('active')) {
       _setupEkraninaGec();
@@ -2803,30 +2815,56 @@ async function startInspection() {
     await dbGuncelle('birimler', birim);
   }
 
-  const denetim = {
-    id: uuid(),
-    kurumId,
-    birimId,
-    bina: birim.ad,
-    kat: secilenKat,
-    odaId: odaKaydi.id,
-    oda: odaKaydi.ad,
-    alanTipi: odaKaydi.alanTipi,
-    odaNo: odaKaydi.no,
-    tur: secilenTur,
-    sorumlu: resp,
-    baslangic: new Date().toISOString(),
-    guncelleme: new Date().toISOString()
-  };
-  await dbEkle('denetimler', denetim);
+  // Aynı konuma (kurum/birim/oda/denetim türü) daha önce başlanmış bir
+  // denetim varsa yenisini oluşturmak yerine ona devam edilir (PWA Commit
+  // 4M) -- bulgu/foto/ses/not mevcut kayda eklenir, hiçbir eski veri
+  // silinmez/overwrite edilmez. odaKaydi zaten (kat, alanTipi, no) ile
+  // tekilleştirildiği için burada yalnız odaId + tur eşleşmesi yeterli.
+  const birimDenetimleri = await dbIndexTumu('denetimler', 'birimId', birimId);
+  const eslesenler = birimDenetimleri.filter(d =>
+    d.kurumId === kurumId && d.odaId === odaKaydi.id && d.tur === secilenTur);
+  eslesenler.sort((a, b) => (b.guncelleme || b.baslangic || '').localeCompare(a.guncelleme || a.baslangic || ''));
+  let denetim = eslesenler[0] || null;
+  const mevcudaDevamEdildi = !!denetim;
+
+  if (denetim) {
+    denetim.guncelleme = new Date().toISOString();
+    await dbGuncelle('denetimler', denetim);
+  } else {
+    denetim = {
+      id: uuid(),
+      kurumId,
+      birimId,
+      bina: birim.ad,
+      kat: secilenKat,
+      odaId: odaKaydi.id,
+      oda: odaKaydi.ad,
+      alanTipi: odaKaydi.alanTipi,
+      odaNo: odaKaydi.no,
+      tur: secilenTur,
+      sorumlu: resp,
+      baslangic: new Date().toISOString(),
+      guncelleme: new Date().toISOString()
+    };
+    await dbEkle('denetimler', denetim);
+  }
 
   currentSession = denetim;
   sessionBulgular = [];
   updateLocationDisplay();
+  _denetimDevamDurumGoster(mevcudaDevamEdildi);
   showScreen('inspection');
   _ekraniPushEt('inceleme');   // Kat-Alan ekranı yığında kalır — geri tuşu ORAYA döner (Kurulum'a atlamaz)
   startTimer();
   await renderFindings();
+}
+
+function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
+  const el = document.getElementById('denetim-devam-durum');
+  if (!el) return;
+  el.textContent = mevcudaDevamEdildi
+    ? 'Bu konum için mevcut denetime devam ediliyor.'
+    : 'Yeni denetim başlatıldı.';
 }
 
 function updateLocationDisplay() {

@@ -1,11 +1,14 @@
-// PWA Commit 2 / Bölüm J -- mevcut yeniden giriş davranışı karakterizasyonu.
-// BU DAVRANIŞ DEĞİŞTİRİLMEZ -- yalnız gözlemlenip isimde açıkça yazılır.
-// Commit 8'de ürün kararıyla bilinçli olarak değiştirilecektir.
+// PWA Commit 2 / Bölüm J -- yeniden giriş davranışı.
+// PWA Commit 4M ile davranış BİLİNÇLİ olarak değiştirildi: aynı kurum/birim/
+// oda/denetim türü ile ikinci kez girildiğinde ARTIK yeni bir denetim kaydı
+// AÇILMAZ -- mevcut kayda devam edilir (bkz. tests/y-same-location-append.spec.js,
+// kapsamlı davranış orada test edilir; burada yalnız bu dosyanın önceki
+// negatif karakterizasyonu pozitife çevrildi).
 const { test, expect } = require('@playwright/test');
 const { benzersizAd, gercekKurumEkle, gercekBirimEkle, storeTumu } = require('./helpers');
 
-test.describe('J. Mevcut yeniden giriş davranışı', () => {
-  test('mevcut baseline aynı konuma (kurum/birim/kat/alan/oda) ikinci girişte yeni bir denetim kaydi olusturur, eski kayda eklemez', async ({ page }) => {
+test.describe('J. Yeniden giriş davranışı', () => {
+  test('PWA Commit 4M ile aynı konuma (kurum/birim/kat/alan/oda) ikinci girişte YENİ denetim ACILMAZ, mevcut kayda devam edilir', async ({ page }) => {
     const kurumAdi = benzersizAd('Kurum');
     const birimAdi = benzersizAd('Birim');
     await page.goto('/index.html');
@@ -15,7 +18,6 @@ test.describe('J. Mevcut yeniden giriş davranışı', () => {
     // --- Birinci giriş: kurum/birim/kat/alan/oda aynı ---
     await page.click('button[onclick="ekranKatAlanaGec()"]');
     const alanChip1 = page.locator('#kat-alan-hizli-chips .chip').first();
-    const alanAdi = (await alanChip1.getAttribute('data-alan')) || (await alanChip1.textContent());
     await alanChip1.click();
     await page.locator('#kat-alan-oda-no').fill('101');
     await page.click('button[onclick="startInspection()"]');
@@ -28,13 +30,6 @@ test.describe('J. Mevcut yeniden giriş davranışı', () => {
     const ilkDenetim = denetimlerIlkGiris[0];
 
     // --- Geri dön, TAM AYNI kurum/birim/kat/alan/oda ile ikinci kez başlat ---
-    // NOT (ayrı gözlem): geri navigasyon sonrası "Bu Kattaki Mevcut Odalar"
-    // hızlı-seçim bölümü YENİDEN ÇİZİLMEZ (popstate handler yalnız
-    // showScreen() çağırır, _katAlanMevcutOdalariGoster() TEKRAR
-    // ÇALIŞTIRILMAZ) -- DOM o an için "eski" kalır. Bu test o quirk'i
-    // DEĞİL, asıl denetim-kaydı davranışını hedeflediği için aynı alan
-    // chip'i + aynı oda no'yu ELLE tekrar girerek (gerçek kullanıcının
-    // odayı yeniden yazması gibi) aynı odaKaydi eşleşmesini tetikler.
     await page.click('button[onclick="goToSetup()"]');
     await expect(page.locator('#screen-kat-alan')).toHaveClass(/active/);
     const alanChip2 = page.locator('#kat-alan-hizli-chips .chip').first();
@@ -42,34 +37,26 @@ test.describe('J. Mevcut yeniden giriş davranışı', () => {
     await page.locator('#kat-alan-oda-no').fill('101');
     await page.click('button[onclick="startInspection()"]');
     await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+    await expect(page.locator('#denetim-devam-durum')).toHaveText('Bu konum için mevcut denetime devam ediliyor.');
 
     const denetimlerIkinciGiris = await storeTumu(page, 'denetimler');
     const birimler = await storeTumu(page, 'birimler');
     const birim = birimler[0];
 
-    // Gözlemlenen (DEĞİŞTİRİLMEYEN) davranış: YENİ bir denetim kaydı oluşur.
-    // NOT: `dbTumu` (IndexedDB getAll()) sonuçları PRIMARY KEY (uuid metni)
-    // sırasına göre döner, EKLENME sırasına göre DEĞİL -- bu yüzden ikinci
-    // kaydı array index'iyle DEĞİL, id'siyle (ilkDenetim.id'den FARKLI olan)
-    // buluyoruz.
-    expect(denetimlerIkinciGiris.length).toBe(2);
-    const ikinciDenetim = denetimlerIkinciGiris.find((d) => d.id !== ilkDenetim.id);
-    expect(ikinciDenetim).toBeTruthy();
-    expect(ikinciDenetim.id).not.toBe(ilkDenetim.id);
-    // Ama fiziksel oda kaydı TEKRAR OLUŞTURULMAZ -- ikisi de AYNI odaId'yi paylaşır.
-    expect(ikinciDenetim.odaId).toBe(ilkDenetim.odaId);
+    // PWA Commit 4M: YENİ denetim kaydı AÇILMAZ -- tek kayıt kalır, aynı id.
+    expect(denetimlerIkinciGiris.length).toBe(1);
+    expect(denetimlerIkinciGiris[0].id).toBe(ilkDenetim.id);
+    expect(denetimlerIkinciGiris[0].odaId).toBe(ilkDenetim.odaId);
     expect(birim.odalar.length).toBe(1);
 
-    // İlk ziyaretin bulgusu ikinci (yeni) denetime GÖRÜNMEZ -- iki ayrı
-    // "Geçmiş Kayıt" olarak kalır, birleşik/tekil bir oturum OLUŞTURULMAZ.
-    await expect(page.locator('#findings-list')).not.toContainText('Birinci ziyaret bulgusu.');
+    // İlk ziyaretin bulgusu mevcut denetime bağlı olduğu için GÖRÜNÜR kalır.
+    await expect(page.locator('#findings-list')).toContainText('Birinci ziyaret bulgusu.');
 
-    // Geçmiş Kayıtlar listesinde aynı birim altında 2 ayrı satır görünür.
+    // Geçmiş Kayıtlar listesinde bu konum için TEK satır görünür (duplicate yok).
     await page.click('button[onclick="goToSetup()"]');
     await expect(page.locator('#screen-kat-alan')).toHaveClass(/active/);
     await page.click('button[onclick="katAlanGeri()"]');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
-    const gecmisSatirlari = page.locator(`[data-swipe-id="${ilkDenetim.id}"], [data-swipe-id="${ikinciDenetim.id}"]`);
-    await expect(gecmisSatirlari).toHaveCount(2);
+    await expect(page.locator(`[data-swipe-id="${ilkDenetim.id}"]`)).toHaveCount(1);
   });
 });
