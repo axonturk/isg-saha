@@ -109,6 +109,11 @@
         .header {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 20px;
+            /* Saha kullanımında breadcrumb/konum metni (ör. "Rektörlük / Zemin")
+               Android'de uzun basmada sözlük/çeviri balonu açıyordu -- bu alan
+               etkileşimli/tıklanabilir değil, seçilebilir olmamalı. Butonların
+               tıklanabilirliği user-select ile etkilenmez. */
+            user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
         }
         .version-badge { font-size: 0.7rem; background: #ddd; padding: 2px 6px; border-radius: 4px; }
     </style>

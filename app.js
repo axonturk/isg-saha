@@ -2265,6 +2265,29 @@ if (navigator.serviceWorker) {
   });
 }
 
+// PWA Mobile Field Hotfix: yeni bir Service Worker devraldığında (yeni
+// deploy sonrası cache/version güncellendiğinde) AÇIK KALMIŞ bir sekme
+// eski cache'ten yüklenmiş app.js ile hâlâ çalışmaya devam edebiliyordu --
+// yeni index.html'de olup eski (bellekte zaten çalışan) app.js'te olmayan
+// bir fonksiyona (ör. galeri/aynı-konum işleyicileri) dokunulunca senkron
+// hata fırlıyor, global hata bandını tetikliyordu (eski-yeni JS karışımı).
+// `controllerchange` -- yeni SW devraldığı anı bildirir -- ile sayfa BİR
+// KEZ yenilenir, böylece HTML/JS/SW her zaman aynı sürümde kalır.
+// ÖNEMLİ: `clients.claim()` (sw.js'de zaten vardı) İLK KURULUMDA da
+// controller'ı null'dan bir worker'a geçirip bu event'i tetikler -- o an
+// sayfa zaten TAM DOĞRU (yeni) app.js ile çalışıyor, yenilemeye gerek yok.
+// Yalnız sayfa DAHA ÖNCE (yüklenirken) zaten bir controller'a sahipse ve
+// SONRADAN bu değişirse gerçek bir "eski sekim, yeni SW" senaryosudur.
+if (navigator.serviceWorker) {
+  const _swZatenKontrolluydu = !!navigator.serviceWorker.controller;
+  let _swYenilemeYapildi = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_swYenilemeYapildi || !_swZatenKontrolluydu) return;
+    _swYenilemeYapildi = true;
+    location.reload();
+  });
+}
+
 // ─── EKRAN YÖNETİMİ ──────────────────────────────────────────
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
