@@ -1,4 +1,4 @@
-const CACHE = 'isg-saha-v16';
+const CACHE = 'isg-saha-v17';
 const RUNTIME = 'isg-saha-runtime-v1';
 const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 // OCR bağımlılıkları (tesseract.js) + ikon fontu ilk kullanımda buradan iner, sonra offline çalışır
@@ -9,7 +9,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks =>
-    Promise.all(ks.filter(k => k !== CACHE && k !== RUNTIME).map(k => caches.delete(k)))
+    Promise.all(ks.filter(k => k.startsWith('isg-saha-') && k !== CACHE && k !== RUNTIME).map(k => caches.delete(k)))
   ).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
