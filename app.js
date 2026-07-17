@@ -2306,6 +2306,17 @@ function _ekraniPushEt(ekranAdi) {
   }
 }
 
+// "Bu Odayı Tamamla" gibi YANAL geçişler için: yeni bir history seviyesi
+// EKLEMEZ, mevcut en üst kaydı DEĞİŞTİRİR. Aksi halde (push kullanılsaydı)
+// inceleme->kat-alan geçişinden sonra "Geri" tuşu kullanıcıyı az önce
+// tamamladığı odaya GERİ döndürürdü (kafa karıştırıcı döngü) -- replaceState
+// ile "Geri" doğrudan kurulum ekranına döner, tıpkı normal kat-alan
+// akışındaki gibi.
+function _ekraniDegistir(ekranAdi) {
+  if (typeof history === 'undefined' || !history.replaceState) return;
+  history.replaceState({ ekran: ekranAdi }, '');
+}
+
 // PWA Commit 4M: aynı konuma hızlı geri-dönüş senaryosunda (mevcut denetime
 // devam ederken) bu 250ms fallback ESKİ (stale) bir çağrıdan kalıp, ARADAN
 // başka bir _geriTikla çağrısı geçtikten SONRA tetiklenip o an TAMAMEN
@@ -2890,12 +2901,46 @@ function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
     : 'Yeni denetim başlatıldı.';
 }
 
+// PWA UX Commit: eski düz "Bina / Kat / Oda X" metnini AYNI veriden kompakt,
+// seçilemeyen chip'lere böler -- veri modeli/eşleşme anahtarı değişmedi,
+// yalnız sunum. Konteyner zaten .header içinde olduğu için user-select:none
+// miras alınır (mobil hotfix'te eklenen koruma korunur).
 function updateLocationDisplay() {
   if (!currentSession) return;
   const { bina, kat, oda } = currentSession;
-  document.getElementById('current-loc-display').textContent =
-    `${bina} / ${kat} / Oda ${oda}`;
+  const el = document.getElementById('current-loc-display');
+  if (!el) return;
+  const parcalar = [bina, kat, `Oda ${oda}`];
+  el.innerHTML = '<span class="konum-chip konum-chip-etiket">AKTİF KONUM</span>' +
+    parcalar.map(p => `<span class="konum-chip">${_esc(p)}</span>`).join('');
 }
+
+// "Bu Odayı Tamamla" -- aktif denetimi SİLMEDEN/kilitlemeden, aynı
+// kurum/birim/kat bağlamındaki oda/mahal seçim ekranına döner. Konum
+// eşleşme anahtarı (kurumId+birimId+odaId+tur) ve mevcut denetime devam
+// davranışı (PWA Commit 4M) değişmez -- aynı odaya tekrar girilirse hâlâ
+// aynı denetim kaydı kullanılır.
+async function _odaSecimineDon() {
+  if (!currentSession) { goToSetup(); return; }
+  const { kurumId, birimId, kat } = currentSession;
+
+  await kurumlariYukle();
+  document.getElementById('setup-kurum').value = kurumId;
+  await birimleriYukle();
+  document.getElementById('setup-birim').value = birimId;
+
+  const kurum = await dbGetir('kurumlar', kurumId);
+  const birim = await dbGetir('birimler', birimId);
+  document.getElementById('kat-alan-baslik').textContent = `${kurum ? kurum.ad : ''} / ${birim ? birim.ad : ''}`;
+
+  const katlar = (birim && birim.katlar && birim.katlar.length) ? birim.katlar : ['Zemin'];
+  const hedefKat = katlar.includes(kat) ? kat : katlar[0];
+  await _katChipleriCiz(katlar, hedefKat);
+
+  showScreen('kat-alan');
+  _ekraniDegistir('kat-alan');
+}
+if (typeof window !== 'undefined') window._odaSecimineDon = _odaSecimineDon;
 
 // ─── TIMER ───────────────────────────────────────────────────
 function startTimer() {

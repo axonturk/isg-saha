@@ -18,6 +18,7 @@
             --bg: #f8f9fa;
             --text: #2c3e50;
             --safe-top: env(safe-area-inset-top);
+            --safe-bottom: env(safe-area-inset-bottom);
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -115,6 +116,27 @@
                tıklanabilirliği user-select ile etkilenmez. */
             user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
         }
+        .header.konum-header { flex-wrap: wrap; }
+
+        /* Üst konum chip bar (PWA UX Commit) -- eski düz "Bina / Kat / Oda"
+           metni yerine kompakt, seçilemeyen chip'ler (.header'dan user-select
+           miras alınır). */
+        .konum-chip-bar { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 160px; min-width: 0; }
+        .konum-chip {
+            display: inline-block; max-width: 42vw; padding: 3px 9px;
+            background: #eef2f7; color: var(--primary); border-radius: 12px;
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .konum-chip-etiket { background: var(--accent); color: white; }
+
+        /* Alt sticky aksiyon barı ("Bu Odayı Tamamla") */
+        .bottom-action-bar {
+            position: sticky; bottom: 0; background: white; border-top: 1px solid #eee;
+            margin: 20px -20px -20px; padding: 12px 20px calc(12px + var(--safe-bottom));
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+        }
+        .bottom-action-caption { text-align: center; font-size: 0.7rem; color: #999; margin-top: 4px; }
         .version-badge { font-size: 0.7rem; background: #ddd; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
@@ -335,16 +357,14 @@
 
     <!-- DENETİM EKRANI -->
     <div id="screen-inspection" class="screen">
-        <div class="header">
+        <div class="header konum-header">
             <button class="btn-outline btn" style="width:auto;" onclick="goToSetup()">
                 <i class="fas fa-arrow-left"></i>
             </button>
-            <div style="text-align:right">
-                <div id="current-loc-display" style="font-weight:bold">Bina - Oda</div>
-                <div id="session-time" style="font-size:0.8rem; color:#666">00:00</div>
-                <div id="denetim-devam-durum" style="font-size:0.75rem; color:#27ae60;"></div>
-            </div>
+            <div id="current-loc-display" class="konum-chip-bar"></div>
+            <div id="session-time" style="font-size:0.8rem; color:#666; white-space:nowrap;">00:00</div>
         </div>
+        <div id="denetim-devam-durum" style="font-size:0.8rem; color:#27ae60; margin-bottom:15px;"></div>
 
         <div class="card">
             <h3>Bulgu Ekle</h3>
@@ -377,6 +397,13 @@
 
         <h3>Bu Odadaki Bulgular</h3>
         <div id="findings-list"></div>
+
+        <div class="bottom-action-bar">
+            <button class="btn btn-success" onclick="_odaSecimineDon()">
+                <i class="fas fa-check"></i> Bu Odayı Tamamla
+            </button>
+            <div class="bottom-action-caption">Oda seçimine dön</div>
+        </div>
     </div>
 
     <!-- MODALLAR -->
