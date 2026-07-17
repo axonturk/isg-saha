@@ -204,6 +204,62 @@
             <div id="dof-detay"></div>
         </div>
 
+        <!-- DÖF TAKİP DÜZENLEME (PWA Commit 4H) — yalnız izinli 8 alan -->
+        <div class="card" id="dof-takip-form-kart" style="display:none;">
+            <h2>Takip Bilgileri</h2>
+            <div class="input-group">
+                <label for="dof-takip-planlanan-tarih">Planlanan Tarih</label>
+                <input type="date" id="dof-takip-planlanan-tarih" oninput="_dofTakipAlanDegisti('planlanan_tarih')">
+            </div>
+            <div class="input-group">
+                <label for="dof-takip-sorumlu">Sorumlu</label>
+                <input type="text" id="dof-takip-sorumlu" oninput="_dofTakipAlanDegisti('sorumlu')">
+            </div>
+            <div class="input-group">
+                <label for="dof-takip-gerceklesen-faaliyet">Gerçekleşen Faaliyet</label>
+                <textarea id="dof-takip-gerceklesen-faaliyet" rows="2" oninput="_dofTakipAlanDegisti('gerceklesen_faaliyet')"></textarea>
+            </div>
+            <div class="input-group">
+                <label for="dof-takip-etkinlik-kontrol-tarihi">Etkinlik Kontrol Tarihi</label>
+                <input type="date" id="dof-takip-etkinlik-kontrol-tarihi" oninput="_dofTakipAlanDegisti('etkinlik_kontrol_tarihi')">
+            </div>
+            <div class="input-group">
+                <label for="dof-takip-gozlem-degerlendirme">Gözlem/Değerlendirme</label>
+                <textarea id="dof-takip-gozlem-degerlendirme" rows="2" oninput="_dofTakipAlanDegisti('gozlem_degerlendirme')"></textarea>
+            </div>
+            <div class="location-grid">
+                <div class="input-group">
+                    <label for="dof-takip-yeni-o">Yeni O</label>
+                    <select id="dof-takip-yeni-o" onchange="_dofTakipAlanDegisti('yeni_o')">
+                        <option value="">—</option>
+                        <option value="10">10</option><option value="6">6</option><option value="3">3</option>
+                        <option value="1">1</option><option value="0.5">0.5</option><option value="0.2">0.2</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="dof-takip-yeni-f">Yeni F</label>
+                    <select id="dof-takip-yeni-f" onchange="_dofTakipAlanDegisti('yeni_f')">
+                        <option value="">—</option>
+                        <option value="10">10</option><option value="6">6</option><option value="3">3</option>
+                        <option value="2">2</option><option value="1">1</option><option value="0.5">0.5</option>
+                    </select>
+                </div>
+            </div>
+            <div class="input-group">
+                <label for="dof-takip-yeni-s">Yeni S</label>
+                <select id="dof-takip-yeni-s" onchange="_dofTakipAlanDegisti('yeni_s')">
+                    <option value="">—</option>
+                    <option value="100">100</option><option value="40">40</option><option value="15">15</option>
+                    <option value="7">7</option><option value="3">3</option><option value="1">1</option>
+                </select>
+            </div>
+            <div id="dof-takip-durum" style="margin-top:10px; font-weight:600;"></div>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button id="dof-takip-kaydet-btn" class="btn btn-success" onclick="_dofTakipKaydet()" disabled>Kaydet</button>
+                <button id="dof-takip-temizle-btn" class="btn btn-outline" onclick="_dofTakipTemizleTikla()">Temizle</button>
+            </div>
+        </div>
+
         <div id="active-inspections">
             <h3 style="margin-top:30px">Geçmiş Kayıtlar</h3>
             <div id="inspections-list"></div>

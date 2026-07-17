@@ -1851,6 +1851,7 @@ async function _dofListesiYukle() {
     listeEl.innerHTML = '';
     _dofListeSeciliId = null;
     _dofDetayGoster(null);
+    await _dofTakipFormYukle(null);
     return;
   }
 
@@ -1860,6 +1861,7 @@ async function _dofListesiYukle() {
   }
   listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(_dofListeSeciliId);
+  await _dofTakipFormYukle(_dofListeSeciliId);
 }
 
 function _dofListeKartHtml(k) {
@@ -1884,6 +1886,7 @@ function _dofDetaySec(dofId) {
   const listeEl = document.getElementById('dof-liste');
   if (listeEl) listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(dofId);
+  _dofTakipFormYukle(dofId);
 }
 
 function _dofDetayGoster(dofId) {
@@ -1931,6 +1934,183 @@ function _dofDetayGoster(dofId) {
 if (typeof window !== 'undefined') {
   window._dofDetaySec = _dofDetaySec;
   window._dofListesiYukle = _dofListesiYukle;
+}
+
+// ─── DÖF TAKİP DÜZENLEME (PWA Commit 4H) ─────────────────────────
+// Yalnız izinli sekiz takip alanını düzenler -- gerçek servisleri
+// (`dofTakipTaslagiGetir`/`Guncelle`/`Temizle`, Commit 4A/4A-1/4A-2)
+// DEĞİŞTİRMEDEN çağırır. Replay hazırlık/ZIP/medya UI'ı YOKTUR.
+//
+// SPARSE absent/null/value semantiği UI TARAFINDA da korunur: form,
+// kullanıcının BU oturumda GERÇEKTEN dokunduğu alanları kendi
+// `_dofTakipDokunulanAlanlar` kümesiyle izler -- her Kaydet'te tüm 8
+// alanı göndermez, yalnız dokunulanları gönderir (dokunulmayan absent
+// kalır, temizlenen explicit null olarak gider). `dofTakipTaslagiGetir`
+// dış sözleşme gereği HER ZAMAN dolu 8-alanlı gösterim döner (Commit
+// 4A-2 notu) -- bu, formu doldururken kullanılır ama dirty-izleme BUNA
+// değil, kullanıcının bu oturumdaki GERÇEK etkileşimine dayanır.
+//
+// O/F/S üçlü kuralı: biri dokunulursa üçü birlikte gönderilir (mevcut
+// form değerleriyle) -- kısmi üçlü İSTEMCİ TARAFINDA engellenmez, servisin
+// KENDİ (zaten test edilmiş) `_dofOfsUclusuGecerliMi` reddi kullanılır;
+// bu, mantığı UI'da tekrarlamaz/çatallaştırmaz (bkz. commit raporu).
+
+let _dofTakipSecliDofUuid = null;
+let _dofTakipDokunulanAlanlar = new Set();
+
+const _DOF_TAKIP_ALAN_ELEMENT_ID = {
+  planlanan_tarih: 'dof-takip-planlanan-tarih',
+  sorumlu: 'dof-takip-sorumlu',
+  gerceklesen_faaliyet: 'dof-takip-gerceklesen-faaliyet',
+  etkinlik_kontrol_tarihi: 'dof-takip-etkinlik-kontrol-tarihi',
+  gozlem_degerlendirme: 'dof-takip-gozlem-degerlendirme',
+  yeni_o: 'dof-takip-yeni-o',
+  yeni_f: 'dof-takip-yeni-f',
+  yeni_s: 'dof-takip-yeni-s',
+};
+const _DOF_TAKIP_OFS_ALANLARI_UI = ['yeni_o', 'yeni_f', 'yeni_s'];
+
+const _DOF_TAKIP_HATA_METINLERI = {
+  GECERSIZ_TAKIP_DEGERI: 'Takip alanlarında geçersiz değer var.',
+  GECERSIZ_DEGISIKLIK: 'Takip alanlarında geçersiz değer var.',
+  IZINSIZ_TAKIP_ALANI: 'Bu alan düzenlenemez.',
+  KANONIK_DOF_DEGIL: 'Bu DÖF kaydı düzenlenemez.',
+  DOF_BULUNAMADI: 'DÖF kaydı bulunamadı.',
+  VERITABANI_HATASI: 'Veritabanı hatası.',
+};
+
+/** Formu verilen taslak değerleriyle doldurur (yalnız GÖRÜNÜM -- dirty
+ * izleme burada SIFIRLANIR, bu fonksiyon "temiz" bir başlangıç noktası
+ * sayılır). */
+function _dofTakipFormaYaz(taslak) {
+  document.getElementById('dof-takip-planlanan-tarih').value = taslak.planlanan_tarih || '';
+  document.getElementById('dof-takip-sorumlu').value = taslak.sorumlu || '';
+  document.getElementById('dof-takip-gerceklesen-faaliyet').value = taslak.gerceklesen_faaliyet || '';
+  document.getElementById('dof-takip-etkinlik-kontrol-tarihi').value = taslak.etkinlik_kontrol_tarihi || '';
+  document.getElementById('dof-takip-gozlem-degerlendirme').value = taslak.gozlem_degerlendirme || '';
+  document.getElementById('dof-takip-yeni-o').value = (taslak.yeni_o ?? '') === '' ? '' : String(taslak.yeni_o);
+  document.getElementById('dof-takip-yeni-f').value = (taslak.yeni_f ?? '') === '' ? '' : String(taslak.yeni_f);
+  document.getElementById('dof-takip-yeni-s').value = (taslak.yeni_s ?? '') === '' ? '' : String(taslak.yeni_s);
+}
+
+/** Bir form alanının GÜNCEL değerini, servisin beklediği tipe (tarih/metin
+ * string veya sayı) çevirerek okur. Boş değer -> `null` (temizleme talebi). */
+function _dofTakipFormDegerOku(alan) {
+  const ham = document.getElementById(_DOF_TAKIP_ALAN_ELEMENT_ID[alan]).value;
+  if (ham === '') return null;
+  return _DOF_TAKIP_OFS_ALANLARI_UI.includes(alan) ? Number(ham) : ham;
+}
+
+/** Kaydet butonunun aktiflik durumunu günceller -- hiçbir alana
+ * dokunulmadıysa disabled (gereksiz/no-op kaydı önlemenin ilk katmanı;
+ * asıl güvence `_dofTakipKaydet` içindeki boş-küme kontrolüdür). */
+function _dofTakipButonDurumGuncelle() {
+  const btn = document.getElementById('dof-takip-kaydet-btn');
+  if (btn) btn.disabled = _dofTakipDokunulanAlanlar.size === 0;
+}
+
+/** Bir form alanı kullanıcı tarafından değiştirildiğinde çağrılır
+ * (oninput/onchange). Yalnız BU alanı dokunulmuş işaretler -- diğer
+ * alanların absent/value durumunu ETKİLEMEZ. */
+function _dofTakipAlanDegisti(alan) {
+  _dofTakipDokunulanAlanlar.add(alan);
+  _dofTakipButonDurumGuncelle();
+}
+
+/** Seçili DÖF değiştiğinde (veya liste yenilendiğinde) çağrılır -- formu
+ * `dofTakipTaslagiGetir`'den TAZE değerlerle doldurur, dirty izlemeyi
+ * sıfırlar. `dofUuid` yoksa (seçim yok/liste boş) formu gizler. Kanonik
+ * olmayan/bulunamayan DÖF için form AÇILMAZ (legacy güvenliği). */
+async function _dofTakipFormYukle(dofUuid) {
+  const kart = document.getElementById('dof-takip-form-kart');
+  if (!kart) return;
+  _dofTakipSecliDofUuid = dofUuid;
+  _dofTakipDokunulanAlanlar = new Set();
+
+  if (!dofUuid) {
+    kart.style.display = 'none';
+    return;
+  }
+
+  const durum = document.getElementById('dof-takip-durum');
+  try {
+    const sonuc = await dofTakipTaslagiGetir(dofUuid);
+    kart.style.display = 'block';
+    durum.textContent = '';
+    _dofTakipFormaYaz(sonuc.takipTaslagi);
+    _dofTakipButonDurumGuncelle();
+  } catch (e) {
+    // Legacy/WIP veya bulunamayan kayıt -- form AÇILMAZ (yalnız kanonik
+    // DÖF'ler düzenlenebilir). Normal akışta liste zaten yalnız kanonik
+    // kayıtları sunduğundan bu dal pratikte savunma amaçlıdır.
+    kart.style.display = 'none';
+  }
+}
+
+/** "Kaydet" -- yalnız BU oturumda dokunulan alanlardan payload kurar
+ * (O/F/S'ten biri dokunulduysa üçü birlikte, mevcut form değerleriyle),
+ * `dofTakipTaslagiGuncelle`'yi (değiştirilmeden) çağırır. Hiçbir alana
+ * dokunulmadıysa servisi HİÇ ÇAĞIRMADAN "Değişiklik yok" gösterir --
+ * DB'ye kesinlikle yazma OLMAZ. */
+async function _dofTakipKaydet() {
+  if (!_dofTakipSecliDofUuid) return;
+  const durum = document.getElementById('dof-takip-durum');
+
+  if (_dofTakipDokunulanAlanlar.size === 0) {
+    durum.textContent = 'Değişiklik yok.';
+    return;
+  }
+
+  const gonderilecekAlanlar = new Set(_dofTakipDokunulanAlanlar);
+  if (_DOF_TAKIP_OFS_ALANLARI_UI.some((a) => gonderilecekAlanlar.has(a))) {
+    for (const a of _DOF_TAKIP_OFS_ALANLARI_UI) gonderilecekAlanlar.add(a);
+  }
+  const payload = {};
+  for (const alan of gonderilecekAlanlar) {
+    payload[alan] = _dofTakipFormDegerOku(alan);
+  }
+
+  const kaydetBtn = document.getElementById('dof-takip-kaydet-btn');
+  kaydetBtn.disabled = true;
+  durum.textContent = 'Kaydediliyor...';
+  try {
+    await dofTakipTaslagiGuncelle(_dofTakipSecliDofUuid, payload);
+    await _dofListesiYukle();   // liste + okunur özet + bu form (dirty sıfırlanmış) tazelenir
+    document.getElementById('dof-takip-durum').textContent = 'Takip bilgileri kaydedildi';
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_TAKIP_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+    kaydetBtn.disabled = false;
+  }
+}
+
+/** "Temizle" -- yalnız yerel `takipTaslagi`yi kaldırır (`dofTakipTaslagiTemizle`,
+ * değiştirilmeden). Imported DÖF kaydı, replay hazırlık metadata'sı vb.
+ * BU commit'in kapsamı dışında/dokunulmaz -- eski hazırlık varsa Commit
+ * 4D'nin ZIP üretimi zaten `REPLAY_HAZIRLIK_ESKI` ile reddeder, bu
+ * davranış burada bozulmaz. */
+async function _dofTakipTemizleTikla() {
+  if (!_dofTakipSecliDofUuid) return;
+  const durum = document.getElementById('dof-takip-durum');
+  const temizleBtn = document.getElementById('dof-takip-temizle-btn');
+  temizleBtn.disabled = true;
+  durum.textContent = 'Temizleniyor...';
+  try {
+    await dofTakipTaslagiTemizle(_dofTakipSecliDofUuid);
+    await _dofListesiYukle();
+    document.getElementById('dof-takip-durum').textContent = 'Takip bilgileri temizlendi';
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_TAKIP_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+  } finally {
+    temizleBtn.disabled = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window._dofTakipAlanDegisti = _dofTakipAlanDegisti;
+  window._dofTakipKaydet = _dofTakipKaydet;
+  window._dofTakipTemizleTikla = _dofTakipTemizleTikla;
 }
 
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
