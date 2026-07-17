@@ -2250,6 +2250,21 @@ window.addEventListener('load', () => {
   }
 });
 
+// ─── SERVICE WORKER REGISTRATION (PWA Commit 4K) ────────────
+// Offline app-shell'i gerçekten aktive eder -- sw.js zaten vardı ama
+// production kodu hiç register etmiyordu (bkz. tests/k-offline-appshell.spec.js
+// negatif karakterizasyonu). Hata durumunda sessizce uyarır, uygulamayı
+// çökertmez; desteklenmeyen ortamda hiç çalışmaz.
+if (navigator.serviceWorker) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then(() => {
+      console.log('[PWA] Service Worker registered');
+    }).catch((err) => {
+      console.warn('[PWA] Service Worker registration failed', err);
+    });
+  });
+}
+
 // ─── EKRAN YÖNETİMİ ──────────────────────────────────────────
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));

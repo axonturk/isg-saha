@@ -1,31 +1,26 @@
 // PWA Commit 2 / Bölüm K -- offline app-shell karakterizasyonu.
 //
-// ÖNEMLİ, YENİ BULGU: committed baseline'da (852764c) `app.js`/`index.html`
-// içinde `navigator.serviceWorker.register(...)`'a TEK BİR referans YOK
-// (grep ile doğrulandı). `sw.js` dosyası VAR ve içeriği (cache-first app
-// shell + runtime cache) makul ama PRODUCTION KODU BUNU KENDİSİ HİÇ
-// TETİKLEMİYOR -- yani gerçek kullanımda (bu worktree'nin kod tabanıyla)
-// Service Worker HİÇBİR ZAMAN aktive olmaz, dolayısıyla bugünkü uygulama
-// offline açılışı sw.js ÜZERİNDEN SAĞLAMIYOR OLABİLİR. Bu, Commit 2
-// kapsamında DÜZELTİLMEZ (yalnız karakterize edilir) -- ayrı bir risk
-// olarak raporlanır (bkz. PWA Commit 2 raporu §I, P0/P1).
+// GÜNCELLEME (PWA Commit 4K): Commit 2'nin bulduğu boşluk (`sw.js` var ama
+// production kodu register etmiyordu) 4K ile kapatıldı -- `app.js` artık
+// `window.addEventListener('load', ...)` içinde `navigator.serviceWorker
+// .register('./sw.js')` çağırıyor. İlk test aşağıda bunu POZİTİF olarak
+// doğrular (eski negatif karakterizasyonun yerini alır). Registration
+// çağrısının kendisiyle ilgili ayrıntılı senaryolar (path, tek seferlik,
+// unsupported/reject davranışı, DÖF/saha regresyonu) artık
+// tests/w-service-worker-registration.spec.js'de -- burada tekrar edilmez.
 //
-// Bu test dosyası, sw.js'in KENDİ mekaniğini (aktive olursa doğru
-// çalışıp çalışmadığını) ayrı ayrı doğrulamak için sw.js'i TEST TARAFINDAN
-// elle register eder -- bu, production'ın YAPMADIĞI bir şeyi test ortamında
-// yapmak anlamına gelir, production kodu HİÇ değiştirilmez.
+// Bu test dosyası, sw.js'in KENDİ mekaniğini (cache-first app shell +
+// offline reload) doğrular.
 const { test, expect } = require('@playwright/test');
 
 test.describe('K. Offline app-shell', () => {
-  test('production kodu service worker\'i kendisi register etmiyor (yeni bulgu, negatif karakterizasyon)', async ({ page }) => {
+  test('production kodu service worker\'i kendisi register eder (PWA Commit 4K)', async ({ page }) => {
     await page.goto('/index.html');
-    await page.waitForTimeout(500);   // olası gecikmeli register için makul bekleme
     const kayitliMi = await page.evaluate(async () => {
-      const kayitlar = await navigator.serviceWorker.getRegistrations();
-      return kayitlar.length > 0;
+      const reg = await navigator.serviceWorker.ready;
+      return !!reg;
     });
-    expect(kayitliMi, 'Production kodu sw.js\'i kendiliğinden register ETMEMELİ (bugünkü davranış) -- ' +
-      'register olduysa bu karakterizasyonun güncellenmesi gerekir.').toBe(false);
+    expect(kayitliMi, 'Production kodu sw.js\'i kendiliğinden register ETMELİ (PWA Commit 4K).').toBe(true);
   });
 
   test('sw.js ELLE register edilirse (test-only) app shell offline yeniden yuklemede acilir', async ({ page }) => {
