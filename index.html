@@ -260,6 +260,16 @@
             </div>
         </div>
 
+        <!-- DÖF REPLAY HAZIRLIK / ZIP İNDİRME (PWA Commit 4I) — medyasız, tek DÖF -->
+        <div class="card" id="dof-replay-kart" style="display:none;">
+            <h2>Replay Paketi</h2>
+            <div id="dof-replay-durum" style="font-size:0.9rem; color:#666; margin-bottom:10px;">Hazırlık yok</div>
+            <div style="display:flex; gap:10px;">
+                <button id="dof-replay-hazirlik-btn" class="btn btn-outline" onclick="_dofReplayHazirlikTikla()">Hazırlık Oluştur</button>
+                <button id="dof-replay-zip-btn" class="btn btn-success" onclick="_dofReplayZipIndirTikla()">ZIP İndir</button>
+            </div>
+        </div>
+
         <div id="active-inspections">
             <h3 style="margin-top:30px">Geçmiş Kayıtlar</h3>
             <div id="inspections-list"></div>

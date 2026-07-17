@@ -1852,6 +1852,7 @@ async function _dofListesiYukle() {
     _dofListeSeciliId = null;
     _dofDetayGoster(null);
     await _dofTakipFormYukle(null);
+    await _dofReplayBolumYukle(null);
     return;
   }
 
@@ -1862,6 +1863,7 @@ async function _dofListesiYukle() {
   listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(_dofListeSeciliId);
   await _dofTakipFormYukle(_dofListeSeciliId);
+  await _dofReplayBolumYukle(_dofListeSeciliId);
 }
 
 function _dofListeKartHtml(k) {
@@ -1887,6 +1889,7 @@ function _dofDetaySec(dofId) {
   if (listeEl) listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(dofId);
   _dofTakipFormYukle(dofId);
+  _dofReplayBolumYukle(dofId);
 }
 
 function _dofDetayGoster(dofId) {
@@ -2111,6 +2114,127 @@ if (typeof window !== 'undefined') {
   window._dofTakipAlanDegisti = _dofTakipAlanDegisti;
   window._dofTakipKaydet = _dofTakipKaydet;
   window._dofTakipTemizleTikla = _dofTakipTemizleTikla;
+}
+
+// ─── DÖF REPLAY HAZIRLIK / ZIP İNDİRME (PWA Commit 4I) ───────────
+// Yalnız mevcut servisleri (Commit 4C `dofReplayHazirlikGetir/Hazirla`,
+// Commit 4D `dofReplayZipOlustur`) DEĞİŞTİRMEDEN UI'a bağlar. Medya/galeri/
+// çoklu-DÖF seçim YOKTUR -- yalnız seçili TEK DÖF için. Hazırlık/ZIP
+// servisleri zaten kendi güvenceleriyle çalışır (submission UUID yalnız
+// `dofReplayHazirlikHazirla` içinde üretilir, ZIP üretimi salt-okunurdur,
+// hazırlık yok/eski durumları servis tarafından reddedilir) -- bu bölüm
+// hiçbir iş kuralını tekrar YAZMAZ, yalnız sonucu/hatayı gösterir.
+
+let _dofReplaySecliDofUuid = null;
+let _dofReplayIslemDevamEdiyor = false;
+
+const _DOF_REPLAY_HATA_METINLERI = {
+  BOS_TAKIP_TASLAGI: 'Takip bilgisi yok. Önce takip bilgisi girin.',
+  GECERSIZ_TAKIP_TASLAGI: 'Takip alanlarında geçersiz değer var.',
+  KANONIK_DOF_DEGIL: 'Bu DÖF kaydı işlenemez.',
+  DOF_BULUNAMADI: 'DÖF kaydı bulunamadı.',
+  REPLAY_HAZIRLIK_YOK: 'Replay hazırlığı yok. Önce hazırlık oluşturun.',
+  REPLAY_HAZIRLIK_ESKI: 'Takip bilgileri değişmiş. Hazırlığı yeniden oluşturun.',
+  KARISIK_EXPORT_PAKETI: 'Farklı paketlerden gelen kayıtlar birlikte işlenemez.',
+  PAKET_ICI_DUPLICATE: 'Geçersiz istek (yinelenen kayıt).',
+  SUBMISSION_UUID_DUPLICATE: 'Geçersiz istek (yinelenen kimlik).',
+  GECERSIZ_SUBMISSION_UUID: 'Geçersiz istek (kimlik hatası).',
+  GECERSIZ_GIRDI: 'Geçersiz istek.',
+  ZIP_URETIM_HATASI: 'Replay ZIP hazırlanamadı.',
+  VERITABANI_HATASI: 'Veritabanı hatası.',
+};
+
+/** Verilen Blob'u kullanıcı tıklamasının SONUCU olarak indirir (otomatik
+ * tetiklenmez) -- normal saha ZIP'inin kullandığı AYNI güvenilir örüntü
+ * (`URL.createObjectURL` + geçici `<a download>` + `URL.revokeObjectURL`),
+ * izole bir yardımcı olarak (mevcut normal ZIP akışına dokunulmadı). */
+function _dofBlobIndir(blob, dosyaAdi) {
+  const guvenliAd = String(dosyaAdi || 'dof_replay.zip').replace(/[\\/]/g, '_');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = guvenliAd;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Seçili DÖF değiştiğinde (veya liste yenilendiğinde) çağrılır -- yalnız
+ * `dofReplayHazirlikGetir` (salt-okunur) ile mevcut hazırlık durumunu
+ * gösterir. Kanonik olmayan/bulunamayan DÖF için bölüm AÇILMAZ. */
+async function _dofReplayBolumYukle(dofUuid) {
+  const kart = document.getElementById('dof-replay-kart');
+  if (!kart) return;
+  _dofReplaySecliDofUuid = dofUuid;
+  if (!dofUuid) {
+    kart.style.display = 'none';
+    return;
+  }
+  const durum = document.getElementById('dof-replay-durum');
+  try {
+    const sonuc = await dofReplayHazirlikGetir(dofUuid);
+    kart.style.display = 'block';
+    durum.textContent = sonuc.replayHazirlik ? 'Hazırlık hazır' : 'Hazırlık yok';
+  } catch (e) {
+    kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
+  }
+}
+
+/** "Hazırlık Oluştur" -- `dofReplayHazirlikHazirla`'yı (değiştirilmeden)
+ * çağırır. Servis idempotency'i kendi sağlar (aynı taslak -> aynı
+ * `submissionUuid`, `durum:'degismedi'`); burada yalnız sonuca göre
+ * kullanıcı mesajı seçilir. */
+async function _dofReplayHazirlikTikla() {
+  if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  _dofReplayIslemDevamEdiyor = true;
+  const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
+  const zipBtn = document.getElementById('dof-replay-zip-btn');
+  const durum = document.getElementById('dof-replay-durum');
+  hazirlikBtn.disabled = true;
+  zipBtn.disabled = true;
+  durum.textContent = 'Hazırlanıyor...';
+  try {
+    const sonuc = await dofReplayHazirlikHazirla(_dofReplaySecliDofUuid);
+    durum.textContent = sonuc.durum === 'degismedi' ? 'Replay hazırlığı zaten güncel.' : 'Replay hazırlığı oluşturuldu.';
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+  } finally {
+    _dofReplayIslemDevamEdiyor = false;
+    hazirlikBtn.disabled = false;
+    zipBtn.disabled = false;
+  }
+}
+
+/** "ZIP İndir" -- `dofReplayZipOlustur([dofUuid])`'yi (değiştirilmeden,
+ * yalnız seçili TEK DÖF ile) çağırır, dönen Blob'u indirir. Hazırlık yok/
+ * eski durumlarını servis KENDİSİ reddeder (`REPLAY_HAZIRLIK_YOK`/
+ * `REPLAY_HAZIRLIK_ESKI`) -- burada tekrar doğrulanmaz. */
+async function _dofReplayZipIndirTikla() {
+  if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  _dofReplayIslemDevamEdiyor = true;
+  const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
+  const zipBtn = document.getElementById('dof-replay-zip-btn');
+  const durum = document.getElementById('dof-replay-durum');
+  hazirlikBtn.disabled = true;
+  zipBtn.disabled = true;
+  durum.textContent = 'ZIP hazırlanıyor...';
+  try {
+    const sonuc = await dofReplayZipOlustur([_dofReplaySecliDofUuid]);
+    _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
+    durum.textContent = 'ZIP indirildi.';
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+  } finally {
+    _dofReplayIslemDevamEdiyor = false;
+    hazirlikBtn.disabled = false;
+    zipBtn.disabled = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window._dofReplayHazirlikTikla = _dofReplayHazirlikTikla;
+  window._dofReplayZipIndirTikla = _dofReplayZipIndirTikla;
 }
 
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
