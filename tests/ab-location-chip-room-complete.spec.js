@@ -97,9 +97,17 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
     // Her chip'te bir ikon (<i class="fas ...">) olmalı.
     await expect(chipler.first().locator('i.fas')).toHaveCount(1);
 
-    // Ayrı bir düz-metin başlık YOK -- kart satırı TEK bilgi kaynağıdır
-    // (kullanıcı talebiyle sadeleştirildi).
-    await expect(page.locator('#current-loc-baslik')).toHaveCount(0);
+    // Gerçek Android hotfix: chip satırının ÜSTÜNDE, .header içinde AYRICA
+    // düz-metin yol/breadcrumb başlığı görünür (chip satırının YERİNE değil,
+    // ONUNLA BİRLİKTE) -- gerçek cihazda kart satırı tek başına yeterince
+    // net okunmuyordu.
+    await expect(page.locator('#konum-yol-metin')).toBeVisible();
+    await expect(page.locator('#konum-yol-metin')).toContainText(birimAdi);
+    await expect(page.locator('#konum-yol-metin')).toContainText('Zemin');
+
+    // Devam/yeni-denetim durum segmenti AYNI kaydırılabilir şeridin bir
+    // parçası -- ayrı bir alt blok değil.
+    await expect(page.locator('.konum-satiri #denetim-devam-durum')).toBeVisible();
   });
 
   test('B. Text selection/callout engellenir -- .header korunan mobil hotfix davranışı', async ({ page }) => {
@@ -114,6 +122,10 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
 
     const headerStil = await page.locator('#screen-inspection .header').evaluate((el) => getComputedStyle(el).userSelect);
     expect(headerStil).toBe('none');
+
+    // Yol/breadcrumb başlığı (.header içinde) da aynı korumayı miras alır.
+    const yolStil = await page.locator('#konum-yol-metin').evaluate((el) => getComputedStyle(el).userSelect);
+    expect(yolStil).toBe('none');
 
     // Geri butonu hâlâ tıklanabilir -- user-select navigasyonu engellemez.
     await page.tap('button[onclick="goToSetup()"]');

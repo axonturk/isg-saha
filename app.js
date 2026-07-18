@@ -2902,20 +2902,24 @@ function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
   el.innerHTML = `<span class="konum-durum-ikon"><i class="fas fa-check"></i></span><span>${_esc(metin)}</span>`;
 }
 
-// PWA UX Commit: eski düz "Bina / Kat / Oda X" metnini AYNI veriden kompakt,
-// ikonlu, seçilemeyen kart-chip'lere böler -- veri modeli/eşleşme anahtarı
-// değişmedi, yalnız sunum. Ayrı bir düz-metin başlık YOK -- kart satırının
-// kendisi tek bilgi kaynağıdır. Her ikon kendi (sade/pastel) rengini taşır,
-// kart arkaplanı/metni nötr kalır (kullanıcının verdiği referans görsele
-// göre ayarlandı) -- kart TEK renge indirgenirse "renk yok" gibi görünüyordu.
-// Konteyner .konum-satiri kendi user-select:none'una sahip (mobil
-// hotfix'teki koruma korunur).
+// PWA UX Commit + gerçek Android hotfix: eski düz "Bina / Kat / Oda X"
+// metnini AYNI veriden kompakt, ikonlu, seçilemeyen kart-chip'lere böler --
+// veri modeli/eşleşme anahtarı değişmedi, yalnız sunum. Düz-metin yol/
+// breadcrumb (.konum-yol-baslik, .header içinde) ARTIK GERİ EKLENDİ --
+// kart satırının YERİNE değil, ONUNLA BİRLİKTE gösterilir (gerçek cihazda
+// kart satırı tek başına yeterince net okunmuyordu). Her ikon kendi
+// (sade/pastel) rengini taşır, kart arkaplanı/metni nötr kalır. Konteyner
+// .konum-satiri kendi user-select:none'una sahip (mobil hotfix'teki koruma
+// korunur).
 const KONUM_CHIP_IKONLARI = ['fa-building', 'fa-stairs', 'fa-door-open', 'fa-tag'];
 const KONUM_CHIP_RENKLERI = ['#2c3e50', '#27ae60', '#8e44ad', '#f39c12'];
 function updateLocationDisplay() {
   if (!currentSession) return;
   const { bina, kat, oda } = currentSession;
   const tamYol = `${bina} / ${kat} / Oda ${oda}`;
+
+  const baslik = document.getElementById('konum-yol-metin');
+  if (baslik) baslik.textContent = tamYol;
 
   const el = document.getElementById('current-loc-display');
   if (!el) return;
