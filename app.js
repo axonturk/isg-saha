@@ -2896,23 +2896,32 @@ async function startInspection() {
 function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
   const el = document.getElementById('denetim-devam-durum');
   if (!el) return;
-  el.textContent = mevcudaDevamEdildi
+  const metin = mevcudaDevamEdildi
     ? 'Bu konum için mevcut denetime devam ediliyor.'
     : 'Yeni denetim başlatıldı.';
+  el.innerHTML = `<span class="konum-durum-ikon"><i class="fas fa-check"></i></span><span>${_esc(metin)}</span>`;
 }
 
 // PWA UX Commit: eski düz "Bina / Kat / Oda X" metnini AYNI veriden kompakt,
-// seçilemeyen chip'lere böler -- veri modeli/eşleşme anahtarı değişmedi,
-// yalnız sunum. Konteyner zaten .header içinde olduğu için user-select:none
-// miras alınır (mobil hotfix'te eklenen koruma korunur).
+// ikonlu, seçilemeyen kart-chip'lere böler -- veri modeli/eşleşme anahtarı
+// değişmedi, yalnız sunum. Ayrı bir düz-metin başlık YOK -- kart satırının
+// kendisi tek bilgi kaynağıdır (kullanıcı talebiyle sadeleştirildi). Konteyner
+// .konum-satiri kendi user-select:none'una sahip (mobil hotfix'teki koruma
+// korunur).
+const KONUM_CHIP_IKONLARI = ['fa-building', 'fa-stairs', 'fa-door-open', 'fa-tag'];
 function updateLocationDisplay() {
   if (!currentSession) return;
   const { bina, kat, oda } = currentSession;
+  const tamYol = `${bina} / ${kat} / Oda ${oda}`;
+
   const el = document.getElementById('current-loc-display');
   if (!el) return;
-  const parcalar = [bina, kat, `Oda ${oda}`];
-  el.innerHTML = '<span class="konum-chip konum-chip-etiket">AKTİF KONUM</span>' +
-    parcalar.map(p => `<span class="konum-chip">${_esc(p)}</span>`).join('');
+  const parcalar = tamYol.split('/').map(p => p.trim()).filter(Boolean);
+  el.innerHTML = '<div class="konum-chip konum-chip-etiket"><i class="fas fa-location-dot"></i><span>AKTİF KONUM</span></div>' +
+    parcalar.map((p, i) => {
+      const ikon = KONUM_CHIP_IKONLARI[Math.min(i, KONUM_CHIP_IKONLARI.length - 1)];
+      return `<div class="konum-chip"><i class="fas ${ikon}"></i><span>${_esc(p)}</span></div>`;
+    }).join('');
 }
 
 // "Bu Odayı Tamamla" -- aktif denetimi SİLMEDEN/kilitlemeden, aynı
@@ -3246,6 +3255,16 @@ document.getElementById('form-action-btn') &&
 function goToSetup() {
   _geriTikla('screen-inspection');
 }
+
+// Alt sticky aksiyon barındaki "Geri" butonu -- üst-soldaki geri okuyla
+// AYNI davranış (goToSetup). Ayrı bir fonksiyon adı kullanılmasının TEK
+// nedeni: `button[onclick="goToSetup()"]` seçicisi birçok mevcut testte
+// TEK elemanı bulmayı varsayıyor -- aynı onclick metniyle ikinci bir buton
+// eklemek o seçicileri "strict mode violation" ile kırardı.
+function _altGeriTikla() {
+  goToSetup();
+}
+if (typeof window !== 'undefined') window._altGeriTikla = _altGeriTikla;
 
 // ─── KAMERA — İKİ AYRI GÖREV ──────────────────────────────────
 // 'kanit'  : Bulgu Ekle ekranındaki Çek-Onayla — kanıt fotoğrafı, OCR YOK.

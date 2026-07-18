@@ -80,21 +80,26 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
     await context.grantPermissions(['camera', 'microphone']);
   });
 
-  test('A. Üst konum chip bar görünür -- AKTİF KONUM + birim + kat + oda chip olarak', async ({ page }) => {
+  test('A. Üst konum chip bar görünür -- AKTİF KONUM + birim + kat + oda kart-chip olarak, ikonlu', async ({ page }) => {
     const { birimAdi } = await _kurumBirimHazirla(page);
     await _konumaGir(page);
 
+    // Tam yol "{bina} / {kat} / Oda {oda}" -- "/" ile bölünüp her parça ayrı
+    // bir kart-chip olur (oda alanı kendi içinde de "/" içerebilir, ör.
+    // "Ofis / idari oda" -- bu durumda ek chip'ler doğal olarak oluşur).
     const chipler = page.locator('#current-loc-display .konum-chip');
-    await expect(chipler).toHaveCount(4);
+    const sayi = await chipler.count();
+    expect(sayi).toBeGreaterThanOrEqual(4);   // en az: etiket + bina + kat + oda
     await expect(chipler.nth(0)).toHaveText('AKTİF KONUM');
+    await expect(chipler.nth(0)).toHaveClass(/konum-chip-etiket/);
     await expect(chipler.nth(1)).toHaveText(birimAdi);
     await expect(chipler.nth(2)).toHaveText('Zemin');
-    await expect(chipler.nth(3)).toContainText('Oda');
+    // Her chip'te bir ikon (<i class="fas ...">) olmalı.
+    await expect(chipler.first().locator('i.fas')).toHaveCount(1);
 
-    // Eski düz path metni artık ana görsel yapı DEĞİL -- konteynerin kendi
-    // ham metni tek bir düz satır değil, ayrı chip elemanlarından oluşuyor.
-    const chipEtiketSayisi = await page.locator('#current-loc-display > .konum-chip').count();
-    expect(chipEtiketSayisi).toBeGreaterThan(1);
+    // Ayrı bir düz-metin başlık YOK -- kart satırı TEK bilgi kaynağıdır
+    // (kullanıcı talebiyle sadeleştirildi).
+    await expect(page.locator('#current-loc-baslik')).toHaveCount(0);
   });
 
   test('B. Text selection/callout engellenir -- .header korunan mobil hotfix davranışı', async ({ page }) => {
@@ -120,7 +125,13 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
     await _konumaGir(page);
     await expect(page.locator('button[onclick="_odaSecimineDon()"]')).toBeVisible();
     await expect(page.locator('button[onclick="_odaSecimineDon()"]')).toContainText('Bu Odayı Tamamla');
+    // Üst-sol geri oku (mevcut, değişmedi).
     await expect(page.locator('button[onclick="goToSetup()"]')).toBeVisible();
+    // Alt sticky bardaki ayrı "Geri" butonu (bu commit'te eklendi) -- aynı
+    // davranışı (_altGeriTikla -> goToSetup) çağırır, farklı onclick metniyle
+    // (selector çakışmasını önlemek için).
+    await expect(page.locator('button[onclick="_altGeriTikla()"]')).toBeVisible();
+    await expect(page.locator('button[onclick="_altGeriTikla()"]')).toContainText('Geri');
   });
 
   test('D. Bu Odayı Tamamla oda/mahal seçimine döner -- kurum/birim/kat bağlamı korunur', async ({ page }) => {
@@ -286,6 +297,9 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
     await _konumaGir(page);
     await expect(page.locator('button', { hasText: 'Resim Yükle' })).toBeVisible();
     await expect(page.locator('button[onclick="openOCR(\'kanit\')"]')).toBeVisible();
+    // Çek-Onayla + Resim Yükle aynı satırda (.ikili-buton-satiri) -- yapısal kanıt.
+    await expect(page.locator('.ikili-buton-satiri button[onclick="openOCR(\'kanit\')"]')).toHaveCount(1);
+    await expect(page.locator('.ikili-buton-satiri button', { hasText: 'Resim Yükle' })).toHaveCount(1);
 
     await page.setInputFiles('#galeri-foto-input', { name: 'not.txt', mimeType: 'text/plain', buffer: Buffer.from('görsel değil') });
     await expect(page.locator('#galeri-foto-durum')).toHaveText('Yalnız görsel dosyası yüklenebilir.');
@@ -302,6 +316,7 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
       return !!reg;
     }, { timeout: 5000 });
     await _konumaGir(page);
-    await expect(page.locator('#current-loc-display .konum-chip')).toHaveCount(4);
+    const sayi = await page.locator('#current-loc-display .konum-chip').count();
+    expect(sayi).toBeGreaterThanOrEqual(4);
   });
 });
