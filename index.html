@@ -121,25 +121,28 @@
         /* Üst konum kartları + devam durum kartı (PWA UX Commit) -- eski düz
            "Bina / Kat / Oda" metni yerine ikonlu, seçilemeyen kart-chip'ler
            (.header'dan user-select miras alınır). Chip satırı TEK satırda,
-           taşarsa yatay kaydırmalı; tek, sade (rengarenk olmayan) palet. */
+           kaydırma çubuğu görünmeden sığacak kadar kompakt; ikonlar kendi
+           (sade/pastel) rengini taşır, kart arkaplanı/metni nötr kalır. */
         .konum-satiri {
             display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px;
             user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
         }
         .konum-chip-bar {
-            display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px;
-            -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+            display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; -ms-overflow-style: none;   /* taşma olursa bile çubuk görünmesin */
         }
+        .konum-chip-bar::-webkit-scrollbar { display: none; }
         .konum-chip {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 4px; flex: 0 0 auto; width: 70px; padding: 8px 4px;
+            gap: 3px; flex: 1 1 0; min-width: 0; max-width: 62px; padding: 6px 2px;
             background: #f4f6f8; border: 1px solid #e1e5ea; border-radius: 10px;
-            font-size: 0.58rem; font-weight: 700; letter-spacing: 0.02em; text-align: center;
+            font-size: 0.52rem; font-weight: 700; letter-spacing: 0.01em; text-align: center;
             color: var(--primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .konum-chip i { font-size: 1rem; color: var(--primary); }
-        .konum-chip-etiket { background: var(--primary); border-color: var(--primary); color: white; }
-        .konum-chip-etiket i { color: white; }
+        .konum-chip i { font-size: 0.85rem; }
+        .konum-chip-etiket { background: #eaf2fd; border-color: var(--accent); color: var(--accent); }
+        .konum-chip-etiket i { color: var(--accent); }
 
         .konum-durum-karti {
             display: flex; align-items: center; gap: 8px;

@@ -2905,10 +2905,13 @@ function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
 // PWA UX Commit: eski düz "Bina / Kat / Oda X" metnini AYNI veriden kompakt,
 // ikonlu, seçilemeyen kart-chip'lere böler -- veri modeli/eşleşme anahtarı
 // değişmedi, yalnız sunum. Ayrı bir düz-metin başlık YOK -- kart satırının
-// kendisi tek bilgi kaynağıdır (kullanıcı talebiyle sadeleştirildi). Konteyner
-// .konum-satiri kendi user-select:none'una sahip (mobil hotfix'teki koruma
-// korunur).
+// kendisi tek bilgi kaynağıdır. Her ikon kendi (sade/pastel) rengini taşır,
+// kart arkaplanı/metni nötr kalır (kullanıcının verdiği referans görsele
+// göre ayarlandı) -- kart TEK renge indirgenirse "renk yok" gibi görünüyordu.
+// Konteyner .konum-satiri kendi user-select:none'una sahip (mobil
+// hotfix'teki koruma korunur).
 const KONUM_CHIP_IKONLARI = ['fa-building', 'fa-stairs', 'fa-door-open', 'fa-tag'];
+const KONUM_CHIP_RENKLERI = ['#2c3e50', '#27ae60', '#8e44ad', '#f39c12'];
 function updateLocationDisplay() {
   if (!currentSession) return;
   const { bina, kat, oda } = currentSession;
@@ -2919,8 +2922,10 @@ function updateLocationDisplay() {
   const parcalar = tamYol.split('/').map(p => p.trim()).filter(Boolean);
   el.innerHTML = '<div class="konum-chip konum-chip-etiket"><i class="fas fa-location-dot"></i><span>AKTİF KONUM</span></div>' +
     parcalar.map((p, i) => {
-      const ikon = KONUM_CHIP_IKONLARI[Math.min(i, KONUM_CHIP_IKONLARI.length - 1)];
-      return `<div class="konum-chip"><i class="fas ${ikon}"></i><span>${_esc(p)}</span></div>`;
+      const idx = Math.min(i, KONUM_CHIP_IKONLARI.length - 1);
+      const ikon = KONUM_CHIP_IKONLARI[idx];
+      const renk = KONUM_CHIP_RENKLERI[idx];
+      return `<div class="konum-chip"><i class="fas ${ikon}" style="color:${renk}"></i><span>${_esc(p)}</span></div>`;
     }).join('');
 }
 
