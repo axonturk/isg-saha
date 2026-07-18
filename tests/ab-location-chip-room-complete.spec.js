@@ -295,11 +295,11 @@ test.describe('AB. Üst konum chip bar + Bu Odayı Tamamla', () => {
     await sahteKameraKur(page);
     await _kurumBirimHazirla(page);
     await _konumaGir(page);
-    await expect(page.locator('button', { hasText: 'Resim Yükle' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Galeri' })).toBeVisible();
     await expect(page.locator('button[onclick="openOCR(\'kanit\')"]')).toBeVisible();
-    // Çek-Onayla + Resim Yükle aynı satırda (.ikili-buton-satiri) -- yapısal kanıt.
-    await expect(page.locator('.ikili-buton-satiri button[onclick="openOCR(\'kanit\')"]')).toHaveCount(1);
-    await expect(page.locator('.ikili-buton-satiri button', { hasText: 'Resim Yükle' })).toHaveCount(1);
+    // Kamera + Galeri + Ses notu aynı satırda (.kanit-ekle-satiri) -- yapısal kanıt.
+    await expect(page.locator('.kanit-ekle-satiri button[onclick="openOCR(\'kanit\')"]')).toHaveCount(1);
+    await expect(page.locator('.kanit-ekle-satiri button', { hasText: 'Galeri' })).toHaveCount(1);
 
     await page.setInputFiles('#galeri-foto-input', { name: 'not.txt', mimeType: 'text/plain', buffer: Buffer.from('görsel değil') });
     await expect(page.locator('#galeri-foto-durum')).toHaveText('Yalnız görsel dosyası yüklenebilir.');

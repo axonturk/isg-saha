@@ -71,7 +71,7 @@ test.describe('X. Galeriden resim yükleme', () => {
 
   test('A. UI görünür -- Resim Yükle seçeneği ve kamera butonu birlikte mevcut', async ({ page }) => {
     await _denetimBaslat(page);
-    await expect(page.locator('button', { hasText: 'Resim Yükle' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Galeri' })).toBeVisible();
     await expect(page.locator('#galeri-foto-input')).toBeAttached();
     await expect(page.locator('button[onclick="openOCR(\'kanit\')"]')).toBeVisible();
   });
@@ -242,7 +242,7 @@ test.describe('X. Galeriden resim yükleme', () => {
       const reg = await navigator.serviceWorker.getRegistration('./sw.js');
       return !!reg;
     }, { timeout: 5000 });
-    await expect(page.locator('button', { hasText: 'Resim Yükle' })).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Galeri' })).toBeVisible();
     await _galeriYukle(page);
     await expect(page.locator('#foto-onizleme img')).toHaveCount(1);
   });

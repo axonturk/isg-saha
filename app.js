@@ -2976,9 +2976,9 @@ function toggleHayatiRisk() {
 function _hayatiRiskButonGuncelle() {
   const btn = document.getElementById('btn-hayati-risk');
   if (!btn) return;
-  btn.style.background = hayatiRiskAktif ? '#e74c3c' : '#eee';
-  btn.style.color = hayatiRiskAktif ? 'white' : '#333';
-  btn.textContent = hayatiRiskAktif ? '⚠ Hayati Risk: AÇIK' : '⚠ Hayati Risk İşaretle';
+  btn.classList.toggle('aktif', hayatiRiskAktif);
+  const etiket = document.getElementById('hayati-risk-etiket');
+  if (etiket) etiket.textContent = hayatiRiskAktif ? 'Hayati Risk: AÇIK' : 'Hayati Risk İşaretle';
 }
 
 // ─── BULGU KAYDET (çoklu fotoğraf + çoklu ses, sınırsız) ─────
@@ -3388,9 +3388,11 @@ async function toggleSesKaydi() {
     };
     sesRecorder.start();
     if (btn) {
-      btn.textContent = '⏺ Kaydediliyor… (durdurmak için bas)';
-      btn.style.background = '#e74c3c';
-      btn.style.color = 'white';
+      btn.classList.add('aktif');
+      const etiket = document.getElementById('ses-buton-etiket');
+      if (etiket) etiket.textContent = 'Durdur';
+      const ikon = btn.querySelector('i');
+      if (ikon) { ikon.classList.remove('fa-microphone'); ikon.classList.add('fa-stop'); }
     }
   } catch (e) {
     alert('Mikrofon erişimi reddedildi: ' + e.message);
@@ -3401,9 +3403,11 @@ if (typeof window !== 'undefined') window.toggleSesKaydi = toggleSesKaydi;
 function _sesButonSifirla() {
   const btn = document.getElementById('btn-ses-kaydi');
   if (!btn) return;
-  btn.textContent = '🎤 Ses Notu Kaydet';
-  btn.style.background = '#eee';
-  btn.style.color = '#333';
+  btn.classList.remove('aktif');
+  const etiket = document.getElementById('ses-buton-etiket');
+  if (etiket) etiket.textContent = 'Ses notu';
+  const ikon = btn.querySelector('i');
+  if (ikon) { ikon.classList.remove('fa-stop'); ikon.classList.add('fa-microphone'); }
 }
 
 // Bekleyen (henüz kaydedilmemiş) tüm ses notlarını numaralı gösterir,

@@ -33,15 +33,15 @@ test.describe('G. Ses kaydı davranışı (gerçek MediaRecorder akışı, sanal
 
     const sesButonu = page.locator('#btn-ses-kaydi');
     await expect(sesButonu).toBeVisible();
-    await expect(sesButonu).toHaveText(/Ses Notu Kaydet/);
+    await expect(sesButonu).toHaveText(/Ses notu/);
 
     await sesButonu.click();
-    await expect(sesButonu).toHaveText(/Kaydediliyor/);
+    await expect(sesButonu).toHaveText(/Durdur/);
 
     await page.waitForTimeout(600);   // MediaRecorder'ın gerçek chunk üretmesi için
 
     await sesButonu.click();   // durdur
-    await expect(sesButonu).toHaveText(/Ses Notu Kaydet/);
+    await expect(sesButonu).toHaveText(/Ses notu/);
 
     // Geçici (kaydedilmemiş) ses önizlemesi eklendi mi.
     await expect(page.locator('#ses-onizleme audio')).toHaveCount(1);

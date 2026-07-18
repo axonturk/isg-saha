@@ -159,16 +159,31 @@
             position: sticky; bottom: 0; background: white; border-top: 1px solid #eee;
             margin: 20px -20px -20px; padding: 12px 20px calc(12px + var(--safe-bottom));
             box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
-            display: flex; gap: 10px; align-items: flex-start;
+            display: flex; gap: 10px; align-items: stretch;
         }
-        .bottom-action-bar > .btn { flex: 1; }
-        .bottom-action-tamamla { flex: 1; display: flex; flex-direction: column; }
-        .bottom-action-caption { text-align: center; font-size: 0.7rem; color: #999; margin-top: 4px; }
+        .bottom-action-geri {
+            flex: 0 0 32%; flex-direction: column; gap: 2px; font-size: 0.85rem;
+        }
+        .bottom-action-tamamla { flex: 1; flex-direction: column; gap: 2px; }
+        .bottom-action-tamamla-baslik { display: flex; align-items: center; gap: 6px; }
+        .bottom-action-caption { font-size: 0.7rem; font-weight: 400; opacity: 0.85; }
         .version-badge { font-size: 0.7rem; background: #ddd; padding: 2px 6px; border-radius: 4px; }
 
-        /* Çek-Onayla + Resim Yükle aynı satırda (PWA UX Commit) */
-        .ikili-buton-satiri { display: flex; gap: 10px; margin-bottom: 10px; }
-        .ikili-buton-satiri > .btn { width: auto; flex: 1; }
+        /* Kanıt ekle -- Kamera/Galeri/Ses notu 3'lü kart satırı (Bulgu Ekle redesign) */
+        .kanit-ekle-satiri { display: flex; gap: 8px; margin-bottom: 10px; }
+        .kanit-karti {
+            flex: 1; flex-direction: column; gap: 5px; padding: 12px 4px;
+            border-radius: 10px; border: 1px solid #e1e5ea;
+            background: #f4f6f8; color: var(--primary); font-size: 0.72rem;
+        }
+        .kanit-karti i { font-size: 1.25rem; }
+        .kanit-karti-vurgu { background: #f5eefb; border-color: #8e44ad; color: #8e44ad; }
+        .kanit-karti.aktif { background: var(--danger); border-color: var(--danger); color: white; }
+        .bulgu-alt-baslik { font-size: 0.72rem; color: #888; font-weight: 600; margin: 10px 0 4px; }
+        .hayati-risk-btn {
+            background: white; border: 1.5px solid var(--danger); color: var(--danger);
+        }
+        .hayati-risk-btn.aktif { background: var(--danger); border-color: var(--danger); color: white; }
     </style>
 </head>
 <body>
@@ -401,29 +416,30 @@
 
         <div class="card">
             <h3>Bulgu Ekle</h3>
-            <div class="ikili-buton-satiri">
-                <button class="btn btn-primary" onclick="openOCR('kanit')" style="background: #8e44ad;">
-                    <i class="fas fa-camera"></i> Çek-Onayla (Kanıt Fotoğrafı)
+            <div class="kanit-ekle-satiri">
+                <button class="btn kanit-karti kanit-karti-vurgu" onclick="openOCR('kanit')">
+                    <i class="fas fa-camera"></i> Kamera
                 </button>
-                <button class="btn btn-outline" onclick="document.getElementById('galeri-foto-input').click()">
-                    <i class="fas fa-image"></i> Resim Yükle
+                <button class="btn kanit-karti" onclick="document.getElementById('galeri-foto-input').click()">
+                    <i class="fas fa-image"></i> Galeri
+                </button>
+                <button id="btn-ses-kaydi" class="btn kanit-karti" onclick="toggleSesKaydi()">
+                    <i class="fas fa-microphone"></i> <span id="ses-buton-etiket">Ses notu</span>
                 </button>
             </div>
             <input type="file" id="galeri-foto-input" accept="image/*" style="display:none" onchange="_galeriDosyaSecildi(this)">
             <div id="galeri-foto-durum" style="font-size:0.8rem; color:#666;"></div>
             <div id="foto-onizleme"></div>
-            <button id="btn-ses-kaydi" class="btn" style="margin-top:10px; background:#eee; color:#333;" onclick="toggleSesKaydi()">
-                🎤 Ses Notu Kaydet
-            </button>
             <div id="ses-onizleme"></div>
-            <textarea id="finding-manual" placeholder="Bulguyu buraya yazın (opsiyonel — foto/ses de tek başına yeterli)..." rows="3" style="margin-top:10px"></textarea>
+            <div class="bulgu-alt-baslik">Açıklama</div>
+            <textarea id="finding-manual" placeholder="Bulguyu buraya yazın (opsiyonel — foto/ses de tek başına yeterli)..." rows="3"></textarea>
             <div class="chip-group" style="margin-top:15px">
                 <div class="chip" onclick="addQuickFinding('Yangın Tüpü Eksik')">Tüp Eksik</div>
                 <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
                 <div class="chip" onclick="addQuickFinding('Priz Yerinden Çıkmış')">Priz</div>
             </div>
-            <button id="btn-hayati-risk" class="btn" style="margin-top:15px; background:#eee; color:#333;" onclick="toggleHayatiRisk()">
-                ⚠ Hayati Risk İşaretle
+            <button id="btn-hayati-risk" class="btn hayati-risk-btn" style="margin-top:15px" onclick="toggleHayatiRisk()">
+                <i class="fas fa-triangle-exclamation"></i> <span id="hayati-risk-etiket">Hayati Risk İşaretle</span>
             </button>
             <button class="btn btn-success" style="margin-top:10px" onclick="saveFinding()">
                 <i class="fas fa-plus"></i> Bulguyu Kaydet
@@ -434,15 +450,14 @@
         <div id="findings-list"></div>
 
         <div class="bottom-action-bar">
-            <button class="btn btn-outline" onclick="_altGeriTikla()">
-                <i class="fas fa-arrow-left"></i> Geri
+            <button class="btn btn-outline bottom-action-geri" onclick="_altGeriTikla()">
+                <i class="fas fa-arrow-left"></i>
+                <span>Geri</span>
             </button>
-            <div class="bottom-action-tamamla">
-                <button class="btn btn-success" onclick="_odaSecimineDon()">
-                    <i class="fas fa-check"></i> Bu Odayı Tamamla
-                </button>
-                <div class="bottom-action-caption">Oda seçimine dön</div>
-            </div>
+            <button class="btn btn-success bottom-action-tamamla" onclick="_odaSecimineDon()">
+                <span class="bottom-action-tamamla-baslik"><i class="fas fa-check"></i> Bu Odayı Tamamla</span>
+                <span class="bottom-action-caption">Oda seçimine dön</span>
+            </button>
         </div>
     </div>
 
