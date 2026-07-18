@@ -2885,6 +2885,7 @@ async function startInspection() {
 
   currentSession = denetim;
   sessionBulgular = [];
+  _taslakTemizle();   // önceki odadan kalan kaydedilmemiş foto/ses/not/hayati-risk taslağı yeni odaya taşınmaz
   updateLocationDisplay();
   _denetimDevamDurumGoster(mevcudaDevamEdildi);
   showScreen('inspection');
@@ -2903,14 +2904,23 @@ function _denetimDevamDurumGoster(mevcudaDevamEdildi) {
 }
 
 // PWA UX Commit + gerçek Android hotfix: eski düz "Bina / Kat / Oda X"
-// metnini AYNI veriden kompakt, ikonlu, seçilemeyen kart-chip'lere böler --
-// veri modeli/eşleşme anahtarı değişmedi, yalnız sunum. Düz-metin yol/
-// breadcrumb (.konum-yol-baslik, .header içinde) ARTIK GERİ EKLENDİ --
-// kart satırının YERİNE değil, ONUNLA BİRLİKTE gösterilir (gerçek cihazda
-// kart satırı tek başına yeterince net okunmuyordu). Her ikon kendi
-// (sade/pastel) rengini taşır, kart arkaplanı/metni nötr kalır. Konteyner
-// .konum-satiri kendi user-select:none'una sahip (mobil hotfix'teki koruma
-// korunur).
+// metnini AYNI veriden kompakt, ikonlu kart-chip'lere böler -- veri modeli/
+// eşleşme anahtarı değişmedi, yalnız sunum. Düz-metin yol/breadcrumb
+// (.konum-yol-baslik, .header içinde) ARTIK GERİ EKLENDİ -- kart satırının
+// YERİNE değil, ONUNLA BİRLİKTE gösterilir. Her ikon kendi (sade/pastel)
+// rengini taşır, kart arkaplanı/metni nötr kalır. Konteyner .konum-satiri
+// kendi user-select:none'una sahip (mobil hotfix'teki koruma korunur).
+//
+// Gerçek Android hotfix (konum chip navigasyonu): "AKTİF KONUM" etiket
+// chip'i dışındaki HER chip artık tıklanabilir -- birim/kat/oda parçalarının
+// hepsi AYNI güvenli hedefe (_odaSecimineDon, "Bu Odayı Tamamla" ile birebir
+// aynı fonksiyon) yönlendirir. Model yalnız TEK bir birleşik kat+oda/mahal
+// seçim ekranını (#screen-kat-alan) desteklediği için ayrı "yalnız birim"
+// veya "yalnız kat" seçim seviyeleri YOK -- bu yüzden tüm konum chip'leri
+// aynı, zaten kanıtlanmış (bulgu silmeyen/denetimi kilitlemeyen/history
+// döngüsü üretmeyen) geri dönüşe yönlendirilir. "AKTİF KONUM" etiketi ve
+// durum segmenti bilinçli olarak TIKLANAMAZ bırakıldı (etiket = "buradasınız"
+// göstergesi, durum segmenti = salt bilgi).
 const KONUM_CHIP_IKONLARI = ['fa-building', 'fa-stairs', 'fa-door-open', 'fa-tag'];
 const KONUM_CHIP_RENKLERI = ['#2c3e50', '#27ae60', '#8e44ad', '#f39c12'];
 function updateLocationDisplay() {
@@ -2929,7 +2939,7 @@ function updateLocationDisplay() {
       const idx = Math.min(i, KONUM_CHIP_IKONLARI.length - 1);
       const ikon = KONUM_CHIP_IKONLARI[idx];
       const renk = KONUM_CHIP_RENKLERI[idx];
-      return `<div class="konum-chip"><i class="fas ${ikon}" style="color:${renk}"></i><span>${_esc(p)}</span></div>`;
+      return `<div class="konum-chip konum-chip-tiklanabilir" onclick="_odaSecimineDon()"><i class="fas ${ikon}" style="color:${renk}"></i><span>${_esc(p)}</span></div>`;
     }).join('');
 }
 
@@ -3016,18 +3026,34 @@ async function saveFinding() {
     currentSession.guncelleme = bulgu.zaman;
     await dbGuncelle('denetimler', currentSession);
 
-    aktifFotolarTaslak = [];
-    aktifSeslerTaslak = [];
-    hayatiRiskAktif = false;
-    _hayatiRiskButonGuncelle();
-    _sesButonSifirla();
-    _fotoOnizlemeGoster();
-    _sesOnizlemeGoster();
-    document.getElementById('finding-manual').value = '';
+    _taslakTemizle();
     await renderFindings();
   } finally {
     _bulguKaydediliyor = false;
   }
+}
+
+// Gerçek Android hotfix: taslak (henüz kaydedilmemiş) foto/ses/açıklama/
+// hayati-risk state'i AYNI global değişkenlerde tutuluyor (aktifFotolarTaslak/
+// aktifSeslerTaslak/hayatiRiskAktif) -- "Bulguyu Kaydet" sonrası temizleniyordu
+// AMA "Bu Odayı Tamamla" (_odaSecimineDon) ve inceleme ekranına yeniden giriş
+// (startInspection/resumeSession) bu taslağı HİÇ temizlemiyordu. Sonuç: Oda
+// A'da kaydedilmemiş foto/ses/not bırakılıp "Bu Odayı Tamamla"ya basılırsa,
+// Oda B ekranı açılınca aynı taslak (foto/ses önizlemesi, textarea, hayati
+// risk durumu) hâlâ görünüyordu -- kaydedilirse Oda B'nin denetimId'siyle
+// ama Oda A'nın içeriğiyle bir bulgu oluşuyordu. Bu fonksiyon merkezi taslak
+// temizleyicidir; inceleme ekranına HER giriş noktasında (yeni/mevcut denetim
+// başlatma, geçmişten devam etme) çağrılmalı.
+function _taslakTemizle() {
+  aktifFotolarTaslak = [];
+  aktifSeslerTaslak = [];
+  hayatiRiskAktif = false;
+  _hayatiRiskButonGuncelle();
+  _sesButonSifirla();
+  _fotoOnizlemeGoster();
+  _sesOnizlemeGoster();
+  const metin = document.getElementById('finding-manual');
+  if (metin) metin.value = '';
 }
 
 function addQuickFinding(text) {
@@ -3157,6 +3183,7 @@ async function resumeSession(id) {
   const s = await dbGetir('denetimler', id);
   if (!s) return;
   currentSession = s;
+  _taslakTemizle();   // geçmişten devam ederken de önceki oda/oturumdan kalan taslak taşınmaz
   updateLocationDisplay();
   showScreen('inspection');
   _ekraniPushEt('inceleme');

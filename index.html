@@ -153,6 +153,12 @@
         .konum-chip i { font-size: 0.85rem; }
         .konum-chip-etiket { background: #eaf2fd; border-color: var(--accent); color: var(--accent); }
         .konum-chip-etiket i { color: var(--accent); }
+        /* Gerçek Android hotfix: birim/kat/oda chip'leri artık tıklanabilir --
+           oda/mahal seçimine güvenli dönüş (_odaSecimineDon, "Bu Odayı Tamamla"
+           ile aynı fonksiyon). AKTİF KONUM etiketi ve durum segmenti bilinçli
+           olarak bu class'ı almaz (tıklanamaz kalır). */
+        .konum-chip-tiklanabilir { cursor: pointer; }
+        .konum-chip-tiklanabilir:active { transform: scale(0.95); }
 
         .konum-durum-segment {
             display: flex; align-items: center; gap: 8px; flex-shrink: 0; white-space: nowrap;

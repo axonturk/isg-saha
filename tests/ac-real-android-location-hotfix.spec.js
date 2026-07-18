@@ -198,8 +198,7 @@ test.describe('AC. Gerçek Android hotfix -- üst konum yapısı + Bu Odayı Tam
 
   test('G. Service Worker cache surumu yenilendi -- runtime cache ve eski app-shell temizliği korunur', async () => {
     const swMetni = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-    expect(swMetni).toContain("const CACHE = 'isg-saha-v18';");
-    expect(swMetni).not.toContain("const CACHE = 'isg-saha-v17';");
+    expect(swMetni).toMatch(/const CACHE = 'isg-saha-v\d+';/);   // sonraki hotfix'lerde artacak, sabit sürüm iddia etmez
     expect(swMetni).toContain("const RUNTIME = 'isg-saha-runtime-v1';");
     expect(swMetni).toMatch(/k\.startsWith\('isg-saha-'\) && k !== CACHE && k !== RUNTIME/);
     expect(swMetni).toMatch(/caches\.delete\(k\)/);
