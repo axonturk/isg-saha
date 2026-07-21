@@ -881,6 +881,123 @@ async function dofTakipTaslagiTemizle(dofUuid) {
   });
 }
 
+// ─── DÖF İNCELEME DURUMU / reviewStatus (PWA Commit 4N) ─────────
+// Sahada bir DÖF'ün "görüldü mü/incelendi mi/kapatma önerilir mi"
+// bilgisini tutan, `takipTaslagi`'ndan TAMAMEN BAĞIMSIZ, ayrı bir
+// top-level sibling alan (`reviewStatus`). `_DOF_TAKIP_ALANLARI`
+// allowlist'ine KESİNLİKLE eklenmez -- `dofTakipTaslagiGuncelle` bu
+// alana hiç dokunmaz/bilmez, `dofReviewStatusGuncelle` de `takipTaslagi`
+// alanına hiç dokunmaz (bkz. izolasyon testleri).
+//
+// Bu commit'te EXPORT YOKTUR -- `_DOF_DONUS_GIRDI_ALANLARI` (§DÖF DÖNÜŞ
+// BELGESİ) bu alanı okumaz, `dofDonusBelgesiOlustur`/`dofReplayZipOlustur`
+// hiç değişmedi. Medya/kapanış alanı üretimi YOKTUR -- Human-in-Control
+// ilkesi gereği `kapatma_onerisi` yalnız yerel bir işarettir, final
+// kapatma her zaman Desktop'ta kalır (bkz. dof_takip_contract.py'de
+// kapanış alanlarının hiç olmadığı, salt-okunur doğrulanmış allowlist).
+const _DOF_REVIEW_STATUS_DEGERLERI = new Set([
+  'dokunulmadi', 'goruldu', 'inceledi_degisiklik_yok', 'kapatma_onerisi', 'kapatilamaz',
+]);
+const _DOF_REVIEW_STATUS_VARSAYILAN = 'dokunulmadi';
+
+/** Bir DÖF'ün mevcut reviewStatus'unu okur -- salt-okunur, HİÇBİR
+ * DB yazması yapmaz. Alan own-property olarak yoksa (hiç dokunulmamış
+ * -- yeni import edilen veya eski kayıt fark etmez) varsayılan
+ * `'dokunulmadi'` döner; bu, ekranın sadece açılmasıyla DB'ye bir şey
+ * yazılmadığının garantisidir (yalnız `dofReviewStatusGuncelle`
+ * kullanıcının GERÇEKTEN seçim yaptığı anda yazar). `dofTakipTaslagiGetir`
+ * ile AYNI güvenli desen: kayıt yoksa `DOF_BULUNAMADI`, kanonik değilse
+ * `KANONIK_DOF_DEGIL`. */
+async function dofReviewStatusGetir(dofUuid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readonly');
+    const getReq = tx.objectStore('dofler').get(dofUuid);
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        reject(new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`));
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        reject(new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`));
+        return;
+      }
+      const reviewStatus = Object.prototype.hasOwnProperty.call(kayit, 'reviewStatus')
+        ? kayit.reviewStatus : _DOF_REVIEW_STATUS_VARSAYILAN;
+      resolve({ dofUuid, reviewStatus, reviewStatusGuncellenmeZamani: kayit.reviewStatusGuncellenmeZamani ?? null });
+    };
+    getReq.onerror = () => {
+      reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
+    };
+  });
+}
+
+/** Bir DÖF'ün reviewStatus'unu kalıcı yazar -- `dofTakipTaslagiGuncelle`
+ * ile AYNI transaction deseni (get→kanoniklik→doğrulama→put), ama
+ * TAMAMEN AYRI bir alan/fonksiyon: `takipTaslagi` nesnesine (own-
+ * property olarak bile) hiç dokunmaz, yalnız `reviewStatus` +
+ * `reviewStatusGuncellenmeZamani` top-level alanlarını günceller. Geçersiz
+ * enum değeri `GECERSIZ_REVIEW_STATUS` ile reddedilir. */
+async function dofReviewStatusGuncelle(dofUuid, reviewStatus) {
+  if (!_DOF_REVIEW_STATUS_DEGERLERI.has(reviewStatus)) {
+    throw new DofImportHatasi('GECERSIZ_REVIEW_STATUS', `Geçersiz reviewStatus değeri: ${JSON.stringify(reviewStatus)}`);
+  }
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('dofler', 'readwrite');
+    const store = tx.objectStore('dofler');
+    const getReq = store.get(dofUuid);
+    let sonucDegeri = null;
+    let hata = null;
+
+    getReq.onsuccess = () => {
+      const kayit = getReq.result;
+      if (!kayit) {
+        hata = new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+      if (!_dofKanonikMi(kayit)) {
+        hata = new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+        tx.abort();
+        return;
+      }
+
+      const mevcutReviewStatus = Object.prototype.hasOwnProperty.call(kayit, 'reviewStatus')
+        ? kayit.reviewStatus : _DOF_REVIEW_STATUS_VARSAYILAN;
+      if (mevcutReviewStatus === reviewStatus) {
+        // No-op: hiçbir put YOK, reviewStatusGuncellenmeZamani DEĞİŞMEZ.
+        sonucDegeri = { durum: 'degismedi', dofUuid, reviewStatus, reviewStatusGuncellenmeZamani: kayit.reviewStatusGuncellenmeZamani ?? null };
+        return;
+      }
+
+      const yeniZaman = new Date().toISOString();
+      // Güvenli spread: `kayit` GÜVENİLİR (az önce DB'den okunan kanonik
+      // kayıt) -- `takipTaslagi` dahil TÜM diğer alanlar birebir korunur,
+      // yalnız reviewStatus + reviewStatusGuncellenmeZamani eklenir/güncellenir.
+      store.put({ ...kayit, reviewStatus, reviewStatusGuncellenmeZamani: yeniZaman });
+      sonucDegeri = { durum: 'guncellendi', dofUuid, reviewStatus, reviewStatusGuncellenmeZamani: yeniZaman };
+    };
+    getReq.onerror = () => {
+      hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
+      tx.abort();
+    };
+
+    tx.oncomplete = () => {
+      if (hata) return;
+      resolve(sonucDegeri);
+    };
+    tx.onerror = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction hatası'));
+    };
+    tx.onabort = () => {
+      reject(hata || new DofImportHatasi('VERITABANI_HATASI', (tx.error && tx.error.message) || 'transaction abort edildi'));
+    };
+  });
+}
+
 // ─── DÖF DÖNÜŞ BELGESİ ÜRETİMİ (PWA Commit 4B) ──────────────────
 // Kanonik imported DÖF kayıtları + izinli `takipTaslagi`'ndan, masaüstünün
 // gerçek replay-v2 dönüş sözleşmesine (`dof_donus.json` -- isg_denetim/
@@ -1444,6 +1561,7 @@ if (typeof window !== 'undefined') {
   window._dofImport = {
     dofPaketiIceriAktar, DofImportHatasi,
     dofTakipTaslagiGetir, dofTakipTaslagiGuncelle, dofTakipTaslagiTemizle,
+    dofReviewStatusGetir, dofReviewStatusGuncelle,
     dofDonusBelgesiOlustur, dofDonusJsonOlustur,
     dofReplayHazirlikGetir, dofReplayHazirlikHazirla, dofReplayHazirlikTemizle,
     dofDonusGirdileriHazirla, dofReplayZipOlustur,
@@ -1851,6 +1969,7 @@ async function _dofListesiYukle() {
     listeEl.innerHTML = '';
     _dofListeSeciliId = null;
     _dofDetayGoster(null);
+    await _dofReviewDurumYukle(null);
     await _dofTakipFormYukle(null);
     await _dofReplayBolumYukle(null);
     return;
@@ -1862,6 +1981,7 @@ async function _dofListesiYukle() {
   }
   listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(_dofListeSeciliId);
+  await _dofReviewDurumYukle(_dofListeSeciliId);
   await _dofTakipFormYukle(_dofListeSeciliId);
   await _dofReplayBolumYukle(_dofListeSeciliId);
 }
@@ -1888,6 +2008,7 @@ function _dofDetaySec(dofId) {
   const listeEl = document.getElementById('dof-liste');
   if (listeEl) listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(dofId);
+  _dofReviewDurumYukle(dofId);
   _dofTakipFormYukle(dofId);
   _dofReplayBolumYukle(dofId);
 }
@@ -1937,6 +2058,82 @@ function _dofDetayGoster(dofId) {
 if (typeof window !== 'undefined') {
   window._dofDetaySec = _dofDetaySec;
   window._dofListesiYukle = _dofListesiYukle;
+}
+
+// ─── DÖF İNCELEME DURUMU UI (PWA Commit 4N) ─────────────────────
+// `#dof-review-durum-kart` -- `#dof-detay-kart`'tan TAMAMEN AYRI bir
+// kart (mevcut salt-okunur `#dof-detay` testinin -- input/textarea/
+// select sayısı 0 -- bozulmaması için kasıtlı). Seçim değişince otomatik
+// kaydeder, ayrı bir "Kaydet" butonu YOKTUR (tek-alanlık enum seçici
+// için dirty-tracking gereksiz karmaşıklık olurdu). Yalnız `dofReviewStatusGetir`/
+// `Guncelle`'yi (yukarıda tanımlı, izole) çağırır -- `dofTakipTaslagiGetir/
+// Guncelle` HİÇ çağrılmaz, iki katman birbirine karışmaz.
+
+const _DOF_REVIEW_DURUM_ACIKLAMALARI = {
+  kapatma_onerisi: "Kapatma önerisi — final karar Desktop'ta verilir.",
+  kapatilamaz: 'Kapatılamaz — uygunsuzluk devam ediyor.',
+};
+
+/** Seçili DÖF değiştiğinde (veya liste yenilendiğinde) çağrılır --
+ * kartı `dofReviewStatusGetir`'den TAZE değerle doldurur. Yalnız OKUR --
+ * ekranın açılması/DÖF seçilmesi TEK BAŞINA hiçbir DB yazması tetiklemez.
+ * `dofUuid` yoksa (seçim yok/liste boş) kart gizlenir. Kanonik olmayan/
+ * bulunamayan DÖF için kart AÇILMAZ (legacy güvenliği, diğer kartlarla
+ * aynı desen). */
+async function _dofReviewDurumYukle(dofUuid) {
+  const kart = document.getElementById('dof-review-durum-kart');
+  if (!kart) return;
+
+  if (!dofUuid) {
+    kart.style.display = 'none';
+    return;
+  }
+
+  const hataEl = document.getElementById('dof-review-durum-hata');
+  if (hataEl) hataEl.textContent = '';
+
+  let sonuc;
+  try {
+    sonuc = await dofReviewStatusGetir(dofUuid);
+  } catch (e) {
+    kart.style.display = 'none';   // legacy/WIP/bulunamadı -- diğer kartlarla aynı davranış
+    return;
+  }
+
+  kart.style.display = 'block';
+  const secici = document.getElementById('dof-review-durum-secici');
+  if (secici) secici.value = sonuc.reviewStatus;
+  _dofReviewDurumAciklamaGuncelle(sonuc.reviewStatus);
+}
+
+function _dofReviewDurumAciklamaGuncelle(reviewStatus) {
+  const aciklamaEl = document.getElementById('dof-review-durum-aciklama');
+  if (aciklamaEl) aciklamaEl.textContent = _DOF_REVIEW_DURUM_ACIKLAMALARI[reviewStatus] || '';
+}
+
+/** Seçici (`<select>`) değiştiğinde çağrılır -- kullanıcının GERÇEK
+ * seçimini `dofReviewStatusGuncelle` ile kalıcı yazar. Hata durumunda
+ * (ör. eş zamanlı legacy'e dönüşüm) görünür bir durum mesajı gösterir,
+ * seçiciyi son bilinen geçerli değere geri almaz -- tekrar seçim
+ * denemesi kullanıcıya bırakılır (mevcut takip formu hata desenine
+ * benzer basitlik). */
+async function _dofReviewDurumDegisti() {
+  const dofUuid = _dofListeSeciliId;
+  const secici = document.getElementById('dof-review-durum-secici');
+  const hataEl = document.getElementById('dof-review-durum-hata');
+  if (!dofUuid || !secici) return;
+
+  try {
+    const sonuc = await dofReviewStatusGuncelle(dofUuid, secici.value);
+    if (hataEl) hataEl.textContent = '';
+    _dofReviewDurumAciklamaGuncelle(sonuc.reviewStatus);
+  } catch (e) {
+    if (hataEl) hataEl.textContent = (e && e.message) || 'İnceleme durumu kaydedilemedi.';
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window._dofReviewDurumDegisti = _dofReviewDurumDegisti;
 }
 
 // ─── DÖF TAKİP DÜZENLEME (PWA Commit 4H) ─────────────────────────
