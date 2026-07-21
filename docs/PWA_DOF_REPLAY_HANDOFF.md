@@ -5,6 +5,8 @@
 **Bu doküman anındaki Desktop (isg_denetim) HEAD:** `5946612`
 **Durum:** Medyasız DÖF round-trip MVP, gerçek Desktop ↔ PWA QA ile doğrulanmış test uygulaması seviyesindedir.
 
+**2026-07-22 güncellemesi:** Bu doküman, Desktop tarafındaki roadmap görüşmeleriyle (Madde 4.0 sözleşme fazı + Madde 4A doğrulaması) hizalanmak üzere aşağıya **H-M bölümleri eklenerek** güncellendi. Bu güncelleme **yalnız dokümantasyondur — hiçbir kod, test veya üretim davranışı değişmedi.** Yukarıdaki A-G bölümleri (orijinal 4J QA kaydı) aynen korunmuştur, hiçbir cümlesi silinmemiş/değiştirilmemiştir.
+
 ---
 
 ## A. PWA DÖF medyasız round-trip MVP durumu
@@ -141,3 +143,113 @@ Bu koruma (hem PWA'nın `REPLAY_HAZIRLIK_ESKI`'si hem Desktop'un `BASE_STATE_DEG
 ```
 
 **Ancak açıkça belirtilmelidir:** medyasız DÖF round-trip MVP, gerçek test uygulaması seviyesine ulaşmıştır. Yukarıdaki sıradaki işler MVP'yi tamamlamak için değil, **kapsamı genişletmek** içindir.
+
+> **2026-07-22 notu:** 4K/4L/4M bu tarihte git geçmişinde TAMAMLANMIŞ durumda (bkz. `7985f52`, `102645d`, `19d696a`/`12ff577`). Bu bölümdeki eski "4N — Medya replay bağlantısı" ve "4O — Saha test paketi / final handoff" slotları, aşağıdaki **§K**'de reviewStatus işini de kapsayacak şekilde **4N-4R** olarak genişletilip yeniden numaralandırıldı — bu paragraf tarihsel kayıt olarak korunuyor, güncel sıra için §K'ye bakın.
+
+---
+
+## H. Madde 4A kanonik kapanış notu (2026-07-22)
+
+Desktop tarafındaki roadmap görüşmesinde "Madde 4A — PWA DÖF Detay Ekranı, salt-okunur temel" adıyla planlanan iş, bu repodaki **mevcut "4G" (§B tablosu) koduyla zaten karşılanıyor**:
+
+- `_dofDetaySec()` → `_dofDetayGoster()` mevcut.
+- Detay ayrı `#dof-detay-kart` / `#dof-detay` alanında render ediliyor.
+- Detay salt-okunur; `input`/`textarea`/`select` yok.
+- Takip Bilgileri formu ayrı `#dof-takip-form-kart` içinde (4H, karışmıyor).
+- Replay Paketi / ZIP kartı ayrı `#dof-replay-kart` içinde (4I, karışmıyor).
+- Detay mevcut kanonik DÖF kaydından besleniyor; eksik değerlerde "Bilgi yok" fallback var.
+- `reviewStatus`, `kapatma_onerisi`, `kapatilamaz` yok (henüz eklenmedi — bkz. §I, §K).
+- Medya capture yok, yeni medya sözleşmesi yok.
+- PWA→Desktop dönüş ZIP formatı değişmedi.
+- Desktop repo'ya dokunulmadı.
+
+**Hedef test:** `tests/t-dof-list-detail-ui.spec.js` → **10 passed, 0 failed, 0 skipped**.
+**Son tam doğrulama (Codex bağımsız QA):** **232 passed, 0 failed, 0 skipped.**
+
+**Sonuç: Madde 4A KAPANDI.** Yeni kod yazılmadı, yeni commit oluşturulmadı — mevcut PWA "4G" kodu 4A kriterlerini olduğu gibi karşılıyor. Codex bağımsız doğrulama kararı: `READY_TO_MARK_4A_CANONICAL`.
+
+---
+
+## I. Madde 4.0 sözleşme kararları (Desktop tarafında alınmış, PWA'yı bağlar)
+
+Desktop roadmap'inde "Madde 4.0 — DÖF replay sözleşme fazı" kodsuz olarak kapatıldı; PWA tarafını doğrudan ilgilendiren kararlar:
+
+1. **Yeni medya sözleşmesi icat edilmeyecek.** Desktop zaten foto/ses için tam bir alım hattına sahip: SHA-256 doğrulama, staging → Apply çift hash, `dof_fotolar/<dof_id>/` kalıcılaştırma, idempotency, ZIP tip tespiti, partial apply. PWA ileride bu **mevcut** Desktop sözleşmesini üretmeye başlayacak (§K, 4P/4Q).
+2. **`reviewStatus` gerçekten yeni bir alan** — bugün ne Desktop'ta ne PWA'da (bu repoda grep ile doğrulandı: sıfır referans) karşılığı yok. Değerler: `dokunulmadi`, `goruldu`, `inceledi_degisiklik_yok`, `kapatma_onerisi`, `kapatilamaz`.
+3. **`reviewStatus`, `dof_takip_contract` allowlist'ine GİRMEYECEK** — ayrı, bağımsız bir audit/review alanı olarak kalacak; mevcut 8 izinli takip alanıyla (planlanan_tarih, sorumlu, gerceklesen_faaliyet, etkinlik_kontrol_tarihi, gozlem_degerlendirme, yeni_o/f/s) karışmayacak.
+4. **Kapatma alanları PWA'dan gelmeyecek.** Human-in-Control ilkesi değişmiyor: PWA yalnız `kapatma_onerisi` (bir öneri/rozet) üretebilir, **final kapatma her zaman Desktop'ta kalır.**
+5. **ZIP tip tespiti ve partial apply davranışına dokunulmayacak** — bu ikisi zaten sağlam/mevcut (§A-E'de doğrulandı), yeniden tartışılmıyor.
+
+---
+
+## J. Roadmap remap kararı ve "roadmap karmaşası" notu
+
+Desktop tarafındaki roadmap görüşmelerinde (ChatGPT süpervizörlüğünde) "Madde 4 — DÖF Replay Yeniden Tasarımı" **"henüz yapılmamış, en riskli madde"** varsayımıyla planlanmıştı. Gerçekte bu `feature/dof-replay-v2` dalı, **main'e merge edilmemiş** olsa da, o maddenin büyük kısmını (3B, 4A-4M) zaten içeriyordu — ama bu bilgi Desktop roadmap görüşmesine hiç yansımamıştı.
+
+**Karar:** Bu dalın kendi kanonik numaralandırması (3B, 4A-4M — bu doküman + `app.js` yorum blokları) **korunacak**, Desktop roadmap'inin bağımsız önerdiği yeni "4A-4G" etiketleri **kullanılmayacak** (çakışma yaratırdı — örn. Desktop'ın önerdiği "4C" = reviewStatus, ama bu repoda "4C" zaten = replay hazırlık kimliği, tamamlanmış iş). Açık slotlar **4N-4R** olarak kullanılacak (§K).
+
+**Merge kararı bu güncellemenin kapsamı DEĞİLDİR** — yalnız doküman hizalaması yapılıyor, dal durumu/merge zamanlaması ayrı bir karar konusu olarak açık bırakılıyor.
+
+---
+
+## K. Yeni 4N-4R sırası (§G'nin eski 4N/4O slotlarının yerini alır)
+
+```text
+4A         → KAPANDI (§H) — Readonly DÖF detail, mevcut 4G koduyla karşılandı
+
+4N — reviewStatus local model + UI
+     PWA DÖF detay/takip bağlamında reviewStatus alanı: dokunulmadi /
+     goruldu / inceledi_degisiklik_yok / kapatma_onerisi / kapatilamaz.
+     Local persistence + UI seçimi. Export YOK. Medya YOK. Kapanış alanı
+     YOK. dof_takip_contract allowlist'ine karışmaz.
+
+4O — reviewStatus export contract   [4N'e bağımlı]
+     PWA→Desktop dönüş ZIP'inde reviewStatus ayrı audit/review alanı
+     olarak yer alır. "Sadece incelenenleri" export filtresi eklenir
+     (dokunulmadi filtre dışında kalır). kapatma_onerisi final kapatma
+     üretmez. Human-in-Control korunur — final kapatma her zaman
+     Desktop'ta kalır.
+
+4P — DÖF replay media capture (PWA)
+     DÖF detay/takip bağlamında foto+ses ekleme — normal saha bulgusu
+     medya akışından AYRI ama UI tutarlı. Mevcut Desktop medya
+     sözleşmesine (fotolar/sesNotlari) uygun hazırlık. Yeni medya
+     formatı icat edilmez.
+
+4Q — Media export + contract tests   [4P'ye bağımlı]
+     PWA→Desktop dönüş ZIP'ine DÖF replay medya dosyaları eklenir; alan
+     adları Desktop sözleşmesiyle birebir uyumlu; foto/ses hash'leri
+     SHA-256 hex64; Desktop'ın mevcut staging→Apply çift hash,
+     dof_fotolar/<dof_id>/, idempotency hattıyla uyumluluk fixture'ları.
+
+4R — E2E QA / Android / Desktop handoff
+     reviewStatus + medya ile gerçek uçtan uca QA (4J presedentini
+     takip ederek — gerçek Desktop kodu, mock yok). PWA ZIP üretir,
+     Desktop mevcut import doğrular, kapatma_onerisi yalnız rozet/audit
+     kalır, final kapanış Desktop'ta kalır. Android gerçek cihaz
+     regresyonu. Handoff dokümante edilir.
+```
+
+**Sıra gerekçesi:** reviewStatus, medyadan bağımsız ve daha düşük risklidir (yeni ikili/dosya işleme yok, yalnız string enum + IndexedDB alanı) — önce tamamlanırsa, medya işi sırasında export şemasına nasıl oturduğu zaten netleşmiş olur.
+
+---
+
+## L. Tekrar yazılmayacak mevcut işler
+
+Aşağıdakiler **zaten yapılmış ve test edilmiş** — 4N-4R çalışması sırasında yeniden yazılmayacak, değiştirilmeyecek (yalnız yeni alan/dosya eklenerek genişletilecek):
+
+- 4A/4G salt-okunur DÖF detay ekranı (`_dofDetayGoster`)
+- Takip Bilgileri formu / takip taslağı (4A/4A-1/4A-2/4H — `dofTakipTaslagiGetir/Guncelle/Temizle`, `_dofTakipKaydet`)
+- Medyasız replay ZIP üretimi (4C/4D — `dofReplayHazirlikHazirla`, `dofReplayZipOlustur`, tek-entry `dof_donus.json` şeması, `_DOF_DONUS_GIRDI_ALANLARI` allowlist'i)
+- DÖF import/list/detail UI (4F/4G)
+- Replay hazırlık/ZIP indirme UI (4I)
+- Medyasız gerçek Desktop↔PWA QA (4J — bu dokümanın §A-E'si)
+- 4K/4L/4M genel saha MVP işleri (Service Worker, galeri, aynı-konum) — DÖF replay kapsamının tamamen dışında, dokunulmayacak
+
+---
+
+## M. Gerçek eksikler ve sıradaki adım
+
+Grep ile doğrulanan (2026-07-22, `app.js` + `tests/` genelinde sıfır referans): `reviewStatus`, `kapatma_onerisi`, `kapatilamaz`, `dokunulmadi`. DÖF replay bağlamında foto/ses capture yok, medya export yok, "sadece incelenenler" export filtresi yok (mantıksal olarak reviewStatus'a bağımlı).
+
+**Sıradaki önerilen adım: 4N — reviewStatus local model + UI.** Bağımsız, düşük riskli, medyaya dokunmuyor, mevcut 232 testten hiçbirini bozma ihtimali düşük. 4O/4P/4Q/4R bu sıradan sonra, her biri kendi onay/test/rapor döngüsüyle ele alınacak.
