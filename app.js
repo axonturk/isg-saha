@@ -2610,6 +2610,16 @@ function _ekraniDegistir(ekranAdi) {
 // ekranına fırlatabiliyordu. Jeton (generation) ile YALNIZ EN SON
 // _geriTikla çağrısının fallback'i geçerli sayılır -- ara navigasyon
 // olduysa eski zamanlayıcı sessizce iptal olur.
+// Kararlılık notu (2026-07-22): 250ms yedek zamanlayıcı, uzun/otomatikleştirilmiş
+// test koşularında (ör. onlarca dakikalık tam paket, sistem yükü altında) gerçek
+// `popstate` olayı GEÇ gelirse (yok DEĞİL, yalnız GECİKMİŞ) erken tetiklenip
+// kullanıcıyı yanlışlıkla kurulum ekranına fırlatabiliyordu -- jeton'un çözdüğü
+// "stale çağrı" senaryosundan FARKLI, TEK ve geçerli bir çağrının kendi
+// zamanlayıcısının gerçek olaydan önce ateşlenmesi. Süre 250ms -> 600ms
+// büyütüldü: normal/hızlı popstate akışını hiç etkilemez (zamanlayıcı, ekran
+// gerçekten değiştiğinde no-op olarak kalır -- aşağıdaki DOM kontrolü aynen
+// korunuyor), yalnız gerçekten popstate hiç gelmeyen (bazı gömülü tarayıcılar)
+// veya GEÇİKEN durumlar için daha geniş, güvenli bir bekleme payı sağlıyor.
 let _geriTiklaJetonu = 0;
 function _geriTikla(oncekiEkranId) {
   const jeton = ++_geriTiklaJetonu;
@@ -2617,11 +2627,12 @@ function _geriTikla(oncekiEkranId) {
   if (typeof history !== 'undefined' && history.back) history.back();
   setTimeout(() => {
     if (jeton !== _geriTiklaJetonu) return;   // aradan yeni bir geri-tıklama geçti -- bu zamanlayıcı geçersiz
-    // popstate 250ms içinde gelmediyse (bazı gömülü tarayıcılar) manuel düş.
+    // popstate 600ms içinde gelmediyse (bazı gömülü tarayıcılar veya sistem
+    // yükü altında gecikme) manuel düş.
     if (oncekiAktifMi && document.getElementById(oncekiEkranId).classList.contains('active')) {
       _setupEkraninaGec();
     }
-  }, 250);
+  }, 600);
 }
 
 function _modalAcikMi() {
