@@ -27,11 +27,13 @@ window.addEventListener('error', (e) => {
 
 const APP_VERSION = 'v0.11.2';
 const DB_NAME = 'isgSahaDB';
-const DB_VERSION = 4;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
+const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
                         // kanonik değildi); v4: 'dofler' deposu + birimId/
                         // dofUuid index'leri (PWA Commit 3A, replay-v2
-                        // temeli -- bkz. AI/knowledge veya commit mesajı)
+                        // temeli -- bkz. AI/knowledge veya commit mesajı);
+                        // v5: 'dofKanitlari' deposu (PWA Commit 4P, DÖF
+                        // yerel kanıt medyası -- bkz. openDB upgrade bloğu)
 
 // ─── STATE ───────────────────────────────────────────────────
 let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
@@ -261,6 +263,22 @@ function openDB() {
       // Commit 3B'nin kapsamıdır, bu migration veri korumayı önceliklendirir.
       if (!dofStore.indexNames.contains('dofUuid')) {
         dofStore.createIndex('dofUuid', 'dofUuid', { unique: false });
+      }
+
+      // v5 (PWA Commit 4P): 'dofKanitlari' deposu -- DÖF replay bağlamında
+      // yerel foto/ses kanıt medyası. `dofler` kaydına HİÇBİR alan
+      // eklenmez (Blob'ları gömmek her küçük takip/reviewStatus güncellemesinde
+      // tüm kaydın yeniden serileştirilmesine yol açardı) -- tamamen ayrı,
+      // `dofUuid` index'li bir store. Aynı idempotent desen: store zaten
+      // varsa silinmez/yeniden oluşturulmaz.
+      let dofKanitStore;
+      if (!db.objectStoreNames.contains('dofKanitlari')) {
+        dofKanitStore = db.createObjectStore('dofKanitlari', { keyPath: 'localMediaUuid' });
+      } else {
+        dofKanitStore = e.target.transaction.objectStore('dofKanitlari');
+      }
+      if (!dofKanitStore.indexNames.contains('dofUuid')) {
+        dofKanitStore.createIndex('dofUuid', 'dofUuid', { unique: false });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -1007,6 +1025,78 @@ async function dofReviewStatusGuncelle(dofUuid, reviewStatus) {
   });
 }
 
+// ─── DÖF KANIT MEDYALARI (PWA Commit 4P) ─────────────────────────
+// Yerel foto/ses kanıt yakalama -- normal saha bulgu medyasından
+// (aktifFotolarTaslak/aktifSeslerTaslak/sesRecorder/sesChunks, bulgular
+// kaydının içine gömülü fotolar/sesler) TAMAMEN AYRI, kendi IndexedDB
+// store'unda (`dofKanitlari`, ayrı bir 'dofUuid' index'i, PK
+// `localMediaUuid`). `dofler` kaydına HİÇBİR yeni alan eklenmez --
+// `_dofYerelKayitOlustur`'un mevcut açık allowlist'i zaten medya
+// alanlarını hiç taşımıyor (bkz. commit raporu), bu bölüm o sınırı
+// KORUR, genişletmez. `takipTaslagi`/`reviewStatus`'a hiç dokunmaz --
+// export (`dofDonusBelgesiOlustur`), hazırlık fingerprint
+// (`_dofHazirlikKanonikJson`) ve replay ZIP (`dofReplayZipOlustur`) bu
+// store'u HİÇ okumaz (medya export'u 4Q'nun kapsamıdır, bu committe YOK).
+// Medya immutable kabul edilir -- düzeltme "sil + yeniden ekle" iledir,
+// güncelleme servisi YOKTUR.
+
+/** Ortak ön kontrol: DÖF var mı + kanonik mi. Legacy/WIP DÖF'e medya
+ * okuma/ekleme reddedilir (diğer DÖF servisleriyle -- reviewStatus/
+ * takipTaslagi -- AYNI güvenli desen). */
+async function _dofKanitDofKaydiDogrula(dofUuid) {
+  const kayit = await dbGetir('dofler', dofUuid);
+  if (!kayit) {
+    throw new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
+  }
+  if (!_dofKanonikMi(kayit)) {
+    throw new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
+  }
+  return kayit;
+}
+
+/** Bir DÖF'e bağlı tüm kanıt medyalarını salt-okunur döner -- oluşturma
+ * zamanına göre ARTAN (eskiden yeniye) sırayla, deterministik. */
+async function dofKanitMedyalariGetir(dofUuid) {
+  await _dofKanitDofKaydiDogrula(dofUuid);
+  const kayitlar = await dbIndexTumu('dofKanitlari', 'dofUuid', dofUuid);
+  return kayitlar.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+
+/** Kanonik bir DÖF'e yeni bir kanıt medyası ekler. `medyaGirdisi`:
+ * `{mediaType:'photo'|'audio', source:'camera'|'gallery'|'audio', blob,
+ * mimeType, size, displayName?, durationMs?, width?, height?, note?}`.
+ * Legacy/WIP DÖF için reddedilir. `dofler` kaydına, `takipTaslagi`'na,
+ * `reviewStatus`'a HİÇ dokunmaz -- tamamen ayrı bir yazma işlemidir. */
+async function dofKanitMedyasiEkle(dofUuid, medyaGirdisi) {
+  await _dofKanitDofKaydiDogrula(dofUuid);
+  const kayit = {
+    localMediaUuid: uuid(),
+    dofUuid,
+    mediaType: medyaGirdisi.mediaType,
+    source: medyaGirdisi.source,
+    blob: medyaGirdisi.blob,
+    mimeType: medyaGirdisi.mimeType || null,
+    size: typeof medyaGirdisi.size === 'number' ? medyaGirdisi.size : null,
+    createdAt: new Date().toISOString(),
+    displayName: medyaGirdisi.displayName || null,
+    durationMs: typeof medyaGirdisi.durationMs === 'number' ? medyaGirdisi.durationMs : null,
+    width: typeof medyaGirdisi.width === 'number' ? medyaGirdisi.width : null,
+    height: typeof medyaGirdisi.height === 'number' ? medyaGirdisi.height : null,
+    note: medyaGirdisi.note || null,
+  };
+  await dbEkle('dofKanitlari', kayit);
+  return kayit;
+}
+
+/** Bir kanıt medyasını kalıcı olarak (local-only hard delete) kaldırır --
+ * export henüz yok (4Q'ya kadar), bu yüzden "silme sonrası dış sözleşme
+ * etkilenir mi" endişesi bu commit'te geçerli değil. `dofler`/
+ * `takipTaslagi`/`reviewStatus`'a dokunmaz. Var olmayan bir kimlik için
+ * IndexedDB `delete()` sessizce no-op'tur (idempotent). */
+async function dofKanitMedyasiSil(localMediaUuid) {
+  await dbSil('dofKanitlari', localMediaUuid);
+}
+
 // ─── DÖF DÖNÜŞ BELGESİ ÜRETİMİ (PWA Commit 4B) ──────────────────
 // Kanonik imported DÖF kayıtları + izinli `takipTaslagi`'ndan, masaüstünün
 // gerçek replay-v2 dönüş sözleşmesine (`dof_donus.json` -- isg_denetim/
@@ -1626,6 +1716,7 @@ if (typeof window !== 'undefined') {
     dofReplayHazirlikGetir, dofReplayHazirlikHazirla, dofReplayHazirlikTemizle,
     dofDonusGirdileriHazirla, dofReplayZipOlustur,
     dofIncelenenDofUuidleriniFiltrele,
+    dofKanitMedyalariGetir, dofKanitMedyasiEkle, dofKanitMedyasiSil,
   };
 }
 
@@ -2033,6 +2124,7 @@ async function _dofListesiYukle() {
     await _dofReviewDurumYukle(null);
     await _dofTakipFormYukle(null);
     await _dofReplayBolumYukle(null);
+    await _dofKanitMedyaYukle(null);
     return;
   }
 
@@ -2045,6 +2137,7 @@ async function _dofListesiYukle() {
   await _dofReviewDurumYukle(_dofListeSeciliId);
   await _dofTakipFormYukle(_dofListeSeciliId);
   await _dofReplayBolumYukle(_dofListeSeciliId);
+  await _dofKanitMedyaYukle(_dofListeSeciliId);
 }
 
 function _dofListeKartHtml(k) {
@@ -2072,6 +2165,7 @@ function _dofDetaySec(dofId) {
   _dofReviewDurumYukle(dofId);
   _dofTakipFormYukle(dofId);
   _dofReplayBolumYukle(dofId);
+  _dofKanitMedyaYukle(dofId);
 }
 
 function _dofDetayGoster(dofId) {
@@ -2520,6 +2614,196 @@ if (typeof window !== 'undefined') {
   window._dofReplayHazirlikTikla = _dofReplayHazirlikTikla;
   window._dofReplayZipIndirTikla = _dofReplayZipIndirTikla;
 }
+
+// ─── DÖF KANIT MEDYALARI UI (PWA Commit 4P) ─────────────────────
+// Kamera/galeri/ses akışları normal sahanın `aktifFotolarTaslak`/
+// `aktifSeslerTaslak`/`sesRecorder`/`sesChunks` state'ini HİÇ paylaşmaz --
+// tamamen ayrı, `dofKanit`/`dofSes` önekli global state. Kamera YAKALAMA
+// ARAYÜZÜ (video/canvas/#camera-ui) fiziksel olarak TEKTİR ve mevcut
+// `openOCR`/`capturePhoto` ile paylaşılır (yeni bir kamera overlay'i
+// icat edilmedi) -- yalnız `kameraModu==='dof-kanit'` dalı `capturePhoto()`
+// içine eklendi, sonucu `aktifFotolarTaslak`'a DEĞİL doğrudan
+// `dofKanitMedyasiEkle`'ye yönlendirir.
+
+let _dofKanitAktifDofUuid = null;
+let _dofKanitAktifObjectUrller = [];   // önizleme için üretilen ObjectURL'ler -- her render öncesi/kart kapanırken revoke edilir
+let dofSesRecorder = null;
+let dofSesChunks = [];
+let dofSesKayitAktifDofUuid = null;   // kayıt hangi DÖF için başladı -- DÖF değişip kayıt zorla durdurulursa yanlış DÖF'e YAZILMAZ
+
+function _dofKanitObjectUrlleriTemizle() {
+  for (const url of _dofKanitAktifObjectUrller) {
+    try { URL.revokeObjectURL(url); } catch (e) { /* zaten geçersizse yok say */ }
+  }
+  _dofKanitAktifObjectUrller = [];
+}
+
+function _dofKanitMedyaListesiRenderEt(medyalar) {
+  _dofKanitObjectUrlleriTemizle();   // önceki render'ın URL'lerini serbest bırak
+  const liste = document.getElementById('dof-kanit-medya-liste');
+  if (!liste) return;
+  if (medyalar.length === 0) {
+    liste.innerHTML = '<p style="color:#999; font-size:0.85rem;">Henüz kanıt eklenmedi.</p>';
+    return;
+  }
+  liste.innerHTML = medyalar.map((m) => {
+    const url = URL.createObjectURL(m.blob);
+    _dofKanitAktifObjectUrller.push(url);
+    const onizleme = m.mediaType === 'photo'
+      ? `<img src="${url}" style="width:64px; height:64px; object-fit:cover; border-radius:6px;">`
+      : `<audio src="${url}" controls style="height:32px; max-width:180px;"></audio>`;
+    return `
+      <div style="display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid #eee;">
+        ${onizleme}
+        <span style="font-size:0.8rem; color:#666; flex:1;">${_esc(m.source)} · ${_esc(new Date(m.createdAt).toLocaleString('tr-TR'))}</span>
+        <button class="btn btn-outline" style="padding:2px 10px; font-size:0.8rem;"
+          onclick="_dofKanitMedyaSilTikla('${_escAttr(m.localMediaUuid)}')">Sil</button>
+      </div>`;
+  }).join('');
+}
+
+/** DÖF seçim zincirine bağlanır (`_dofListesiYukle`/`_dofDetaySec`). Başka
+ * bir DÖF için aktif ses kaydı varsa güvenle durdurur (kayıt ATILIR,
+ * yanlış DÖF'e yazılmaz -- bkz. `toggleDofSesKaydi.onstop`). Legacy/WIP
+ * DÖF için kart açılmaz (diğer DÖF kartlarıyla aynı desen). */
+async function _dofKanitMedyaYukle(dofUuid) {
+  if (dofSesRecorder && dofSesRecorder.state === 'recording' && dofSesKayitAktifDofUuid !== dofUuid) {
+    dofSesRecorder.stop();   // onstop, kayıt anındaki DÖF ile YENİ _dofKanitAktifDofUuid'i karşılaştırıp atacak
+  }
+  _dofKanitAktifDofUuid = dofUuid;
+  const kart = document.getElementById('dof-kanit-medya-kart');
+  if (!kart) return;
+  if (!dofUuid) {
+    kart.style.display = 'none';
+    _dofKanitObjectUrlleriTemizle();
+    return;
+  }
+  let medyalar;
+  try {
+    medyalar = await dofKanitMedyalariGetir(dofUuid);
+  } catch (e) {
+    kart.style.display = 'none';   // legacy/WIP -- capture engellenir
+    _dofKanitObjectUrlleriTemizle();
+    return;
+  }
+  kart.style.display = 'block';
+  _dofKanitMedyaListesiRenderEt(medyalar);
+}
+
+async function _dofKanitFotoKaydet(sonuc, source) {
+  const dofUuid = _dofKanitAktifDofUuid;
+  const durum = document.getElementById('dof-kanit-medya-durum');
+  if (!dofUuid) return;
+  try {
+    await dofKanitMedyasiEkle(dofUuid, {
+      mediaType: 'photo', source,
+      blob: sonuc.blob, mimeType: sonuc.blob ? sonuc.blob.type : 'image/jpeg',
+      size: sonuc.blob ? sonuc.blob.size : sonuc.sikistirilmisBoyut,
+      width: sonuc.genislik || null, height: sonuc.yukseklik || null,
+    });
+    if (durum) durum.textContent = 'Fotoğraf eklendi.';
+    await _dofKanitMedyaYukle(dofUuid);
+  } catch (e) {
+    if (durum) durum.textContent = (e && e.message) || 'Fotoğraf eklenemedi.';
+  }
+}
+
+/** Galeri/dosya seçici -- normal sahanın `_galeriDosyaSecildi`/
+ * `fotoAlVeSikistir` HATTINA hiç girmez, yalnız aynı SAF yardımcıları
+ * (`_resmiYukle`/`compressImage`) reuse eder. */
+async function _dofKanitGaleriDosyaSecildi(input) {
+  const dosya = input.files && input.files[0];
+  const durum = document.getElementById('dof-kanit-medya-durum');
+  const dofUuid = _dofKanitAktifDofUuid;
+  if (!dosya) return;
+  input.value = '';
+  if (!dofUuid) return;
+  if (!dosya.type || !dosya.type.startsWith('image/')) {
+    if (durum) durum.textContent = 'Yalnız görsel dosyası yüklenebilir.';
+    return;
+  }
+  try {
+    await _resmiYukle(dosya);
+    const sonuc = await compressImage(dosya);
+    await _dofKanitFotoKaydet(sonuc, 'gallery');
+  } catch (e) {
+    if (durum) durum.textContent = 'Görsel okunamadı.';
+  }
+}
+if (typeof window !== 'undefined') window._dofKanitGaleriDosyaSecildi = _dofKanitGaleriDosyaSecildi;
+
+function _dofKanitSesButonSifirla() {
+  const btn = document.getElementById('dof-kanit-ses-btn');
+  if (!btn) return;
+  btn.classList.remove('aktif');
+  const etiket = document.getElementById('dof-kanit-ses-etiket');
+  if (etiket) etiket.textContent = 'Ses Notu';
+  const ikon = btn.querySelector('i');
+  if (ikon) { ikon.classList.remove('fa-stop'); ikon.classList.add('fa-microphone'); }
+}
+
+/** Normal sahanın `sesRecorder`/`sesChunks`/`aktifSeslerTaslak` state'ini
+ * HİÇ kullanmaz -- ayrı `dofSesRecorder`/`dofSesChunks`. DÖF değişirken
+ * (`_dofKanitMedyaYukle`) zorla durdurulursa, `onstop` anındaki
+ * `_dofKanitAktifDofUuid` artık kayıt başlangıcındaki DÖF'le eşleşmez --
+ * bu durumda kayıt SESSİZCE ATILIR, yanlış DÖF'e yazılmaz. */
+async function toggleDofSesKaydi() {
+  const btn = document.getElementById('dof-kanit-ses-btn');
+  if (dofSesRecorder && dofSesRecorder.state === 'recording') {
+    dofSesRecorder.stop();
+    return;
+  }
+  const dofUuid = _dofKanitAktifDofUuid;
+  if (!dofUuid) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    dofSesChunks = [];
+    dofSesKayitAktifDofUuid = dofUuid;
+    dofSesRecorder = new MediaRecorder(stream);
+    const baslangic = Date.now();
+    dofSesRecorder.ondataavailable = (e) => { if (e.data.size > 0) dofSesChunks.push(e.data); };
+    dofSesRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const kaydedilecekDofUuid = dofSesKayitAktifDofUuid;
+      const sureMs = Date.now() - baslangic;
+      const blob = new Blob(dofSesChunks, { type: 'audio/webm' });
+      dofSesRecorder = null;
+      dofSesKayitAktifDofUuid = null;
+      _dofKanitSesButonSifirla();
+      if (!kaydedilecekDofUuid || kaydedilecekDofUuid !== _dofKanitAktifDofUuid) {
+        return;   // DÖF değişti -- kayıt bilerek ATILDI, yanlış DÖF'e yazılmadı
+      }
+      const durum = document.getElementById('dof-kanit-medya-durum');
+      try {
+        await dofKanitMedyasiEkle(kaydedilecekDofUuid, {
+          mediaType: 'audio', source: 'audio',
+          blob, mimeType: 'audio/webm', size: blob.size, durationMs: sureMs,
+        });
+        if (durum) durum.textContent = 'Ses notu eklendi.';
+        await _dofKanitMedyaYukle(kaydedilecekDofUuid);
+      } catch (e) {
+        if (durum) durum.textContent = (e && e.message) || 'Ses notu eklenemedi.';
+      }
+    };
+    dofSesRecorder.start();
+    if (btn) {
+      btn.classList.add('aktif');
+      const etiket = document.getElementById('dof-kanit-ses-etiket');
+      if (etiket) etiket.textContent = 'Durdur';
+      const ikon = btn.querySelector('i');
+      if (ikon) { ikon.classList.remove('fa-microphone'); ikon.classList.add('fa-stop'); }
+    }
+  } catch (e) {
+    alert('Mikrofon erişimi reddedildi: ' + e.message);
+  }
+}
+if (typeof window !== 'undefined') window.toggleDofSesKaydi = toggleDofSesKaydi;
+
+async function _dofKanitMedyaSilTikla(localMediaUuid) {
+  await dofKanitMedyasiSil(localMediaUuid);
+  if (_dofKanitAktifDofUuid) await _dofKanitMedyaYukle(_dofKanitAktifDofUuid);
+}
+if (typeof window !== 'undefined') window._dofKanitMedyaSilTikla = _dofKanitMedyaSilTikla;
 
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
 window.addEventListener('load', () => {
@@ -3632,6 +3916,16 @@ async function capturePhoto() {
 
   const imageData = canvas.toDataURL('image/jpeg', 0.95);
   const sonuc = await compressImage(imageData);
+
+  // PWA Commit 4P: DÖF kanıt medyası modu -- aktifFotolarTaslak'a HİÇ
+  // dokunmaz, doğrudan dofKanitMedyasiEkle'ye (ayrı store) yönlendirir.
+  // Kamera overlay'i (video/canvas/#camera-ui) fiziksel olarak paylaşılır,
+  // ama SONUÇ/STATE tamamen ayrıdır.
+  if (kameraModu === 'dof-kanit') {
+    await _dofKanitFotoKaydet(sonuc, 'camera');
+    return;
+  }
+
   aktifFotolarTaslak.push(sonuc);   // ÜZERİNE YAZMAZ — listeye eklenir, sınırsız
   console.log('[sıkıştırma] Kayda hazır foto:', boyutBiçimle(sonuc.sikistirilmisBoyut),
     sonuc.sikistirildi ? '(sıkıştırıldı)' : '(orijinal korundu)');

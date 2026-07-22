@@ -29,12 +29,15 @@ test.describe('A. Uygulama başlangıcı', () => {
   // KENDİSİ orada ayrıntılı doğrulanıyor). Bu test yalnız "temiz kurulumda
   // GÜNCEL beklenen son durum" özetini korur, negatif assertion SESSİZCE
   // silinmedi -- pozitife çevrildi.
-  test('IndexedDB v4 temiz kurulumda kanonik dofler store\'unu oluşturur', async ({ page }) => {
+  // PWA Commit 4P (bilinçli güncelleme): DB_VERSION 4->5, yeni `dofKanitlari`
+  // store'u (DÖF kanıt medyası) eklendi -- bkz. app.js::openDB.
+  test('IndexedDB v5 temiz kurulumda kanonik dofler + dofKanitlari store\'larını oluşturur', async ({ page }) => {
     await page.goto('/index.html');
     const { adlar, versiyon } = await storeAdlari(page);
 
-    expect(versiyon).toBe(4);
-    expect(adlar.sort()).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofler', 'kurumlar'].sort());
+    expect(versiyon).toBe(5);
+    expect(adlar.sort()).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofKanitlari', 'dofler', 'kurumlar'].sort());
     expect(adlar).toContain('dofler');
+    expect(adlar).toContain('dofKanitlari');
   });
 });

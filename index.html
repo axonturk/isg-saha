@@ -368,6 +368,27 @@
             </div>
         </div>
 
+        <!-- DÖF KANIT MEDYALARI (PWA Commit 4P) — normal saha bulgu -->
+        <!-- medyasından TAMAMEN AYRI, yerel dofKanitlari store'u; -->
+        <!-- export/ZIP'e HİÇ girmez (medya export 4Q'nun kapsamı) -->
+        <div class="card" id="dof-kanit-medya-kart" style="display:none;">
+            <h2>Kanıt Medyaları</h2>
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <button class="btn btn-outline" onclick="openOCR('dof-kanit')">
+                    <i class="fas fa-camera"></i> Fotoğraf Çek
+                </button>
+                <button class="btn btn-outline" onclick="document.getElementById('dof-kanit-galeri-input').click()">
+                    <i class="fas fa-image"></i> Dosya Seç
+                </button>
+                <button id="dof-kanit-ses-btn" class="btn btn-outline" onclick="toggleDofSesKaydi()">
+                    <i class="fas fa-microphone"></i> <span id="dof-kanit-ses-etiket">Ses Notu</span>
+                </button>
+            </div>
+            <input type="file" id="dof-kanit-galeri-input" accept="image/*" style="display:none" onchange="_dofKanitGaleriDosyaSecildi(this)">
+            <div id="dof-kanit-medya-durum" style="font-size:0.85rem; color:#666; margin-bottom:8px;"></div>
+            <div id="dof-kanit-medya-liste"></div>
+        </div>
+
         <!-- DÖF REPLAY HAZIRLIK / ZIP İNDİRME (PWA Commit 4I) — medyasız, tek DÖF -->
         <div class="card" id="dof-replay-kart" style="display:none;">
             <h2>Replay Paketi</h2>

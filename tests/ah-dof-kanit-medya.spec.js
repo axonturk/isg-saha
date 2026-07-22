@@ -1,0 +1,449 @@
+// PWA Commit 4P -- DÖF replay bağlamında yerel kanıt medyası (foto/ses)
+// yakalama ("Kanıt Medyaları" kartı). Normal saha bulgu medyasından
+// (aktifFotolarTaslak/aktifSeslerTaslak/sesRecorder/sesChunks) TAMAMEN
+// AYRI state + ayrı IndexedDB store (`dofKanitlari`). Export/ZIP/
+// dof_donus.json/hazırlık fingerprint'e HİÇ girmez (4Q'nun kapsamı).
+//
+// Test paralelliği aynı origin'de DB çakışması yaratabileceği için bu
+// dosya SERIAL çalışır (diğer DÖF dosyalarıyla aynı desen).
+const AdmZip = require('adm-zip');
+const { test, expect } = require('@playwright/test');
+const { dbTemizle } = require('./migration-helpers');
+const { gecerliDofKaydi, gecerliDofPaketi } = require('./dof-import-fixtures');
+const { benzersizAd, gercekKurumEkle, gercekBirimEkle, storeTumu } = require('./helpers');
+const { sahteKameraKur, sahteMikrofonKur } = require('./media-mocks');
+
+test.describe.configure({ mode: 'serial' });
+
+async function dofSecVeKartBekle(page, index = 0) {
+  await page.locator('.dof-liste-karti').nth(index).click();
+  await expect(page.locator('#dof-kanit-medya-kart')).toBeVisible();
+}
+
+async function medyalarGetirDene(page, dofUuid) {
+  return page.evaluate(async (u) => {
+    try {
+      const sonuc = await window._dofImport.dofKanitMedyalariGetir(u);
+      return { basarili: true, sonuc };
+    } catch (e) {
+      return { basarili: false, kod: e && e.kod, mesaj: e && e.message };
+    }
+  }, dofUuid);
+}
+
+async function medyaEkleDene(page, dofUuid, medyaGirdisi) {
+  return page.evaluate(async ({ u, m }) => {
+    try {
+      // Blob test tarafında (Node) üretilemez -- sayfa içinde küçük bir
+      // gerçek Blob üretilir (foto/ses gövdesi bu testte önemli değil,
+      // yalnız servis sözleşmesi test ediliyor).
+      const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: m.mimeType || 'application/octet-stream' });
+      const sonuc = await window._dofImport.dofKanitMedyasiEkle(u, { ...m, blob });
+      return { basarili: true, sonuc };
+    } catch (e) {
+      return { basarili: false, kod: e && e.kod, mesaj: e && e.message };
+    }
+  }, { u: dofUuid, m: medyaGirdisi });
+}
+
+async function medyaSilDene(page, localMediaUuid) {
+  return page.evaluate(async (id) => {
+    try {
+      await window._dofImport.dofKanitMedyasiSil(id);
+      return { basarili: true };
+    } catch (e) {
+      return { basarili: false, kod: e && e.kod, mesaj: e && e.message };
+    }
+  }, localMediaUuid);
+}
+
+/** Gerçek dosya-yükleme akışı (`#dof-import-input`) -- `dofIceriAktarDene`
+ * (salt-servis köprüsü) DEĞİL, çünkü bu dosyadaki testlerin çoğu
+ * `.dof-liste-karti` UI etkileşimi gerektiriyor ve yalnız gerçek
+ * `_dofPaketDosyaSecildi` yolu listeyi (`_dofListesiYukle`) yeniler. */
+async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
+  await page.setInputFiles('#dof-import-input', {
+    name: dosyaAdi, mimeType: 'application/json', buffer: Buffer.from(jsonMetni, 'utf-8'),
+  });
+}
+
+async function tekDofKur(page, dofId = 1, bulguKodu = 'B-1') {
+  const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId, bulguKodu })] });
+  await dosyaSec(page, JSON.stringify(paket));
+  return paket.tehlikeler[0].dofUuid;
+}
+
+async function _denetimBaslat(page) {
+  const kurumAdi = benzersizAd('Kurum');
+  const birimAdi = benzersizAd('Birim');
+  await gercekKurumEkle(page, kurumAdi);
+  await gercekBirimEkle(page, { ad: birimAdi, profil: 'genel', katSayisi: 1 });
+  await page.click('button[onclick="ekranKatAlanaGec()"]');
+  await page.locator('#kat-alan-hizli-chips .chip').first().click();
+  await page.locator('#kat-alan-oda-no').fill('101');
+  await page.click('button[onclick="startInspection()"]');
+  await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+}
+
+/** 1x1 şeffaf PNG -- galeri yükleme testleri için gerçek, geçerli görsel. */
+const PNG_1X1_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+async function dofGaleriFotoYukle(page) {
+  await page.setInputFiles('#dof-kanit-galeri-input', {
+    name: 'test.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1X1_BASE64, 'base64'),
+  });
+}
+
+test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/tests/fixtures/blank.html');
+    await dbTemizle(page);
+    await page.goto('/index.html');
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+  });
+
+  test.afterEach(async ({ page }) => {
+    await page.goto('/tests/fixtures/blank.html');
+    await dbTemizle(page);
+  });
+
+  test('A. Kanonik DÖF seçilince Kanıt Medyaları kartı görünür', async ({ page }) => {
+    await tekDofKur(page);
+    await expect(page.locator('#dof-kanit-medya-kart')).toBeHidden();
+    await dofSecVeKartBekle(page);
+  });
+
+  test('B. Legacy/WIP DÖF için kart gizlenir, servis KANONIK_DOF_DEGIL verir', async ({ page }) => {
+    const wipKayit = {
+      id: 'dof_wip_ah1', dofId: 101, bulguKodu: 'B-1', durum: 'bekliyor', birimId: 'birim-wip',
+    };
+    await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), wipKayit);
+
+    const getirSonucu = await medyalarGetirDene(page, 'dof_wip_ah1');
+    expect(getirSonucu.basarili).toBe(false);
+    expect(getirSonucu.kod).toBe('KANONIK_DOF_DEGIL');
+
+    const ekleSonucu = await medyaEkleDene(page, 'dof_wip_ah1', { mediaType: 'photo', source: 'gallery', mimeType: 'image/jpeg', size: 4 });
+    expect(ekleSonucu.basarili).toBe(false);
+    expect(ekleSonucu.kod).toBe('KANONIK_DOF_DEGIL');
+  });
+
+  test('C. Galeri fotoğrafı DÖF\'e local kaydedilir', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+
+    await dofGaleriFotoYukle(page);
+    await expect(page.locator('#dof-kanit-medya-durum')).toHaveText('Fotoğraf eklendi.');
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+    expect(medyalar.sonuc[0].mediaType).toBe('photo');
+    expect(medyalar.sonuc[0].source).toBe('gallery');
+    expect(medyalar.sonuc[0].dofUuid).toBe(dofUuid);
+  });
+
+  test('D. Kamera fotoğrafı DÖF\'e local kaydedilir (gerçek kamera akışı, sanal donanım)', async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await sahteKameraKur(page);
+    await page.goto('/index.html');   // addInitScript sonrası sayfayı tazele
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+
+    await page.click('button[onclick="openOCR(\'dof-kanit\')"]');
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
+    });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#camera-ui')).toBeHidden();
+
+    await expect(page.locator('#dof-kanit-medya-durum')).toHaveText('Fotoğraf eklendi.');
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+    expect(medyalar.sonuc[0].source).toBe('camera');
+    expect(medyalar.sonuc[0].blob).toBeTruthy();
+  });
+
+  test('E. Ses notu DÖF\'e local kaydedilir (gerçek MediaRecorder akışı, sanal donanım)', async ({ page, context }) => {
+    await context.grantPermissions(['microphone']);
+    await sahteMikrofonKur(page);
+    await page.goto('/index.html');
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+
+    const sesBtn = page.locator('#dof-kanit-ses-btn');
+    await expect(sesBtn).toContainText('Ses Notu');
+    await sesBtn.click();
+    await expect(sesBtn).toContainText('Durdur');
+    await page.waitForTimeout(600);
+    await sesBtn.click();
+    await expect(sesBtn).toContainText('Ses Notu');
+
+    await expect(page.locator('#dof-kanit-medya-durum')).toHaveText('Ses notu eklendi.');
+    await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+    expect(medyalar.sonuc[0].mediaType).toBe('audio');
+    expect(medyalar.sonuc[0].source).toBe('audio');
+    expect(medyalar.sonuc[0].durationMs).toBeGreaterThan(0);
+  });
+
+  test('F. DÖF A medyası DÖF B\'ye sızmaz', async ({ page }) => {
+    const paket = gecerliDofPaketi({
+      tehlikelerOverride: [
+        gecerliDofKaydi({ dofId: 1, bulguKodu: 'B-1' }),
+        gecerliDofKaydi({ dofId: 2, bulguKodu: 'B-2' }),
+      ],
+    });
+    await dosyaSec(page, JSON.stringify(paket));
+    const [uuidA, uuidB] = paket.tehlikeler.map((t) => t.dofUuid);
+
+    await medyaEkleDene(page, uuidA, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+
+    const medyalarA = await medyalarGetirDene(page, uuidA);
+    const medyalarB = await medyalarGetirDene(page, uuidB);
+    expect(medyalarA.sonuc.length).toBe(1);
+    expect(medyalarB.sonuc.length).toBe(0);
+
+    // UI üzerinden de doğrula: DÖF B seçilince liste boş, DÖF A'ya dönünce dolu.
+    await page.locator('.dof-liste-karti').filter({ hasText: 'B-2' }).click();
+    await expect(page.locator('#dof-kanit-medya-kart')).toContainText('Henüz kanıt eklenmedi.');
+    await page.locator('.dof-liste-karti').filter({ hasText: 'B-1' }).click();
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+  });
+
+  test('G. Sayfa yenileme sonrası medya listesi korunur', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 1500 });
+
+    await page.reload();
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+    await dofSecVeKartBekle(page);
+
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+    await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
+  });
+
+  test('H. Silme medya kaydını DB\'den ve UI\'dan kaldırır', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+    await dofGaleriFotoYukle(page);
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+
+    await page.locator('#dof-kanit-medya-liste button', { hasText: 'Sil' }).click();
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(0);
+    await expect(page.locator('#dof-kanit-medya-liste')).toContainText('Henüz kanıt eklenmedi.');
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(0);
+  });
+
+  test('I. Normal saha fotoğraf taslağı (aktifFotolarTaslak) DÖF medya eklemesinden etkilenmez', async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await sahteKameraKur(page);
+    await page.goto('/index.html');
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    // Önce DÖF'e iki foto ekle.
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+    await dofGaleriFotoYukle(page);
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+    await page.click('button[onclick="openOCR(\'dof-kanit\')"]');
+    await page.waitForFunction(() => { const v = document.getElementById('video'); return v && v.videoWidth > 0; });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(2);
+
+    // Sonra NORMAL saha akışında bir fotoğraf çek -- yalnız KENDİ fotoğrafı sayılmalı.
+    await _denetimBaslat(page);
+    await page.click('button[onclick="openOCR(\'kanit\')"]');
+    await page.waitForFunction(() => { const v = document.getElementById('video'); return v && v.videoWidth > 0; });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#foto-onizleme')).toContainText('1 fotoğraf hazır');
+    await expect(page.locator('#foto-onizleme img')).toHaveCount(1);   // 2 DEĞİL
+
+    await page.locator('button[onclick="saveFinding()"]').click();
+    const bulgular = await storeTumu(page, 'bulgular');
+    expect(bulgular.length).toBe(1);
+    expect(bulgular[0].fotolar.length).toBe(1);   // DÖF'ün 2 fotoğrafı sızmadı
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(2);   // DÖF medyası da kendi başına doğru kaldı
+  });
+
+  test('J. Normal saha ses taslağı (aktifSeslerTaslak/sesRecorder) DÖF ses eklemesinden etkilenmez', async ({ page, context }) => {
+    await context.grantPermissions(['microphone']);
+    await sahteMikrofonKur(page);
+    await page.goto('/index.html');
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+    const dofSesBtn = page.locator('#dof-kanit-ses-btn');
+    await dofSesBtn.click();
+    await page.waitForTimeout(500);
+    await dofSesBtn.click();
+    await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
+
+    await _denetimBaslat(page);
+    const sesBtn = page.locator('#btn-ses-kaydi');
+    await sesBtn.click();
+    await page.waitForTimeout(500);
+    await sesBtn.click();
+    await expect(page.locator('#ses-onizleme audio')).toHaveCount(1);
+
+    await page.locator('button[onclick="saveFinding()"]').click();
+    const bulgular = await storeTumu(page, 'bulgular');
+    expect(bulgular[0].sesler.length).toBe(1);   // DÖF'ün ses notu sızmadı
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+  });
+
+  test('K. Medya ekleme reviewStatus\'u değiştirmez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    const oncekiKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+    expect(Object.prototype.hasOwnProperty.call(oncekiKayit, 'reviewStatus')).toBe(false);
+
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+
+    const sonKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+    expect(Object.prototype.hasOwnProperty.call(sonKayit, 'reviewStatus')).toBe(false);
+  });
+
+  test('L. Medya ekleme takipTaslagi\'nı ve dofler kaydının diğer alanlarını değiştirmez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    const oncekiKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+
+    await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 900 });
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'camera', mimeType: 'image/jpeg', size: 4 });
+
+    const sonKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+    expect(sonKayit).toEqual(oncekiKayit);   // dofler kaydı BİREBİR aynı -- medya store'u tamamen ayrı
+  });
+
+  test('M. Medya ekleme dof_donus.json / ZIP şemasını değiştirmez, medya alanı üretmez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 500 });
+
+    await page.evaluate((u) => window._dofImport.dofReplayHazirlikHazirla(u), dofUuid);
+    const zip = await page.evaluate(async (u) => {
+      const sonuc = await window._dofImport.dofReplayZipOlustur([u]);
+      const buf = new Uint8Array(await sonuc.zipBlob.arrayBuffer());
+      let ikili = '';
+      const PARCA = 0x8000;
+      for (let i = 0; i < buf.length; i += PARCA) ikili += String.fromCharCode.apply(null, buf.subarray(i, i + PARCA));
+      return { zipB64: btoa(ikili) };
+    }, dofUuid);
+
+    const zipDosya = new AdmZip(Buffer.from(zip.zipB64, 'base64'));
+    expect(zipDosya.getEntries().map((e) => e.entryName)).toEqual(['dof_donus.json']);   // hâlâ tek entry
+    const belge = JSON.parse(zipDosya.readAsText('dof_donus.json', 'utf8'));
+    const kontrol = belge.dofKontrolleri[0];
+    for (const medyaAlani of ['fotolar', 'sesNotlari', 'medya', 'kanitlar', 'photos', 'audio']) {
+      expect(kontrol).not.toHaveProperty(medyaAlani);
+    }
+  });
+
+  test('N. Hazırlık sonrası medya eklenirse ZIP REPLAY_HAZIRLIK_ESKI vermez (4O fingerprint bozulmadı)', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    const hazirlik = await page.evaluate((u) => window._dofImport.dofReplayHazirlikHazirla(u), dofUuid);
+    expect(hazirlik).toBeTruthy();
+
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+
+    const zipSonucu = await page.evaluate(async (u) => {
+      try {
+        await window._dofImport.dofReplayZipOlustur([u]);
+        return { basarili: true };
+      } catch (e) {
+        return { basarili: false, kod: e && e.kod };
+      }
+    }, dofUuid);
+    expect(zipSonucu.basarili).toBe(true);   // REPLAY_HAZIRLIK_ESKI VERMEDİ
+  });
+
+  test('O. Aktif DÖF ses kaydı sırasında başka DÖF\'e geçiş yanlış DÖF\'e kayıt üretmez', async ({ page, context }) => {
+    await context.grantPermissions(['microphone']);
+    await sahteMikrofonKur(page);
+    await page.goto('/index.html');
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    const paket = gecerliDofPaketi({
+      tehlikelerOverride: [
+        gecerliDofKaydi({ dofId: 1, bulguKodu: 'B-1' }),
+        gecerliDofKaydi({ dofId: 2, bulguKodu: 'B-2' }),
+      ],
+    });
+    await dosyaSec(page, JSON.stringify(paket));
+    const [uuidA, uuidB] = paket.tehlikeler.map((t) => t.dofUuid);
+
+    await page.locator('.dof-liste-karti').filter({ hasText: 'B-1' }).click();
+    const sesBtn = page.locator('#dof-kanit-ses-btn');
+    await sesBtn.click();
+    await expect(sesBtn).toContainText('Durdur');
+    await page.waitForTimeout(300);
+
+    // Kayıt DEVAM EDERKEN başka bir DÖF'e geç.
+    await page.locator('.dof-liste-karti').filter({ hasText: 'B-2' }).click();
+    await expect(page.locator('#dof-kanit-ses-btn')).toContainText('Ses Notu');   // otomatik durduruldu
+
+    const medyalarA = await medyalarGetirDene(page, uuidA);
+    const medyalarB = await medyalarGetirDene(page, uuidB);
+    expect(medyalarA.sonuc.length).toBe(0);   // atıldı, A'ya yazılmadı
+    expect(medyalarB.sonuc.length).toBe(0);   // B'ye de yazılmadı
+  });
+
+  test('P. ObjectURL cleanup -- yeni render öncesi eski URL\'ler revoke edilir', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await dofSecVeKartBekle(page);
+
+    await page.evaluate(() => {
+      window.__revokeSayisi = 0;
+      const orijinal = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (u) => { window.__revokeSayisi++; orijinal(u); };
+    });
+
+    await dofGaleriFotoYukle(page);
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
+    await dofGaleriFotoYukle(page);
+    await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(2);
+
+    const revokeSayisiIlkIki = await page.evaluate(() => window.__revokeSayisi);
+    expect(revokeSayisiIlkIki).toBeGreaterThanOrEqual(1);   // ikinci ekleme öncesi ilkin URL'i revoke edildi
+
+    await page.locator('.dof-liste-karti').first().click();   // aynı DÖF -- yine de kart yeniden yüklenir
+    await page.locator('.dof-liste-karti').first().click();
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(2);   // veri kaybı yok, yalnız önizleme URL'leri temizlendi
+  });
+
+  test('Q. Servis fonksiyonları dofReplayZipOlustur imzasını/davranışını bozmaz (mevcut q/r regresyonu ayrı dosyalarda; burada yalnız medya alanının hiç sızmadığı ek olarak doğrulanır)', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'camera', mimeType: 'image/jpeg', size: 4 });
+
+    const belgeSonucu = await page.evaluate(async (u) => {
+      const belge = await window._dofImport.dofDonusBelgesiOlustur([{ dofUuid: u, submissionUuid: crypto.randomUUID() }]);
+      return belge;
+    }, dofUuid);
+    expect(Object.keys(belgeSonucu)).toEqual(['paketUuid', 'dofKontrolleri']);
+    expect(Object.keys(belgeSonucu.dofKontrolleri[0]).sort()).toEqual(
+      ['dofUuid', 'exportUuid', 'baseStateHash', 'aktifTurSirasi', 'replayVersion', 'submissionUuid', 'sorumlu'].sort());
+  });
+});

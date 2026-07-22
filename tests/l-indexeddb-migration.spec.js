@@ -3,6 +3,10 @@
 // YOK). Her senaryo öncesi veritabanı tamamen silinir, izole başlangıç
 // durumu raw API ile kurulur, ardından GERÇEK app.js açılıp v4 upgrade'i
 // tetiklenir.
+// PWA Commit 4P (bilinçli güncelleme): DB_VERSION 4->5, yeni `dofKanitlari`
+// store'u eklendi -- bu dosyadaki `versiyon`/`toBe(4)` beklentileri v5'e
+// güncellendi, migration senaryolarının KENDİSİ (dofler şeması/verisi)
+// değişmedi.
 //
 // Test paralelliği aynı origin'de DB çakışması yaratabileceği için bu
 // dosya SERIAL çalışır (yalnız bu dosya -- ticket'in kendi izniyle,
@@ -34,8 +38,8 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(4);
-    expect(bilgi.storeAdlari).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofler', 'kurumlar']);
+    expect(bilgi.versiyon).toBe(5);
+    expect(bilgi.storeAdlari).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofKanitlari', 'dofler', 'kurumlar']);
     expect(bilgi.doflerBilgisi).toMatchObject({
       keyPath: 'id',
       autoIncrement: false,
@@ -69,8 +73,9 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(4);
+    expect(bilgi.versiyon).toBe(5);
     expect(bilgi.storeAdlari).toContain('dofler');
+    expect(bilgi.storeAdlari).toContain('dofKanitlari');
     expect(bilgi.doflerBilgisi.indexNames).toEqual(['birimId', 'dofUuid']);
 
     const kurumlarSonra = await rawStoreTumu(page, 'kurumlar');
@@ -146,8 +151,9 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(4);
+    expect(bilgi.versiyon).toBe(5);
     expect(bilgi.storeAdlari).toContain('dofler');
+    expect(bilgi.storeAdlari).toContain('dofKanitlari');
     // birimId korunmuş, dofUuid yeni oluşturulmuş.
     expect(bilgi.doflerBilgisi.indexNames).toEqual(['birimId', 'dofUuid']);
     expect(bilgi.doflerBilgisi.dofUuidUnique).toBe(false);
