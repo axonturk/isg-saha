@@ -146,7 +146,15 @@ test.describe('AF. DÖF inceleme durumu (reviewStatus) UI', () => {
     expect(kayit.reviewStatus).toBe('goruldu');   // birbirini etkilemedi
   });
 
-  test('J. Replay ZIP şeması değişmez -- reviewStatus set edilmiş DÖF için dof_donus.json reviewStatus içermez', async ({ page }) => {
+  // NOT (PWA Commit 4O): Bu test 4N'de, reviewStatus export sözleşmesi
+  // henüz TASARLANMADAN önce yazılmıştı ve o zamanki doğru/savunmacı
+  // varsayımla "reviewStatus asla sızmaz" diye kilitlemişti. 4O bu
+  // sözleşmeyi KASITLI olarak ekledi (bkz. tests/ag-dof-review-status-export.spec.js,
+  // dof_donus.json sözleşmesi artık incelenmiş DÖF'ler için reviewStatus
+  // taşıyor) -- bu yüzden aşağıdaki assertion, ESKİMİŞ varsayımdan YENİ,
+  // kasıtlı davranışa güncellendi. ZIP'in tek-entry/üst-şema/medyasızlık
+  // sözleşmesi DEĞİŞMEDİ, yalnız bu tek satır güncellendi.
+  test('J. Replay ZIP -- reviewStatus set edilmiş DÖF için dof_donus.json artık reviewStatus taşır (4O), şema aksi halde değişmez', async ({ page }) => {
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dosyaSec(page, JSON.stringify(paket));
     const dofUuid = paket.tehlikeler[0].dofUuid;
@@ -188,8 +196,15 @@ test.describe('AF. DÖF inceleme durumu (reviewStatus) UI', () => {
 
     const belge = JSON.parse(zip.readAsText('dof_donus.json', 'utf8'));
     expect(Object.keys(belge)).toEqual(['paketUuid', 'dofKontrolleri']);   // üst şema DEĞİŞMEDİ
-    for (const key of Object.keys(belge.dofKontrolleri[0])) {
-      expect(key.toLowerCase()).not.toContain('review');   // reviewStatus SIZMADI
+    // 4O: reviewStatus artık KASITLI olarak belgeye giriyor (incelenmiş DÖF).
+    expect(belge.dofKontrolleri[0].reviewStatus).toBe('kapatma_onerisi');
+    // Ama hiçbir kapanış alanı ÜRETİLMEDİ -- Human-in-Control korunuyor.
+    for (const yasakAlan of ['durum', 'kapanma_tarihi', 'kapanma_notu', 'kapanma_foto', 'kapanis_turu', 'kapanis_gerekcesi', 'kapatan_kullanici']) {
+      expect(belge.dofKontrolleri[0]).not.toHaveProperty(yasakAlan);
+    }
+    // Medya hâlâ yok -- ZIP tek entry, `fotolar`/`sesNotlari` gibi alan yok.
+    for (const medyaAlani of ['fotolar', 'sesNotlari', 'medya']) {
+      expect(belge.dofKontrolleri[0]).not.toHaveProperty(medyaAlani);
     }
   });
 });

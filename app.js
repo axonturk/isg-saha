@@ -900,6 +900,15 @@ const _DOF_REVIEW_STATUS_DEGERLERI = new Set([
 ]);
 const _DOF_REVIEW_STATUS_VARSAYILAN = 'dokunulmadi';
 
+/** Bir DÖF'ün reviewStatus'u dönüş belgesine (dof_donus.json) GİRECEK mi?
+ * (PWA Commit 4O). Yalnız own-property VE varsayılandan farklıysa true --
+ * absent/'dokunulmadi' hiçbir zaman export'a girmez (mevcut sparse takip
+ * alanı felsefesiyle birebir tutarlı, bkz. dofDonusBelgesiOlustur). */
+function _dofReviewStatusExportEdilebilirMi(kayit) {
+  return Object.prototype.hasOwnProperty.call(kayit, 'reviewStatus')
+    && kayit.reviewStatus !== _DOF_REVIEW_STATUS_VARSAYILAN;
+}
+
 /** Bir DÖF'ün mevcut reviewStatus'unu okur -- salt-okunur, HİÇBİR
  * DB yazması yapmaz. Alan own-property olarak yoksa (hiç dokunulmamış
  * -- yeni import edilen veya eski kayıt fark etmez) varsayılan
@@ -1197,16 +1206,23 @@ async function dofDonusBelgesiOlustur(girdiler) {
       throw new DofImportHatasi('KARISIK_EXPORT_PAKETI', `Farklı export paketlerinden gelen DÖF kayıtları tek dönüş belgesinde birleştirilemez: ${dofUuid}`);
     }
 
-    if (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object') {
+    // Yalnız takipTaslagi tamamen ABSENT (undefined -- hiç oluşturulmamış)
+    // ise {} varsayılır; null/yanlış tip eski davranışla (BOS_TAKIP_TASLAGI)
+    // reddedilmeye devam eder -- yalnız "hiç dokunulmamış" gevşetildi.
+    if (kayit.takipTaslagi !== undefined && (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object')) {
       throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
     }
-    const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi);
+    const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {});
     // Sparse own-property mapping (4B-1): yalnız kullanıcının gerçekten
     // dokunduğu alanlar belgeye girer -- explicit null (temizleme talebi)
     // DAHİL. Hiç dokunulmamış alan (own-property değil) belgeye GİRMEZ.
     const dokunulanAlanlar = _DOF_TAKIP_ALANLARI.filter((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
-    if (dokunulanAlanlar.length === 0) {
-      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alana dokunulmamış): ${dofUuid}`);
+    // PWA Commit 4O: reviewStatus, takip alanlarından TAMAMEN BAĞIMSIZ
+    // ikinci bir "boş değil" kaynağıdır -- yalnız İKİSİ DE boşsa reddedilir
+    // (reviewStatus-only export mümkün olmalı).
+    const reviewStatusExportEdilebilir = _dofReviewStatusExportEdilebilirMi(kayit);
+    if (dokunulanAlanlar.length === 0 && !reviewStatusExportEdilebilir) {
+      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş ve inceleme durumu yok: ${dofUuid}`);
     }
 
     // `dofId` bilerek YOK -- Desktop importer okumaz/doğrulamaz/beklemez
@@ -1221,6 +1237,15 @@ async function dofDonusBelgesiOlustur(girdiler) {
     };
     for (const alan of dokunulanAlanlar) {
       kayitBelgesi[alan] = taslak[alan];
+    }
+    // reviewStatus, takip alanlarından AYRI bir audit alanı olarak eklenir --
+    // _DOF_TAKIP_ALANLARI/dokunulanAlanlar mekanizmasından hiç geçmez, hiçbir
+    // kapanış alanı (durum/kapanma_*/kapatan_kullanici) ÜRETİLMEZ.
+    if (reviewStatusExportEdilebilir) {
+      kayitBelgesi.reviewStatus = kayit.reviewStatus;
+      if (Object.prototype.hasOwnProperty.call(kayit, 'reviewStatusGuncellenmeZamani')) {
+        kayitBelgesi.reviewStatusGuncellenmeZamani = kayit.reviewStatusGuncellenmeZamani;
+      }
     }
     dofKontrolleri.push(kayitBelgesi);
   }
@@ -1270,6 +1295,20 @@ async function _dofSha256Hex(metin) {
   return Array.from(new Uint8Array(ozet)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Hazırlık/staleness fingerprint girdisi (PWA Commit 4O): dof_donus.json'a
+ * GERÇEKTEN girecek her şeyin kanonik özeti -- taslak (değişmedi) +
+ * (yalnız export-edilebilirse) reviewStatus. reviewStatus absent/
+ * 'dokunulmadi' iken fingerprint `_dofTaslakKanonikJson`'un ürettiği METİNLE
+ * BİREBİR AYNIDIR (byte-for-byte) -- reviewStatus'a hiç dokunmamış eski
+ * kayıtlar/testler için fingerprint davranışı SIFIR değişir. */
+function _dofHazirlikKanonikJson(kayit, taslak) {
+  const taslakJson = _dofTaslakKanonikJson(taslak);
+  if (!_dofReviewStatusExportEdilebilirMi(kayit)) {
+    return taslakJson;
+  }
+  return JSON.stringify({ taslak: taslakJson, reviewStatus: kayit.reviewStatus });
+}
+
 /** Kaydı okuyup kanoniklik + taslak doğrulaması yapar (ortak ön kontrol).
  * Geçerliyse `{ kayit, taslak, kanonikJson }` döner. */
 function _dofHazirlikKayitDogrula(kayit, dofUuid) {
@@ -1279,15 +1318,18 @@ function _dofHazirlikKayitDogrula(kayit, dofUuid) {
   if (!_dofKanonikMi(kayit)) {
     throw new DofImportHatasi('KANONIK_DOF_DEGIL', `dofUuid kanonik replay-v2 kaydı değil (WIP/legacy olabilir): ${dofUuid}`);
   }
-  if (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object') {
+  // Yalnız takipTaslagi tamamen ABSENT ise {} varsayılır (dofDonusBelgesiOlustur
+  // ile aynı gevşetme) -- null/yanlış tip eski davranışla reddedilmeye devam eder.
+  if (kayit.takipTaslagi !== undefined && (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object')) {
     throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
   }
-  const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi);
+  const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {});
   const dokunulan = _DOF_TAKIP_ALANLARI.some((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
-  if (!dokunulan) {
-    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş (hiçbir alana dokunulmamış): ${dofUuid}`);
+  const reviewStatusExportEdilebilir = _dofReviewStatusExportEdilebilirMi(kayit);
+  if (!dokunulan && !reviewStatusExportEdilebilir) {
+    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş ve inceleme durumu yok: ${dofUuid}`);
   }
-  return { kayit, taslak, kanonikJson: _dofTaslakKanonikJson(taslak) };
+  return { kayit, taslak, kanonikJson: _dofHazirlikKanonikJson(kayit, taslak) };
 }
 
 /** Kanonik bir DÖF kaydının replay hazırlık metadata'sını okur (salt-
@@ -1499,6 +1541,24 @@ async function dofDonusGirdileriHazirla(dofUuidListesi) {
 // arasında farklı olabilir -- deterministik olan, içindeki
 // `dof_donus.json` METNİDİR (testle kilitlendi).
 
+/** "Sadece incelenenleri export et" filtre yardımcısı (PWA Commit 4O).
+ * Verilen `dofUuid` listesindeki her kayıt için reviewStatus'u okur,
+ * yalnız incelenmiş (`reviewStatus !== 'dokunulmadi'`, absent DAHİL
+ * dokunulmadi sayılır) olanların `dofUuid`'lerini SIRAYLA döner.
+ * `takipTaslagi` doluluğuna hiç bakmaz (kasıtlı -- reviewStatus tek
+ * ölçüttür). SALT-OKUNUR, `dofReplayZipOlustur`'un imzasını/davranışını
+ * DEĞİŞTİRMEZ -- ondan ÖNCE, isteğe bağlı bir adım olarak çağrılır. */
+async function dofIncelenenDofUuidleriniFiltrele(dofUuidListesi) {
+  const sonuclar = [];
+  for (const dofUuid of dofUuidListesi) {
+    const { reviewStatus } = await dofReviewStatusGetir(dofUuid);
+    if (reviewStatus !== _DOF_REVIEW_STATUS_VARSAYILAN) {
+      sonuclar.push(dofUuid);
+    }
+  }
+  return sonuclar;
+}
+
 /** Medyasız replay ZIP paketi üretir. Her seçili DÖF için:
  * 1) mevcut `replayHazirlik.submissionUuid` kullanılır (yoksa
  *    `REPLAY_HAZIRLIK_YOK`),
@@ -1565,6 +1625,7 @@ if (typeof window !== 'undefined') {
     dofDonusBelgesiOlustur, dofDonusJsonOlustur,
     dofReplayHazirlikGetir, dofReplayHazirlikHazirla, dofReplayHazirlikTemizle,
     dofDonusGirdileriHazirla, dofReplayZipOlustur,
+    dofIncelenenDofUuidleriniFiltrele,
   };
 }
 
@@ -2109,6 +2170,15 @@ async function _dofReviewDurumYukle(dofUuid) {
 function _dofReviewDurumAciklamaGuncelle(reviewStatus) {
   const aciklamaEl = document.getElementById('dof-review-durum-aciklama');
   if (aciklamaEl) aciklamaEl.textContent = _DOF_REVIEW_DURUM_ACIKLAMALARI[reviewStatus] || '';
+
+  // PWA Commit 4O: pasif, ENGELLEMEYEN bilgilendirme -- hiçbir kontrolü
+  // devre dışı bırakmaz, yalnız "sadece incelenenleri export et" filtresinin
+  // (dofIncelenenDofUuidleriniFiltrele) bu DÖF'ü nasıl değerlendireceğini gösterir.
+  const filtreNotuEl = document.getElementById('dof-review-durum-filtre-notu');
+  if (filtreNotuEl) {
+    filtreNotuEl.textContent = reviewStatus === _DOF_REVIEW_STATUS_VARSAYILAN
+      ? "Bu DÖF 'sadece incelenenler' seçiminde yer almayacak." : '';
+  }
 }
 
 /** Seçici (`<select>`) değiştiğinde çağrılır -- kullanıcının GERÇEK
@@ -2127,6 +2197,9 @@ async function _dofReviewDurumDegisti() {
     const sonuc = await dofReviewStatusGuncelle(dofUuid, secici.value);
     if (hataEl) hataEl.textContent = '';
     _dofReviewDurumAciklamaGuncelle(sonuc.reviewStatus);
+    // Replay Paketi kartının "yalnız inceleme durumu" notu reviewStatus'a
+    // bağlı olduğundan, tam liste yenilemeden (ağır) yalnız bu kartı tazele.
+    await _dofReplayBolumYukle(dofUuid);
   } catch (e) {
     if (hataEl) hataEl.textContent = (e && e.message) || 'İnceleme durumu kaydedilemedi.';
   }
@@ -2367,10 +2440,24 @@ async function _dofReplayBolumYukle(dofUuid) {
     return;
   }
   const durum = document.getElementById('dof-replay-durum');
+  const incelemeNotuEl = document.getElementById('dof-replay-inceleme-notu');
   try {
     const sonuc = await dofReplayHazirlikGetir(dofUuid);
     kart.style.display = 'block';
     durum.textContent = sonuc.replayHazirlik ? 'Hazırlık hazır' : 'Hazırlık yok';
+
+    // PWA Commit 4O: pasif, ENGELLEMEYEN not -- yalnız takip alanı hiç
+    // girilmemişken (tüm 8 alan null) VE reviewStatus incelenmişken görünür.
+    // ZIP/Hazırlık butonlarını devre dışı bırakmaz.
+    if (incelemeNotuEl) {
+      const [takipSonuc, reviewSonuc] = await Promise.all([
+        dofTakipTaslagiGetir(dofUuid), dofReviewStatusGetir(dofUuid),
+      ]);
+      const takipBos = Object.values(takipSonuc.takipTaslagi).every((v) => v === null);
+      const incelenmis = reviewSonuc.reviewStatus !== _DOF_REVIEW_STATUS_VARSAYILAN;
+      incelemeNotuEl.textContent = (takipBos && incelenmis)
+        ? 'Yalnız inceleme durumu seçilmiş, takip bilgisi girilmemiş.' : '';
+    }
   } catch (e) {
     kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
   }
