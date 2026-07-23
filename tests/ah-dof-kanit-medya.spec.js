@@ -2,7 +2,9 @@
 // yakalama ("Kanıt Medyaları" kartı). Normal saha bulgu medyasından
 // (aktifFotolarTaslak/aktifSeslerTaslak/sesRecorder/sesChunks) TAMAMEN
 // AYRI state + ayrı IndexedDB store (`dofKanitlari`). Export/ZIP/
-// dof_donus.json/hazırlık fingerprint'e HİÇ girmez (4Q'nun kapsamı).
+// dof_donus.json/hazırlık fingerprint'e dahil olma (M/N/Q/Y testleri) PWA
+// Commit 4Q'da eklendi -- tam pozitif kapsam
+// `tests/ai-dof-kanit-media-export.spec.js`'te.
 //
 // Test paralelliği aynı origin'de DB çakışması yaratabileceği için bu
 // dosya SERIAL çalışır (diğer DÖF dosyalarıyla aynı desen).
@@ -333,7 +335,12 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     expect(sonKayit).toEqual(oncekiKayit);   // dofler kaydı BİREBİR aynı -- medya store'u tamamen ayrı
   });
 
-  test('M. Medya ekleme dof_donus.json / ZIP şemasını değiştirmez, medya alanı üretmez', async ({ page }) => {
+  // NOT (4Q bilinçli güncelleme): M ve N, 4P'nin "medya export'a hiç
+  // girmez" kapsam sınırını doğruluyordu -- bu sınır 4Q'nun KENDİSİ
+  // tarafından kaldırıldı (medya artık üçüncü, bağımsız export kaynağı).
+  // Aşağıdaki iki test YENİ gerçek sözleşmeye güncellendi; tam pozitif
+  // kapsam (19 senaryo) `tests/ai-dof-kanit-media-export.spec.js`'te.
+  test('M. Medya ekleme artık dof_donus.json / ZIP şemasına medya alanı ekler (4Q bilinçli güncelleme)', async ({ page }) => {
     const dofUuid = await tekDofKur(page);
     await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
     await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
@@ -350,15 +357,17 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     }, dofUuid);
 
     const zipDosya = new AdmZip(Buffer.from(zip.zipB64, 'base64'));
-    expect(zipDosya.getEntries().map((e) => e.entryName)).toEqual(['dof_donus.json']);   // hâlâ tek entry
+    const entryAdlari = zipDosya.getEntries().map((e) => e.entryName).sort();
+    expect(entryAdlari.length).toBe(3);   // dof_donus.json + 1 foto + 1 ses
+    expect(entryAdlari).toContain('dof_donus.json');
     const belge = JSON.parse(zipDosya.readAsText('dof_donus.json', 'utf8'));
     const kontrol = belge.dofKontrolleri[0];
-    for (const medyaAlani of ['fotolar', 'sesNotlari', 'medya', 'kanitlar', 'photos', 'audio']) {
-      expect(kontrol).not.toHaveProperty(medyaAlani);
-    }
+    expect(kontrol.fotolar.length).toBe(1);
+    expect(kontrol.sesNotlari.length).toBe(1);
+    expect(kontrol.kanitMedyalari.length).toBe(2);
   });
 
-  test('N. Hazırlık sonrası medya eklenirse ZIP REPLAY_HAZIRLIK_ESKI vermez (4O fingerprint bozulmadı)', async ({ page }) => {
+  test('N. Hazırlık sonrası medya eklenirse ZIP REPLAY_HAZIRLIK_ESKI verir (4Q bilinçli güncelleme -- medya artık fingerprint\'e dahil)', async ({ page }) => {
     const dofUuid = await tekDofKur(page);
     await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
     const hazirlik = await page.evaluate((u) => window._dofImport.dofReplayHazirlikHazirla(u), dofUuid);
@@ -374,7 +383,8 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
         return { basarili: false, kod: e && e.kod };
       }
     }, dofUuid);
-    expect(zipSonucu.basarili).toBe(true);   // REPLAY_HAZIRLIK_ESKI VERMEDİ
+    expect(zipSonucu.basarili).toBe(false);
+    expect(zipSonucu.kod).toBe('REPLAY_HAZIRLIK_ESKI');
   });
 
   test('O. Aktif DÖF ses kaydı sırasında başka DÖF\'e geçiş yanlış DÖF\'e kayıt üretmez', async ({ page, context }) => {
@@ -433,7 +443,7 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     expect(medyalar.sonuc.length).toBe(2);   // veri kaybı yok, yalnız önizleme URL'leri temizlendi
   });
 
-  test('Q. Servis fonksiyonları dofReplayZipOlustur imzasını/davranışını bozmaz (mevcut q/r regresyonu ayrı dosyalarda; burada yalnız medya alanının hiç sızmadığı ek olarak doğrulanır)', async ({ page }) => {
+  test('Q. Servis fonksiyonları dofReplayZipOlustur imzasını bozmaz -- belge artık medya alanlarını da içerir (4Q bilinçli güncelleme)', async ({ page }) => {
     const dofUuid = await tekDofKur(page);
     await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
     await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'camera', mimeType: 'image/jpeg', size: 4 });
@@ -444,7 +454,7 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     }, dofUuid);
     expect(Object.keys(belgeSonucu)).toEqual(['paketUuid', 'dofKontrolleri']);
     expect(Object.keys(belgeSonucu.dofKontrolleri[0]).sort()).toEqual(
-      ['dofUuid', 'exportUuid', 'baseStateHash', 'aktifTurSirasi', 'replayVersion', 'submissionUuid', 'sorumlu'].sort());
+      ['dofUuid', 'exportUuid', 'baseStateHash', 'aktifTurSirasi', 'replayVersion', 'submissionUuid', 'sorumlu', 'fotolar', 'kanitMedyalari'].sort());
   });
 
   // ── Codex bağımsız QA düzeltmesi: dofKanitMedyasiSil artık yalnız
@@ -564,7 +574,7 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     expect(sonKayit).toEqual(oncekiKayit);
   });
 
-  test('Y. Silme dof_donus.json / ZIP şemasını ve 4O fingerprint/staleness davranışını değiştirmez', async ({ page }) => {
+  test('Y. Silme hazırlıktan sonraysa REPLAY_HAZIRLIK_ESKI verir; belge kalan medyayı doğru yansıtır (4Q bilinçli güncelleme -- medya artık fingerprint\'e dahil)', async ({ page }) => {
     const dofUuid = await tekDofKur(page);
     await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
     const ekle1 = await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
@@ -573,8 +583,8 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     const hazirlik = await page.evaluate((u) => window._dofImport.dofReplayHazirlikHazirla(u), dofUuid);
     expect(hazirlik).toBeTruthy();
 
-    // Hazırlıktan SONRA bir medya siliniyor -- 4O fingerprint'i (takip+
-    // reviewStatus'a dayalı) hiç bundan etkilenmemeli.
+    // Hazırlıktan SONRA bir medya siliniyor -- medya seti artık fingerprint'e
+    // dahil olduğundan (4Q) bu, hazırlığı ESKİ kılar.
     await medyaSilDene(page, dofUuid, ekle1.sonuc.localMediaUuid);
 
     const zipSonucu = await page.evaluate(async (u) => {
@@ -585,15 +595,19 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
         return { basarili: false, kod: e && e.kod };
       }
     }, dofUuid);
-    expect(zipSonucu.basarili).toBe(true);   // REPLAY_HAZIRLIK_ESKI VERMEDİ
+    expect(zipSonucu.basarili).toBe(false);
+    expect(zipSonucu.kod).toBe('REPLAY_HAZIRLIK_ESKI');
 
+    // dofDonusBelgesiOlustur hazırlık/staleness'tan bağımsız, salt-okunur
+    // çalışmaya devam eder -- kalan (silinmeyen) medyayı doğru yansıtmalı.
     const belgeSonucu = await page.evaluate(async (u) => {
       return window._dofImport.dofDonusBelgesiOlustur([{ dofUuid: u, submissionUuid: crypto.randomUUID() }]);
     }, dofUuid);
     const kontrol = belgeSonucu.dofKontrolleri[0];
-    for (const medyaAlani of ['fotolar', 'sesNotlari', 'medya', 'kanitlar']) {
-      expect(kontrol).not.toHaveProperty(medyaAlani);
-    }
+    expect(kontrol).not.toHaveProperty('fotolar');   // silinen foto artık yok
+    expect(kontrol.sesNotlari.length).toBe(1);
+    expect(kontrol.kanitMedyalari.length).toBe(1);
+    expect(kontrol.kanitMedyalari[0].localMediaUuid).toBe(ekle2.sonuc.localMediaUuid);
 
     // İkinci medya (silinmeyen) hâlâ store'da duruyor -- silme yalnız hedeflenen kaydı etkiledi.
     const medyalar = await medyalarGetirDene(page, dofUuid);

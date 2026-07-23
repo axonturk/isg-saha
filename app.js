@@ -1033,10 +1033,10 @@ async function dofReviewStatusGuncelle(dofUuid, reviewStatus) {
 // `localMediaUuid`). `dofler` kaydına HİÇBİR yeni alan eklenmez --
 // `_dofYerelKayitOlustur`'un mevcut açık allowlist'i zaten medya
 // alanlarını hiç taşımıyor (bkz. commit raporu), bu bölüm o sınırı
-// KORUR, genişletmez. `takipTaslagi`/`reviewStatus`'a hiç dokunmaz --
-// export (`dofDonusBelgesiOlustur`), hazırlık fingerprint
+// KORUR, genişletmez. `takipTaslagi`/`reviewStatus`'a hiç dokunmaz.
+// Export (`dofDonusBelgesiOlustur`), hazırlık fingerprint
 // (`_dofHazirlikKanonikJson`) ve replay ZIP (`dofReplayZipOlustur`) bu
-// store'u HİÇ okumaz (medya export'u 4Q'nun kapsamıdır, bu committe YOK).
+// store'u OKUR (PWA Commit 4Q ile eklendi -- bkz. o bölümdeki notlar).
 // Medya immutable kabul edilir -- düzeltme "sil + yeniden ekle" iledir,
 // güncelleme servisi YOKTUR.
 
@@ -1115,6 +1115,22 @@ async function dofKanitMedyasiSil(dofUuid, localMediaUuid) {
     throw new DofImportHatasi('DOF_KANIT_MEDYA_DOF_UYUSMAZLIGI', `Medya (${localMediaUuid}) verilen dofUuid'ye ait değil.`);
   }
   await dbSil('dofKanitlari', localMediaUuid);
+}
+
+/** Bir kanıt medyası için Desktop sözleşmesine uygun ZIP dosya adı ve tam
+ * ZIP-içi yol üretir (PWA Commit 4Q). Desktop `dof_replay_import.py`
+ * `_MEDYA_ALANLARI` eşlemesi -- `fotolar`/`sesNotlari` alanları SIRASIYLA
+ * `fotolar/`/`sesler/` ZIP klasörlerine karşılık gelir; manifestteki
+ * alanlar YALNIZ ÇIPLAK dosya adı taşır (klasör Desktop tarafında
+ * kendisi ekler), ZIP entry'sinin kendisi ise TAM yolu (`fotolar/<ad>`)
+ * kullanır. Uzantı sabit: foto -> `.jpg`, ses -> `.webm` (yakalama
+ * tarafında zaten bu formatlarla üretiliyor). */
+function _dofKanitMedyaAdVeYol(medya) {
+  const fotoMu = medya.mediaType === 'photo';
+  const uzanti = fotoMu ? 'jpg' : 'webm';
+  const klasor = fotoMu ? 'fotolar' : 'sesler';
+  const ad = `${medya.localMediaUuid}.${uzanti}`;
+  return { ad, relativePath: `${klasor}/${ad}` };
 }
 
 // ─── DÖF DÖNÜŞ BELGESİ ÜRETİMİ (PWA Commit 4B) ──────────────────
@@ -1331,8 +1347,15 @@ async function dofDonusBelgesiOlustur(girdiler) {
     // ikinci bir "boş değil" kaynağıdır -- yalnız İKİSİ DE boşsa reddedilir
     // (reviewStatus-only export mümkün olmalı).
     const reviewStatusExportEdilebilir = _dofReviewStatusExportEdilebilirMi(kayit);
-    if (dokunulanAlanlar.length === 0 && !reviewStatusExportEdilebilir) {
-      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş ve inceleme durumu yok: ${dofUuid}`);
+    // PWA Commit 4Q: kanıt medyası, takip alanlarından VE reviewStatus'tan
+    // TAMAMEN BAĞIMSIZ üçüncü bir "boş değil" kaynağıdır -- yalnız ÜÇÜ DE
+    // boşsa reddedilir (medya-only export mümkün olmalı, tıpkı
+    // reviewStatus-only gibi).
+    const medyalar = (await dbIndexTumu('dofKanitlari', 'dofUuid', dofUuid))
+      .slice()
+      .sort((a, b) => (a.localMediaUuid < b.localMediaUuid ? -1 : a.localMediaUuid > b.localMediaUuid ? 1 : 0));
+    if (dokunulanAlanlar.length === 0 && !reviewStatusExportEdilebilir && medyalar.length === 0) {
+      throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş, inceleme durumu yok ve kanıt medyası yok: ${dofUuid}`);
     }
 
     // `dofId` bilerek YOK -- Desktop importer okumaz/doğrulamaz/beklemez
@@ -1356,6 +1379,39 @@ async function dofDonusBelgesiOlustur(girdiler) {
       if (Object.prototype.hasOwnProperty.call(kayit, 'reviewStatusGuncellenmeZamani')) {
         kayitBelgesi.reviewStatusGuncellenmeZamani = kayit.reviewStatusGuncellenmeZamani;
       }
+    }
+    // PWA Commit 4Q: `fotolar`/`sesNotlari` Desktop'ın DÜZ (bare) dosya adı
+    // beklediği zorunlu alanlar (`_MEDYA_ALANLARI` -- Desktop klasör önekini
+    // kendisi ekler). `kanitMedyalari` PWA'nın kendi katma (additive) audit
+    // alanıdır -- Desktop Apply'de okunmaz, `payload_snapshot_json`'da
+    // olduğu gibi saklanır. Medyasız kayıtta HİÇBİRİ eklenmez (boş dizi
+    // DEĞİL, tamamen absent).
+    if (medyalar.length > 0) {
+      const fotolar = [];
+      const sesNotlari = [];
+      const kanitMedyalari = [];
+      for (const m of medyalar) {
+        const { ad, relativePath } = _dofKanitMedyaAdVeYol(m);
+        if (m.mediaType === 'photo') fotolar.push(ad); else sesNotlari.push(ad);
+        const sha256 = await _dofBlobSha256Hex(m.blob);
+        kanitMedyalari.push({
+          localMediaUuid: m.localMediaUuid,
+          mediaType: m.mediaType,
+          source: m.source,
+          relativePath,
+          sha256,
+          mimeType: m.mimeType,
+          size: m.size,
+          createdAt: m.createdAt,
+          displayName: m.displayName,
+          durationMs: m.durationMs,
+          width: m.width,
+          height: m.height,
+        });
+      }
+      if (fotolar.length > 0) kayitBelgesi.fotolar = fotolar;
+      if (sesNotlari.length > 0) kayitBelgesi.sesNotlari = sesNotlari;
+      kayitBelgesi.kanitMedyalari = kanitMedyalari;
     }
     dofKontrolleri.push(kayitBelgesi);
   }
@@ -1405,23 +1461,52 @@ async function _dofSha256Hex(metin) {
   return Array.from(new Uint8Array(ozet)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Hazırlık/staleness fingerprint girdisi (PWA Commit 4O): dof_donus.json'a
- * GERÇEKTEN girecek her şeyin kanonik özeti -- taslak (değişmedi) +
- * (yalnız export-edilebilirse) reviewStatus. reviewStatus absent/
- * 'dokunulmadi' iken fingerprint `_dofTaslakKanonikJson`'un ürettiği METİNLE
- * BİREBİR AYNIDIR (byte-for-byte) -- reviewStatus'a hiç dokunmamış eski
- * kayıtlar/testler için fingerprint davranışı SIFIR değişir. */
-function _dofHazirlikKanonikJson(kayit, taslak) {
+/** Bir Blob'un SHA-256 (lowercase hex) özeti (PWA Commit 4Q). Desktop bu
+ * alanı okumaz/beklemez -- yalnız PWA'nın kendi audit/doğrulama alanı
+ * (`kanitMedyalari[].sha256`) için üretilir. */
+async function _dofBlobSha256Hex(blob) {
+  const ozet = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return Array.from(new Uint8Array(ozet)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Hazırlık/staleness fingerprint girdisi (PWA Commit 4O, medya 4Q'da
+ * eklendi): dof_donus.json'a GERÇEKTEN girecek her şeyin kanonik özeti --
+ * taslak (değişmedi) + (yalnız export-edilebilirse) reviewStatus +
+ * (yalnız varsa) kanıt medya seti özeti. reviewStatus absent/'dokunulmadi'
+ * VE medya listesi boşken fingerprint `_dofTaslakKanonikJson`'un ürettiği
+ * METİNLE BİREBİR AYNIDIR (byte-for-byte) -- reviewStatus'a hiç
+ * dokunmamış/medyasız eski kayıtlar/testler için fingerprint davranışı
+ * SIFIR değişir. Medya özeti yalnız kimlik alanlarını (localMediaUuid/
+ * mediaType/relativePath) içerir -- blob içeriği hash'lenmez (immutable
+ * kabul edilir, ekleme/silme zaten UUID setini değiştirir), deterministik
+ * sırayla (localMediaUuid). `medyalar` parametresi çağıran tarafından
+ * (transaction-güvenliği için) önceden okunmuş bir kopya olarak verilir. */
+function _dofHazirlikKanonikJson(kayit, taslak, medyalar) {
   const taslakJson = _dofTaslakKanonikJson(taslak);
-  if (!_dofReviewStatusExportEdilebilirMi(kayit)) {
+  const reviewStatusVar = _dofReviewStatusExportEdilebilirMi(kayit);
+  const medyaListesi = (medyalar || [])
+    .slice()
+    .sort((a, b) => (a.localMediaUuid < b.localMediaUuid ? -1 : a.localMediaUuid > b.localMediaUuid ? 1 : 0))
+    .map((m) => ({
+      localMediaUuid: m.localMediaUuid,
+      mediaType: m.mediaType,
+      relativePath: _dofKanitMedyaAdVeYol(m).relativePath,
+    }));
+  if (!reviewStatusVar && medyaListesi.length === 0) {
     return taslakJson;
   }
-  return JSON.stringify({ taslak: taslakJson, reviewStatus: kayit.reviewStatus });
+  const parca = { taslak: taslakJson };
+  if (reviewStatusVar) parca.reviewStatus = kayit.reviewStatus;
+  if (medyaListesi.length > 0) parca.medya = medyaListesi;
+  return JSON.stringify(parca);
 }
 
 /** Kaydı okuyup kanoniklik + taslak doğrulaması yapar (ortak ön kontrol).
- * Geçerliyse `{ kayit, taslak, kanonikJson }` döner. */
-function _dofHazirlikKayitDogrula(kayit, dofUuid) {
+ * `medyalar` (PWA Commit 4Q): çağıranın önceden okuduğu kanıt medya
+ * listesi -- IndexedDB transaction-güvenliği gereği burada YENİDEN
+ * okunmaz (bkz. `dofReplayHazirlikHazirla` üstündeki not). Geçerliyse
+ * `{ kayit, taslak, kanonikJson }` döner. */
+function _dofHazirlikKayitDogrula(kayit, dofUuid, medyalar) {
   if (!kayit) {
     throw new DofImportHatasi('DOF_BULUNAMADI', `dofUuid bulunamadı: ${dofUuid}`);
   }
@@ -1436,10 +1521,11 @@ function _dofHazirlikKayitDogrula(kayit, dofUuid) {
   const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {});
   const dokunulan = _DOF_TAKIP_ALANLARI.some((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
   const reviewStatusExportEdilebilir = _dofReviewStatusExportEdilebilirMi(kayit);
-  if (!dokunulan && !reviewStatusExportEdilebilir) {
-    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş ve inceleme durumu yok: ${dofUuid}`);
+  const medyaVar = (medyalar || []).length > 0;
+  if (!dokunulan && !reviewStatusExportEdilebilir && !medyaVar) {
+    throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı boş, inceleme durumu yok ve kanıt medyası yok: ${dofUuid}`);
   }
-  return { kayit, taslak, kanonikJson: _dofHazirlikKanonikJson(kayit, taslak) };
+  return { kayit, taslak, kanonikJson: _dofHazirlikKanonikJson(kayit, taslak, medyalar) };
 }
 
 /** Kanonik bir DÖF kaydının replay hazırlık metadata'sını okur (salt-
@@ -1484,7 +1570,16 @@ async function dofReplayHazirlikGetir(dofUuid) {
  * `readwrite` transaction AÇILMADAN ÖNCE hesaplanır; transaction içinde
  * kayıt yeniden okunur ve kanonik JSON'un hâlâ aynı olduğu senkron
  * doğrulanır (eşzamanlı değişiklik varsa yazmadan reddedilir) -- yetkili
- * read-modify-write tek transaction içindedir, kısmi yazma olamaz. */
+ * read-modify-write tek transaction içindedir, kısmi yazma olamaz.
+ *
+ * Kanıt medya listesi (PWA Commit 4Q) AYNI nedenle -- `dofKanitlari` ayrı
+ * bir store olduğundan, `dofler` `readwrite` transaction'ı içinde ona
+ * awaitli bir okuma açmak transaction'ın erken kapanması riskini taşır --
+ * yalnız ÖN aşamada BİR KEZ okunur, in-tx senkron re-doğrulamada da AYNI
+ * pre-fetch edilmiş kopya kullanılır (tek kullanıcılı uygulamada
+ * pre-tx/in-tx arası medya değişimi pratikte imkânsız; olsa bile en kötü
+ * ihtimalle bir sonraki `dofReplayZipOlustur` kendi taze pre-check'inde
+ * yakalar -- SHA-256 parmak izi için zaten kurulu risk toleransıyla aynı). */
 async function dofReplayHazirlikHazirla(dofUuid) {
   // Ön aşama (tx dışı): oku + doğrula + parmak izini hesapla.
   const onKayit = await new Promise((resolve, reject) => {
@@ -1494,7 +1589,8 @@ async function dofReplayHazirlikHazirla(dofUuid) {
       getReq.onerror = () => reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
     }, reject);
   });
-  const onDogrulama = _dofHazirlikKayitDogrula(onKayit, dofUuid);   // DOF_BULUNAMADI/KANONIK_DOF_DEGIL/taslak hataları burada
+  const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', dofUuid);
+  const onDogrulama = _dofHazirlikKayitDogrula(onKayit, dofUuid, medyalar);   // DOF_BULUNAMADI/KANONIK_DOF_DEGIL/taslak hataları burada
   const parmakIzi = await _dofSha256Hex(onDogrulama.kanonikJson);
 
   const db = await openDB();
@@ -1508,7 +1604,7 @@ async function dofReplayHazirlikHazirla(dofUuid) {
     getReq.onsuccess = () => {
       let dogrulama;
       try {
-        dogrulama = _dofHazirlikKayitDogrula(getReq.result, dofUuid);
+        dogrulama = _dofHazirlikKayitDogrula(getReq.result, dofUuid, medyalar);
       } catch (e) {
         hata = e;
         tx.abort();
@@ -1638,15 +1734,18 @@ async function dofDonusGirdileriHazirla(dofUuidListesi) {
   });
 }
 
-// ─── DÖF REPLAY ZIP ÜRETİMİ (PWA Commit 4D, medyasız) ───────────
+// ─── DÖF REPLAY ZIP ÜRETİMİ (PWA Commit 4D, medya 4Q'da eklendi) ─
 // Kanonik zincir: dofler kaydı -> takipTaslagi -> replayHazirlik.
 // submissionUuid -> dof_donus.json -> ZIP. Mevcut `zipYaz` (store-only,
-// harici kütüphanesiz) DEĞİŞTİRİLMEDEN kullanılır. ZIP'te tek entry
+// harici kütüphanesiz) DEĞİŞTİRİLMEDEN kullanılır. ZIP'te en az bir entry
 // vardır: `dof_donus.json` (Desktop `_replay_json_adaylari` öncelik-0
-// adı). Otomatik indirme/UI/medya YOKTUR; fonksiyon test edilebilir bir
-// Blob döndürür. IndexedDB'ye HİÇBİR yazma yapılmaz, submission UUID
-// ÜRETİLMEZ (hazırlık üretimi Commit 4C'nin sorumluluğudur -- hazırlık
-// yoksa/eskiyse ZIP reddedilir, otomatik oluşturma/yenileme YAPILMAZ).
+// adı); kanıt medyası varsa `fotolar/<uuid>.jpg`/`sesler/<uuid>.webm`
+// entry'leri de eklenir (PWA Commit 4Q, `dofDonusBelgesiOlustur`'un
+// ürettiği `kanitMedyalari[].relativePath` ile birebir eşleşir).
+// Otomatik indirme/UI YOKTUR; fonksiyon test edilebilir bir Blob döndürür.
+// IndexedDB'ye HİÇBİR yazma yapılmaz, submission UUID ÜRETİLMEZ (hazırlık
+// üretimi Commit 4C'nin sorumluluğudur -- hazırlık yoksa/eskiyse ZIP
+// reddedilir, otomatik oluşturma/yenileme YAPILMAZ).
 // Not: `zipYaz` DOS zaman damgası yazdığından ZIP BYTE çıktısı çağrılar
 // arasında farklı olabilir -- deterministik olan, içindeki
 // `dof_donus.json` METNİDİR (testle kilitlendi).
@@ -1669,15 +1768,18 @@ async function dofIncelenenDofUuidleriniFiltrele(dofUuidListesi) {
   return sonuclar;
 }
 
-/** Medyasız replay ZIP paketi üretir. Her seçili DÖF için:
+/** Replay ZIP paketi üretir (medya dahil, PWA Commit 4Q). Her seçili DÖF
+ * için:
  * 1) mevcut `replayHazirlik.submissionUuid` kullanılır (yoksa
  *    `REPLAY_HAZIRLIK_YOK`),
- * 2) güncel `takipTaslagi` parmak izi hazırlıktakiyle karşılaştırılır --
- *    farklıysa `REPLAY_HAZIRLIK_ESKI` (eski submission kimliği eski
- *    içeriğe aittir; önce `dofReplayHazirlikHazirla` yeniden çalışmalı),
+ * 2) güncel `takipTaslagi`/reviewStatus/kanıt-medya parmak izi
+ *    hazırlıktakiyle karşılaştırılır -- farklıysa `REPLAY_HAZIRLIK_ESKI`
+ *    (eski submission kimliği eski içeriğe aittir; önce
+ *    `dofReplayHazirlikHazirla` yeniden çalışmalı),
  * 3) `dofDonusBelgesiOlustur` zinciriyle kanonik belge üretilir
  *    (duplicate/karışık paket/bozuk taslak retleri orada),
- * 4) `zipYaz` ile tek entry'li (`dof_donus.json`) ZIP Blob'u yazılır.
+ * 4) `zipYaz` ile `dof_donus.json` + (varsa) kanıt medya Blob'ları tek
+ *    ZIP'e yazılır (imza/opt-out YOK -- otomatik dahil edilir).
  * Başarıda `{ zipBlob, dosyaAdi, dofSayisi, paketUuid }` döner. */
 async function dofReplayZipOlustur(dofUuidListesi) {
   // Girdi doğrulama + hazırlık varlığı (GECERSIZ_GIRDI/DOF_BULUNAMADI/
@@ -1691,7 +1793,8 @@ async function dofReplayZipOlustur(dofUuidListesi) {
   for (let i = 0; i < dofUuidListesi.length; i++) {
     const dofUuid = dofUuidListesi[i];
     const kayit = kayitlar[i];
-    const dogrulama = _dofHazirlikKayitDogrula(kayit, dofUuid);
+    const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', dofUuid);
+    const dogrulama = _dofHazirlikKayitDogrula(kayit, dofUuid, medyalar);
     if (!kayit.replayHazirlik || typeof kayit.replayHazirlik.taslakParmakIzi !== 'string') {
       throw new DofImportHatasi('REPLAY_HAZIRLIK_YOK', `dofUuid için replay hazırlığı yapılmamış: ${dofUuid}`);
     }
@@ -1709,9 +1812,24 @@ async function dofReplayZipOlustur(dofUuidListesi) {
     throw new DofImportHatasi('ZIP_URETIM_HATASI', 'Belge paketUuid içermiyor -- dosya adı üretilemez.');
   }
 
+  // PWA Commit 4Q: `dof_donus.json`'dan SONRA, manifestteki
+  // `kanitMedyalari[].relativePath` ile BİREBİR aynı ZIP entry adlarıyla
+  // medya Blob'ları eklenir (Desktop `fotolar/`/`sesler/` klasör
+  // eşlemesiyle uyumlu). Medyasız kayıtlarda hiçbir entry eklenmez --
+  // mevcut tek-entry davranışı DEĞİŞMEDEN korunur.
+  const zipGirdileri = [{ ad: 'dof_donus.json', veri: jsonMetni }];
+  for (const kontrol of belge.dofKontrolleri) {
+    if (!kontrol.kanitMedyalari) continue;
+    for (const m of kontrol.kanitMedyalari) {
+      const medyaKaydi = await dbGetir('dofKanitlari', m.localMediaUuid);
+      if (!medyaKaydi) continue;   // savunma amaçlı -- normal akışta hiç oluşmaz
+      zipGirdileri.push({ ad: m.relativePath, veri: medyaKaydi.blob });
+    }
+  }
+
   let zipBlob;
   try {
-    zipBlob = await zipYaz([{ ad: 'dof_donus.json', veri: jsonMetni }]);
+    zipBlob = await zipYaz(zipGirdileri);
   } catch (e) {
     throw new DofImportHatasi('ZIP_URETIM_HATASI', `ZIP üretimi başarısız: ${e && e.message}`);
   }
@@ -2555,6 +2673,7 @@ async function _dofReplayBolumYukle(dofUuid) {
   }
   const durum = document.getElementById('dof-replay-durum');
   const incelemeNotuEl = document.getElementById('dof-replay-inceleme-notu');
+  const medyaOzetEl = document.getElementById('dof-replay-medya-ozet');
   try {
     const sonuc = await dofReplayHazirlikGetir(dofUuid);
     kart.style.display = 'block';
@@ -2571,6 +2690,16 @@ async function _dofReplayBolumYukle(dofUuid) {
       const incelenmis = reviewSonuc.reviewStatus !== _DOF_REVIEW_STATUS_VARSAYILAN;
       incelemeNotuEl.textContent = (takipBos && incelenmis)
         ? 'Yalnız inceleme durumu seçilmiş, takip bilgisi girilmemiş.' : '';
+    }
+
+    // PWA Commit 4Q: pasif, ENGELLEMEYEN medya özeti -- yalnız bilgi
+    // amaçlı, hiçbir butonu devre dışı bırakmaz/etkilemez.
+    if (medyaOzetEl) {
+      const medyalar = await dofKanitMedyalariGetir(dofUuid);
+      const fotoSayisi = medyalar.filter((m) => m.mediaType === 'photo').length;
+      const sesSayisi = medyalar.filter((m) => m.mediaType === 'audio').length;
+      medyaOzetEl.textContent = (fotoSayisi > 0 || sesSayisi > 0)
+        ? `Bu pakete ${fotoSayisi} fotoğraf, ${sesSayisi} ses notu dahil edilecek.` : '';
     }
   } catch (e) {
     kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
