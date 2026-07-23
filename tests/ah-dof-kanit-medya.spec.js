@@ -46,15 +46,15 @@ async function medyaEkleDene(page, dofUuid, medyaGirdisi) {
   }, { u: dofUuid, m: medyaGirdisi });
 }
 
-async function medyaSilDene(page, localMediaUuid) {
-  return page.evaluate(async (id) => {
+async function medyaSilDene(page, dofUuid, localMediaUuid) {
+  return page.evaluate(async ({ u, id }) => {
     try {
-      await window._dofImport.dofKanitMedyasiSil(id);
+      await window._dofImport.dofKanitMedyasiSil(u, id);
       return { basarili: true };
     } catch (e) {
       return { basarili: false, kod: e && e.kod, mesaj: e && e.message };
     }
-  }, localMediaUuid);
+  }, { u: dofUuid, id: localMediaUuid });
 }
 
 /** Gerçek dosya-yükleme akışı (`#dof-import-input`) -- `dofIceriAktarDene`
@@ -445,5 +445,159 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     expect(Object.keys(belgeSonucu)).toEqual(['paketUuid', 'dofKontrolleri']);
     expect(Object.keys(belgeSonucu.dofKontrolleri[0]).sort()).toEqual(
       ['dofUuid', 'exportUuid', 'baseStateHash', 'aktifTurSirasi', 'replayVersion', 'submissionUuid', 'sorumlu'].sort());
+  });
+
+  // ── Codex bağımsız QA düzeltmesi: dofKanitMedyasiSil artık yalnız
+  // localMediaUuid değil, ÇAĞIRANIN verdiği dofUuid ile medyanın GERÇEK
+  // sahibi eşleşmiyorsa reddediyor -- aşağıdaki testler bu güvenlik
+  // sınırını kilitler. ──────────────────────────────────────────────
+
+  test('R. Silme doğru DÖF + doğru medya UUID ile başarılı olur (servis-seviyesi)', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    const ekleSonucu = await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    const localMediaUuid = ekleSonucu.sonuc.localMediaUuid;
+
+    const silSonucu = await medyaSilDene(page, dofUuid, localMediaUuid);
+    expect(silSonucu.basarili).toBe(true);
+
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(0);
+  });
+
+  test('S. Silme medya yoksa DOF_KANIT_MEDYA_BULUNAMADI ile reddedilir', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    const silSonucu = await medyaSilDene(page, dofUuid, 'olmayan-bir-uuid');
+    expect(silSonucu.basarili).toBe(false);
+    expect(silSonucu.kod).toBe('DOF_KANIT_MEDYA_BULUNAMADI');
+  });
+
+  test('T. DÖF A\'nın medyası DÖF B bağlamından silinemez (Codex bulgusu -- zorunlu)', async ({ page }) => {
+    const paket = gecerliDofPaketi({
+      tehlikelerOverride: [
+        gecerliDofKaydi({ dofId: 1, bulguKodu: 'B-1' }),
+        gecerliDofKaydi({ dofId: 2, bulguKodu: 'B-2' }),
+      ],
+    });
+    await dosyaSec(page, JSON.stringify(paket));
+    const [uuidA, uuidB] = paket.tehlikeler.map((t) => t.dofUuid);
+
+    const ekleSonucu = await medyaEkleDene(page, uuidA, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    const localMediaUuid = ekleSonucu.sonuc.localMediaUuid;
+
+    // DÖF B bağlamından, DÖF A'nın medyasını silmeye çalış.
+    const silSonucu = await medyaSilDene(page, uuidB, localMediaUuid);
+    expect(silSonucu.basarili).toBe(false);
+    expect(silSonucu.kod).toBe('DOF_KANIT_MEDYA_DOF_UYUSMAZLIGI');
+
+    // Medya A'da HÂLÂ duruyor -- silinmedi.
+    const medyalarA = await medyalarGetirDene(page, uuidA);
+    expect(medyalarA.sonuc.length).toBe(1);
+  });
+
+  test('U. Legacy/WIP DÖF bağlamında silme reddedilir (Codex bulgusu -- zorunlu)', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    const ekleSonucu = await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    const localMediaUuid = ekleSonucu.sonuc.localMediaUuid;
+
+    const wipKayit = { id: 'dof_wip_ah2', dofId: 999, bulguKodu: 'B-WIP', durum: 'bekliyor', birimId: 'birim-wip' };
+    await page.evaluate(async (k) => window._idb.dbEkle('dofler', k), wipKayit);
+
+    // Legacy/WIP dofUuid ile silme dene -- medyanın gerçek sahibiyle
+    // (kanonik dofUuid) hiç eşleşmese bile, ÖNCE kanoniklik reddedilir.
+    const silSonucu = await medyaSilDene(page, 'dof_wip_ah2', localMediaUuid);
+    expect(silSonucu.basarili).toBe(false);
+    expect(silSonucu.kod).toBe('KANONIK_DOF_DEGIL');
+
+    // Gerçek medya da etkilenmedi.
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+  });
+
+  test('V. Kanonik olmayan hale gelmiş DÖF kaydına bağlı medya silinemez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    const ekleSonucu = await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 500 });
+    const localMediaUuid = ekleSonucu.sonuc.localMediaUuid;
+
+    // DÖF kaydı sonradan (savunmacı senaryo) kanonik olmaktan çıkarılıyor.
+    const kayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+    await page.evaluate((k) => window._idb.dbGuncelle('dofler', k), { ...kayit, replayVersion: 1 });
+
+    const silSonucu = await medyaSilDene(page, dofUuid, localMediaUuid);
+    expect(silSonucu.basarili).toBe(false);
+    expect(silSonucu.kod).toBe('KANONIK_DOF_DEGIL');
+  });
+
+  test('W. UI silme çağrısı aktif DÖF uuid\'siyle yapılır -- aidiyet uyuşmazlığında reddedilir, hata görünür', async ({ page }) => {
+    const paket = gecerliDofPaketi({
+      tehlikelerOverride: [
+        gecerliDofKaydi({ dofId: 1, bulguKodu: 'B-1' }),
+        gecerliDofKaydi({ dofId: 2, bulguKodu: 'B-2' }),
+      ],
+    });
+    await dosyaSec(page, JSON.stringify(paket));
+    const [uuidA, uuidB] = paket.tehlikeler.map((t) => t.dofUuid);
+    const ekleSonucu = await medyaEkleDene(page, uuidA, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    const localMediaUuid = ekleSonucu.sonuc.localMediaUuid;
+
+    // UI DÖF B'yi göstermeye geçmişken (aktif DÖF = B), DÖF A'nın medya
+    // UUID'siyle silme UI handler'ı üzerinden tetiklenir (`_dofKanitMedyaSilTikla`
+    // yalnız aktif DÖF'ü, listedeki UUID'ye güvenmeden, kullanır).
+    await page.locator('.dof-liste-karti').filter({ hasText: 'B-2' }).click();
+    await expect(page.locator('#dof-kanit-medya-kart')).toBeVisible();
+
+    await page.evaluate((id) => window._dofKanitMedyaSilTikla(id), localMediaUuid);
+    await expect(page.locator('#dof-kanit-medya-durum')).toHaveText('Medya (' + localMediaUuid + ') verilen dofUuid\'ye ait değil.');
+
+    const medyalarA = await medyalarGetirDene(page, uuidA);
+    expect(medyalarA.sonuc.length).toBe(1);   // silinmedi
+  });
+
+  test('X. Silme reviewStatus\'u ve takipTaslagi\'nı değiştirmez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    const ekleSonucu = await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'camera', mimeType: 'image/jpeg', size: 4 });
+    const oncekiKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+
+    await medyaSilDene(page, dofUuid, ekleSonucu.sonuc.localMediaUuid);
+
+    const sonKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
+    expect(sonKayit).toEqual(oncekiKayit);
+  });
+
+  test('Y. Silme dof_donus.json / ZIP şemasını ve 4O fingerprint/staleness davranışını değiştirmez', async ({ page }) => {
+    const dofUuid = await tekDofKur(page);
+    await page.evaluate((u) => window._dofImport.dofTakipTaslagiGuncelle(u, { sorumlu: 'Ahmet' }), dofUuid);
+    const ekle1 = await medyaEkleDene(page, dofUuid, { mediaType: 'photo', source: 'gallery', mimeType: 'image/png', size: 4 });
+    const ekle2 = await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 300 });
+
+    const hazirlik = await page.evaluate((u) => window._dofImport.dofReplayHazirlikHazirla(u), dofUuid);
+    expect(hazirlik).toBeTruthy();
+
+    // Hazırlıktan SONRA bir medya siliniyor -- 4O fingerprint'i (takip+
+    // reviewStatus'a dayalı) hiç bundan etkilenmemeli.
+    await medyaSilDene(page, dofUuid, ekle1.sonuc.localMediaUuid);
+
+    const zipSonucu = await page.evaluate(async (u) => {
+      try {
+        const sonuc = await window._dofImport.dofReplayZipOlustur([u]);
+        return { basarili: true };
+      } catch (e) {
+        return { basarili: false, kod: e && e.kod };
+      }
+    }, dofUuid);
+    expect(zipSonucu.basarili).toBe(true);   // REPLAY_HAZIRLIK_ESKI VERMEDİ
+
+    const belgeSonucu = await page.evaluate(async (u) => {
+      return window._dofImport.dofDonusBelgesiOlustur([{ dofUuid: u, submissionUuid: crypto.randomUUID() }]);
+    }, dofUuid);
+    const kontrol = belgeSonucu.dofKontrolleri[0];
+    for (const medyaAlani of ['fotolar', 'sesNotlari', 'medya', 'kanitlar']) {
+      expect(kontrol).not.toHaveProperty(medyaAlani);
+    }
+
+    // İkinci medya (silinmeyen) hâlâ store'da duruyor -- silme yalnız hedeflenen kaydı etkiledi.
+    const medyalar = await medyalarGetirDene(page, dofUuid);
+    expect(medyalar.sonuc.length).toBe(1);
+    expect(medyalar.sonuc[0].localMediaUuid).toBe(ekle2.sonuc.localMediaUuid);
   });
 });

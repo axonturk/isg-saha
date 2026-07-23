@@ -1091,9 +1091,29 @@ async function dofKanitMedyasiEkle(dofUuid, medyaGirdisi) {
 /** Bir kanıt medyasını kalıcı olarak (local-only hard delete) kaldırır --
  * export henüz yok (4Q'ya kadar), bu yüzden "silme sonrası dış sözleşme
  * etkilenir mi" endişesi bu commit'te geçerli değil. `dofler`/
- * `takipTaslagi`/`reviewStatus`'a dokunmaz. Var olmayan bir kimlik için
- * IndexedDB `delete()` sessizce no-op'tur (idempotent). */
-async function dofKanitMedyasiSil(localMediaUuid) {
+ * `takipTaslagi`/`reviewStatus`'a dokunmaz.
+ *
+ * GÜVENLİK (Codex bağımsız QA bulgusu, 929dc96 sonrası düzeltme):
+ * Getir/Ekle ile AYNI güvenli desen zorunludur -- yalnız `localMediaUuid`
+ * alıp doğrudan silmek, `window._dofImport` üzerinden dışarı açık bir
+ * servisin, ÇAĞIRANIN belirttiği `dofUuid` ile hiç doğrulama yapmadan
+ * HERHANGİ bir DÖF'ün medyasını (hatta legacy/WIP bağlamdan bile)
+ * silebilmesi anlamına geliyordu. Artık:
+ * 1) `dofUuid` önce `_dofKanitDofKaydiDogrula` ile kanonik olarak
+ *    doğrulanır (legacy/WIP -> KANONIK_DOF_DEGIL, bulunamayan -> DOF_BULUNAMADI),
+ * 2) medya kaydı okunur -- yoksa DOF_KANIT_MEDYA_BULUNAMADI,
+ * 3) medyanın GERÇEK `dofUuid`'si çağıranın verdiğiyle birebir
+ *    eşleşmiyorsa DOF_KANIT_MEDYA_DOF_UYUSMAZLIGI (başka bir DÖF'ün
+ *    medyası silinemez). Yalnız üçü de geçerse hard delete yapılır. */
+async function dofKanitMedyasiSil(dofUuid, localMediaUuid) {
+  await _dofKanitDofKaydiDogrula(dofUuid);
+  const medya = await dbGetir('dofKanitlari', localMediaUuid);
+  if (!medya) {
+    throw new DofImportHatasi('DOF_KANIT_MEDYA_BULUNAMADI', `localMediaUuid bulunamadı: ${localMediaUuid}`);
+  }
+  if (medya.dofUuid !== dofUuid) {
+    throw new DofImportHatasi('DOF_KANIT_MEDYA_DOF_UYUSMAZLIGI', `Medya (${localMediaUuid}) verilen dofUuid'ye ait değil.`);
+  }
   await dbSil('dofKanitlari', localMediaUuid);
 }
 
@@ -2799,9 +2819,21 @@ async function toggleDofSesKaydi() {
 }
 if (typeof window !== 'undefined') window.toggleDofSesKaydi = toggleDofSesKaydi;
 
+/** Yalnız listedeki `localMediaUuid`'e güvenmez -- aktif DÖF bağlamını
+ * (`_dofKanitAktifDofUuid`) da servise gönderir. DÖF arada değiştiyse
+ * veya medya aidiyeti uyuşmuyorsa `dofKanitMedyasiSil` reddeder, hata
+ * kullanıcıya görünür durum mesajıyla yansıtılır (sessizce yutulmaz). */
 async function _dofKanitMedyaSilTikla(localMediaUuid) {
-  await dofKanitMedyasiSil(localMediaUuid);
-  if (_dofKanitAktifDofUuid) await _dofKanitMedyaYukle(_dofKanitAktifDofUuid);
+  const dofUuid = _dofKanitAktifDofUuid;
+  const durum = document.getElementById('dof-kanit-medya-durum');
+  if (!dofUuid) return;
+  try {
+    await dofKanitMedyasiSil(dofUuid, localMediaUuid);
+    if (durum) durum.textContent = '';
+    await _dofKanitMedyaYukle(dofUuid);
+  } catch (e) {
+    if (durum) durum.textContent = (e && e.message) || 'Kanıt silinemedi.';
+  }
 }
 if (typeof window !== 'undefined') window._dofKanitMedyaSilTikla = _dofKanitMedyaSilTikla;
 
