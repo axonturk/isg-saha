@@ -3019,6 +3019,10 @@ if (navigator.serviceWorker) {
 
 // ─── EKRAN YÖNETİMİ ──────────────────────────────────────────
 function showScreen(name) {
+  // Oda/Mahal/Konum Kodu "Sesle Yaz" (bkz. aşağıdaki bölüm): TÜM ekran
+  // geçişleri buradan geçiyor -- aktif bir ses tanıma varsa akış/sayfa
+  // değişince güvenli biçimde durdurulur (yarım kalmış dinleme kalmaz).
+  if (typeof _sesleYazDurdur === 'function') _sesleYazDurdur();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById(`screen-${name}`);
   if (el) el.classList.add('active');
@@ -4146,6 +4150,196 @@ async function _etiketOku(canvas) {
     if (adayKutu) adayKutu.innerHTML = `<span style="color:#e74c3c">OCR hatası: ${_esc(e.message)}</span>`;
   }
 }
+
+// ─── ODA/MAHAL/KONUM KODU — "SESLE YAZ" (Kamera/OCR'a alternatif) ──
+// Kamera/OCR (📷/_etiketOku) saha koşullarında her zaman güvenilir değil --
+// bu bölüm AYNI #kat-alan-oda-no inputuna yazan ÜÇÜNCÜ bir alternatiftir
+// (elle giriş + kamera/OCR + sesle yaz). Hiçbiri kaldırılmaz/bozulmaz.
+//
+// ÖNEMLİ (dürüst sınır): Web Speech API (`SpeechRecognition`/
+// `webkitSpeechRecognition`) tarayıcı yerleşik bir servistir -- TAM
+// OFFLINE ÇALIŞMA GARANTİSİ YOKTUR (çoğu tarayıcıda motor bulut
+// tabanlıdır). Bu yüzden "tam offline ses tanıma" iddia EDİLMEZ; yalnız
+// "destek varsa kullanılabilir hızlı giriş yardımcısı" olarak sunulur.
+// Destek yoksa kullanıcıya açık, kısa bir mesaj gösterilir; elle giriş ve
+// kamera/OCR hiç etkilenmeden çalışmaya devam eder.
+//
+// Aynı anda birden fazla recognition çalışmaması ve ekran/akış değişince
+// güvenli durdurma için TEK bir modül-seviyesi örnek (`_sesTanimaOrnegi`)
+// tutulur; `showScreen()` her çağrıldığında (TÜM navigasyon oradan geçiyor)
+// `_sesleYazDurdur()` çağrılır.
+let _sesTanimaOrnegi = null;
+
+function _sesTanimaDesteginiKontrolEt() {
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function _sesleYazButonDurumGuncelle(dinliyorMu) {
+  const btn = document.getElementById('kat-alan-sesle-yaz-btn');
+  if (!btn) return;
+  btn.textContent = dinliyorMu ? '⏹' : '🎤';
+  btn.classList.toggle('active', dinliyorMu);
+}
+
+function _sesleYazDurumGoster(metin) {
+  const el = document.getElementById('kat-alan-sesle-yaz-durum');
+  if (el) el.textContent = metin || '';
+}
+
+/** Aktif dinlemeyi (varsa) güvenli biçimde durdurur -- ekran/akış
+ * değişiminde (`showScreen`) ve kullanıcı butona tekrar bastığında
+ * çağrılır. `abort()` sonrası tarayıcı zaten `onend`'i tetikler; buradaki
+ * `_sesTanimaOrnegi = null` erken temizlik -- `onend` ikinci kez null
+ * atamayı no-op yapar. */
+function _sesleYazDurdur() {
+  if (_sesTanimaOrnegi) {
+    try { _sesTanimaOrnegi.abort(); } catch (e) { /* zaten durmuş olabilir -- yut */ }
+    _sesTanimaOrnegi = null;
+  }
+  _sesleYazButonDurumGuncelle(false);
+}
+if (typeof window !== 'undefined') window._sesleYazDurdur = _sesleYazDurdur;
+
+const _TR_SAYI_BIRLER = { bir: 1, iki: 2, üç: 3, dört: 4, beş: 5, altı: 6, yedi: 7, sekiz: 8, dokuz: 9 };
+const _TR_SAYI_ONLAR = { on: 10, yirmi: 20, otuz: 30, kırk: 40, elli: 50, altmış: 60, yetmiş: 70, seksen: 80, doksan: 90 };
+// Yalnız İLK kelime + hemen ardından sayı geldiğinde harfe çevrilir --
+// aşırı agresif olmamak için ("zemin"/"el" başka bağlamda serbest kelime
+// olarak KALIR, yalnızca oda kodu deseninde -- harf+sayı -- dönüştürülür).
+const _TR_HARF_KELIME = { el: 'L', zemin: 'Z' };
+
+/** Ardışık Türkçe sayı kelimelerinden (bir..dokuz, on..doksan, yüz) tek bir
+ * tamsayı üretir. Örn: ["üç","yüz","yedi"] -> 307, ["on","beş"] -> 15. */
+function _trSayiKelimeGrubunuCevir(kelimeler) {
+  let deger = 0;
+  let i = 0;
+  while (i < kelimeler.length) {
+    const k = kelimeler[i];
+    if (k === 'yüz') { deger += 100; i += 1; continue; }
+    if (Object.prototype.hasOwnProperty.call(_TR_SAYI_BIRLER, k)) {
+      if (kelimeler[i + 1] === 'yüz') { deger += _TR_SAYI_BIRLER[k] * 100; i += 2; continue; }
+      deger += _TR_SAYI_BIRLER[k]; i += 1; continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(_TR_SAYI_ONLAR, k)) { deger += _TR_SAYI_ONLAR[k]; i += 1; continue; }
+    i += 1;   // buraya asla düşmemeli (çağıran yalnız sayı-kelimesi run'ı verir) -- savunma amaçlı
+  }
+  return deger;
+}
+
+/** Ses tanımadan gelen ham metni oda/mahal/konum koduna göre BASİT ve
+ * TEMKİNLİ normalize eder -- yanlış düzeltme riski varsa ham kelime
+ * KORUNUR (aşırı agresif dönüşüm yapılmaz). Adımlar:
+ * 1) ardışık sayı-kelimesi grupları tek sayıya çevrilir ("üç yüz yedi" -> "307"),
+ * 2) yalnız İLK kelime "el"/"zemin" ise VE hemen ardından (artık sayıya
+ *    çevrilmiş) bir sayı geliyorsa harfe çevrilir ("el 307" -> "L 307"),
+ * 3) tek harfli bağımsız kelimeler büyütülür ("l" -> "L", "a" -> "A"),
+ * 4) kalan alfabetik kelimelerin ilk harfi büyütülür ("ofis" -> "Ofis").
+ * Boş/anlamsız girdi ham (trim'lenmiş) metni değişmeden döner. */
+function _sesMetniOdaKoduNormallestir(hamMetin) {
+  const ham = (hamMetin || '').trim();
+  if (!ham) return ham;
+
+  const kelimeler = ham.toLocaleLowerCase('tr').split(/\s+/).filter(Boolean);
+  const cikti = [];
+  let i = 0;
+  while (i < kelimeler.length) {
+    const k = kelimeler[i];
+    const sayiKelimesiMi = k === 'yüz' ||
+      Object.prototype.hasOwnProperty.call(_TR_SAYI_BIRLER, k) ||
+      Object.prototype.hasOwnProperty.call(_TR_SAYI_ONLAR, k);
+    if (sayiKelimesiMi) {
+      const run = [];
+      let j = i;
+      while (j < kelimeler.length) {
+        const kj = kelimeler[j];
+        const sayiMi = kj === 'yüz' ||
+          Object.prototype.hasOwnProperty.call(_TR_SAYI_BIRLER, kj) ||
+          Object.prototype.hasOwnProperty.call(_TR_SAYI_ONLAR, kj);
+        if (!sayiMi) break;
+        run.push(kj); j += 1;
+      }
+      cikti.push(String(_trSayiKelimeGrubunuCevir(run)));
+      i = j;
+      continue;
+    }
+    cikti.push(k);
+    i += 1;
+  }
+
+  // Adım 2: yalnız İLK kelime harf-kelimesiyse VE ardından sayı geldiyse.
+  if (cikti.length >= 2 && Object.prototype.hasOwnProperty.call(_TR_HARF_KELIME, cikti[0]) && /^\d+$/.test(cikti[1])) {
+    cikti[0] = _TR_HARF_KELIME[cikti[0]];
+  }
+
+  const sonuc = cikti.map((kelime) => {
+    if (/^\d+$/.test(kelime)) return kelime;
+    if (kelime.length === 1) return kelime.toLocaleUpperCase('tr');
+    return kelime.charAt(0).toLocaleUpperCase('tr') + kelime.slice(1);
+  });
+  return sonuc.join(' ');
+}
+
+/** "🎤 Sesle Yaz" butonu -- destek varsa dinlemeyi başlatır/durdurur,
+ * sonucu (normalize edilmiş) doğrudan #kat-alan-oda-no'ya yazar. Otomatik
+ * kayıt/ileri geçiş YAPMAZ -- yalnız inputu doldurur, kullanıcı elle
+ * düzeltebilir/Devam edebilir (mevcut startInspection akışı DEĞİŞMEDEN). */
+function _odaSesleYazTikla() {
+  if (_sesTanimaOrnegi) {
+    // Zaten dinliyor -- kullanıcı tekrar bastı, güvenli durdur (toggle).
+    _sesleYazDurdur();
+    _sesleYazDurumGoster('');
+    return;
+  }
+  if (!_sesTanimaDesteginiKontrolEt()) {
+    _sesleYazDurumGoster('Bu cihaz/tarayıcı sesle yazmayı desteklemiyor. Elle giriş yapabilirsiniz.');
+    return;
+  }
+
+  const SpeechRecognitionSinifi = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognitionSinifi();
+  recognition.lang = 'tr-TR';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    _sesleYazButonDurumGuncelle(true);
+    _sesleYazDurumGoster('Dinleniyor…');
+  };
+  recognition.onresult = (e) => {
+    const alternatif = e && e.results && e.results[0] && e.results[0][0];
+    const hamMetin = alternatif ? alternatif.transcript : '';
+    const normalize = _sesMetniOdaKoduNormallestir(hamMetin);
+    const input = document.getElementById('kat-alan-oda-no');
+    if (input) {
+      input.value = normalize;
+      _katAlanOdaNoDegisti();   // OCR aday-chip seçimiyle AYNI davranış -- eşleşme state'i günceller
+    }
+    _sesleYazDurumGoster(normalize ? `Algılandı: "${normalize}"` : 'Ses algılanamadı, elle yazabilirsiniz.');
+  };
+  recognition.onerror = (e) => {
+    _sesleYazDurumGoster('Ses tanıma hatası: ' + ((e && e.error) || 'bilinmeyen') + '. Elle giriş yapabilirsiniz.');
+    // Spesifikasyona göre `error`'dan sonra `end` de tetiklenir, ama buna
+    // GÜVENMİYORUZ (bazı motor/tarayıcı kombinasyonlarında sıralama garanti
+    // değil) -- burada da doğrudan sıfırlanır, aksi halde buton "⏹" durumunda
+    // asılı kalabilir. `onend` sonradan da çağrılırsa (muhtemel) bu adımlar
+    // zaten idempotent (null'a null atama, false'a false toggle).
+    _sesTanimaOrnegi = null;
+    _sesleYazButonDurumGuncelle(false);
+  };
+  recognition.onend = () => {
+    _sesTanimaOrnegi = null;
+    _sesleYazButonDurumGuncelle(false);
+  };
+
+  _sesTanimaOrnegi = recognition;
+  try {
+    recognition.start();
+  } catch (e) {
+    _sesTanimaOrnegi = null;
+    _sesleYazButonDurumGuncelle(false);
+    _sesleYazDurumGoster('Ses tanıma başlatılamadı: ' + e.message);
+  }
+}
+if (typeof window !== 'undefined') window._odaSesleYazTikla = _odaSesleYazTikla;
 
 // ─── SES KAYDI (bulgu notu — tamamen offline, MediaRecorder) ─
 async function toggleSesKaydi() {
