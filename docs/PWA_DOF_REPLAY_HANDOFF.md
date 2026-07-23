@@ -7,6 +7,8 @@
 
 **2026-07-22 güncellemesi:** Bu doküman, Desktop tarafındaki roadmap görüşmeleriyle (Madde 4.0 sözleşme fazı + Madde 4A doğrulaması) hizalanmak üzere aşağıya **H-M bölümleri eklenerek** güncellendi. Bu güncelleme **yalnız dokümantasyondur — hiçbir kod, test veya üretim davranışı değişmedi.** Yukarıdaki A-G bölümleri (orijinal 4J QA kaydı) aynen korunmuştur, hiçbir cümlesi silinmemiş/değiştirilmemiştir.
 
+**2026-07-23 güncellemesi:** Aşağıya **N-Q bölümleri eklendi** — 4N-4Q'nun kapanışı, Sesle Yaz özelliği, GitHub push + Pages durumu, gerçek Android 4R bulguları (kısmi/BLOCKED_BY_ENVIRONMENT) ve önerilen 4S (Mobile UX Alignment) planı. Bu doküman anındaki gerçek PWA HEAD artık `cc81c08` — üstteki "Bu doküman anındaki PWA HEAD" alanı (§A-G'nin orijinal anını gösterir) **kasıtlı olarak değiştirilmedi**, tarihsel kayıt olarak korunuyor; güncel HEAD için §O'ya bakın. Yine **yalnız dokümantasyon** — hiçbir kod/test/üretim davranışı bu güncellemeyle değişmedi.
+
 ---
 
 ## A. PWA DÖF medyasız round-trip MVP durumu
@@ -255,3 +257,90 @@ Grep ile doğrulanan (2026-07-22, `app.js` + `tests/` genelinde sıfır referans
 **Sıradaki önerilen adım: 4N — reviewStatus local model + UI.** Bağımsız, düşük riskli, medyaya dokunmuyor, mevcut 232 testten hiçbirini bozma ihtimali düşük. 4O/4P/4Q/4R bu sıradan sonra, her biri kendi onay/test/rapor döngüsüyle ele alınacak.
 
 **Desktop 5B ayrımı (2026-07-22, Codex QA sonrası eklendi):** PWA 4N-4R roadmap'i yalnız PWA tarafındaki reviewStatus local model/UI, export filtresi, medya capture/export ve E2E handoff işlerini kapsar. Desktop tarafında reviewStatus'un kalıcı `review_status` kolonu, DÖF İşlemleri sekmesinde görünürlüğü, rozet/filtre/aksiyon davranışı ve Desktop final karar UI'ı **ayrı `Desktop 5B` konusudur**. Bu PWA doküman güncellemesi Desktop 5B'nin yerine geçmez; Desktop repo'ya dokunulmamıştır. Human-in-Control ilkesi gereği PWA `kapatma_onerisi` üretebilir, fakat final kapatma kararı her zaman Desktop'ta kalır.
+
+---
+
+## N. 4N-4Q kapanışı + Sesle Yaz (2026-07-23 güncellemesi)
+
+**Bu güncelleme yalnız dokümantasyondur** — §A-M'nin hiçbir cümlesi silinmedi/değiştirilmedi, yalnız §N'den itibaren ekleniyor. §K'de "planlanmış" olarak listelenen 4N-4Q, bu tarih itibarıyla **hepsi kapandı**:
+
+| Faz | Konu | Durum | Commit(ler) |
+|---|---|---|---|
+| 4N | reviewStatus local model + UI | ✅ KAPANDI | `d230d39` |
+| 4O | reviewStatus sparse export + fingerprint/staleness | ✅ KAPANDI | `1cf4481` |
+| 4P | DÖF replay local media capture | ✅ KAPANDI | `929dc96` (+ güvenlik fix `47e33d4`) |
+| 4Q | DÖF replay media export + contract tests | ✅ KAPANDI | `1fbace5` |
+
+**4Q medya export sözleşmesi (kanonik, değişmedi):**
+- Foto: `fotolar/<localMediaUuid>.jpg`
+- Ses: `sesler/<localMediaUuid>.webm`
+- `dof_donus.json` içinde `fotolar`/`sesNotlari` — Desktop'a zorunlu, **çıplak dosya adı** `string[]`
+- `kanitMedyalari` — additive audit metadata (Desktop okumaz, `payload_snapshot_json`'da korunur)
+- Medyasız kayıtta bu üç alan tamamen **absent** (boş dizi değil)
+- Desktop'ın mevcut sözleşmesi (staging→Apply çift hash, `dof_fotolar/<dof_id>/`, idempotency) **bozulmadı**
+
+**Ek özellik — Sesle Yaz (Oda/Mahal/Konum Kodu UX, DÖF replay kapsamı DIŞINDA ama aynı dalda):**
+- Commit zinciri: `eaa16ed` (feat, ilk implementasyon) → `cc81c08` (fix, Codex NEEDS_FIX P1/P2 sertleştirme).
+- Kanonik kararlar: `#kat-alan-oda-no` yanında 🎤 mikrofon butonu (kamera/OCR'a ek ÜÇÜNCÜ alternatif, ikisi de korunuyor); `SpeechRecognition`/`webkitSpeechRecognition` feature-detect; `lang='tr-TR'`; **tam offline garanti iddiası YOK** — yalnız destek varsa kullanılabilir hızlı-giriş yardımcısı; boş transcript mevcut input değerini SİLMEZ (P1 düzeltmesi); stale `onend`/`onerror` (eski, abort edilmiş bir recognition'ın gecikmeli callback'i) yeni aktif recognition state'ini BOZMAZ (P2 düzeltmesi, closure-guard deseni).
+- Codex bağımsız QA: **READY** (re-check sonrası).
+- Test baseline: tam paket serial run **328 passed, 0 failed, 0 skipped**.
+- DÖF replay sözleşmesine (4Q) veya export koduna **hiç dokunmuyor** — grep ile doğrulandı, sıfır kesişim.
+
+---
+
+## O. GitHub push + Pages durumu (2026-07-23)
+
+- Repo: `C:\Users\fakma\OneDrive\Desktop\isg-saha-asistani-v0.1-dof-replay-v2`, branch `feature/dof-replay-v2`.
+- Remote: `https://github.com/axonturk/isg-saha.git` — **push edildi** (`git push origin feature/dof-replay-v2`, fast-forward, force/tag/main/gh-pages'e dokunulmadı).
+- GitHub Pages: `https://axonturk.github.io/isg-saha/index.html` — **`feature/dof-replay-v2` branch'ini kökten yayınlıyor** (Pages source zaten bu branch'e ayarlıydı, değiştirilmedi), **HTTPS enforced**.
+- Son doğrulanan Pages build: commit `cc81c08d0f95afc06f7f9a08caf111816d800715` ile **birebir eşleşiyor**, `status: "built"`.
+- Bu, gerçek Android cihazda güvenli bağlam (HTTPS) gerektiren mikrofon/kamera izinlerinin test edilebilmesini sağladı (bkz. §P).
+
+---
+
+## P. Gerçek Android 4R durumu (2026-07-23) — TEKNİK OLARAK ÇALIŞTI, QA TAM KAPANMADI
+
+Gerçek Android cihazda, GitHub Pages HTTPS üzerinden doğrulanan zincir:
+
+```text
+GitHub Pages HTTPS açıldı
+→ DÖF paketi içe aktarıldı
+→ DÖF listesi göründü
+→ DÖF detayı açıldı
+→ reviewStatus alanı görüldü
+→ takip bilgileri görüldü
+→ kamera ile fotoğraf çekme çalıştı
+→ dosya seçme çalıştı
+→ ses notu/mikrofon kaydı çalıştı
+→ ZIP indirildi
+```
+
+**Gözlemsel not (ürün iddiası DEĞİL):** Test cihazında internet bağlantısı olmadığı bir anda mikrofon/ses kaydı yine de çalıştı. **Bu, cihaz/tarayıcıya özel bir gözlemdir — "her cihazda offline STT çalışır" şeklinde genellenmeyecek**, Web Speech API'nin doğası gereği tam offline garanti yoktur (bkz. §N, Sesle Yaz kararları).
+
+**4R'nin kapanmama nedeni:** Desktop import/staging/Apply adımı (ZIP'in Desktop'a taşınıp gerçek `dof_replay_zip_kabul_et`/`dof_replay_import_uygula` ile işlenmesi) **henüz tamamlanmadı**. AI ajanı fiziksel bir Android cihazı veya Desktop'un native (CustomTkinter) GUI'sini kendi başına süremediği için ilk otomatik yürütme denemesi **`BLOCKED_BY_ENVIRONMENT`** sonucuyla kapandı — bu bir kod/test hatası değil, araç/erişim sınırıdır. Kullanıcı Android tarafındaki adımların önemli bölümünü elle doğruladı; Desktop import/apply adımı hâlâ kullanıcının kendisi tarafından elle tamamlanmayı bekliyor.
+
+**4R kapanış kriteri (değişmedi):** Desktop import/staging/Apply gerçek bir cihazdan gelen medyalı ZIP ile başarıyla tamamlanıp DB/dosya sistemi kanıtlarıyla (§K'deki 4R tanımına bkz.) doğrulanmadan 4R "kanonik kapandı" sayılmaz.
+
+---
+
+## Q. 4S — DÖF Replay Mobile UX Alignment (önerilen, henüz onaylanmadı/kodlanmadı)
+
+Gerçek Android 4R testinde teknik zincir çalıştı ama kullanıcı, DÖF replay ekranlarının normal saha denetimi akışıyla (konum/mahal bağlamlı, ekran-ekran, sticky footer'lı) tutarsız olduğunu gözlemledi. Bu bulgular ayrı bir UX planlama turunda (kod yazılmadan) belgelendi.
+
+**Kullanıcı tarafından gözlenen UX eksikleri (10 madde):**
+1. DÖF seçilince normal saha denetimindeki gibi konum bazlı ekran gelmeli.
+2. DÖF detay ekranı ayrı/düz kart gibi kalmamalı.
+3. "İçe Aktarılan DÖF'ler" uzun tek liste olmamalı.
+4. Önce birim/alan/konum/mahal grupları chip/düğme gibi görünmeli.
+5. Kullanıcı hangi birim/alanı seçerse yalnız o gruba ait DÖF'ler görünmeli.
+6. DÖF listesi orta bölümde kaydırılabilir olmalı.
+7. Alt eylem düğmeleri sticky/sabit olmalı.
+8. "Hazırlık Oluştur" ayrı zorunlu adım gibi görünmemeli.
+9. ZIP İndir hazırlığı otomatik oluşturmalı veya güncellemeli.
+10. DÖF replay akışı normal saha denetimi layout'una hizalanmalı.
+
+**Kod okumasıyla doğrulanan teknik zemin:** `#screen-setup` içinde DÖF kartları (Paket Al/Liste/Detay/İnceleme Durumu/Takip/Kanıt Medyaları/Replay Paketi) düz sıralı `<div class="card">` olarak duruyor — ayrı ekran/`.konum-header`/sticky footer yok. Her DÖF kaydı (`k.kat`/`k.oda`/`k.alanTipi`) **zaten konum verisini taşıyor** — yeni veri gerekmez, yalnız sunum değişir. `dofReplayHazirlikHazirla` zaten tam idempotent — "ZIP İndir" onu otomatik çağıracak şekilde sadeleştirilebilir, fingerprint/staleness koruması bozulmadan.
+
+**Desktop/PWA DÖF export filtresi kararı:** Desktop'un PWA'ya DÖF gönderirken düşük/önemsiz riskleri filtrelemesi veya PWA'nın kartları risk durumuna göre renklendirmesi — **renklendirme 4S kapsamında PWA UI'da yapılabilir**, **export filtresi ayrı bir Desktop fazı** olarak değerlendirilmeli. Mevcut export/import kontratı bozulmayacak.
+
+**4S kapsamı (önerilen, ChatGPT onayı bekliyor):** DÖF listesi birim/alan/konum gruplama, seçili grup chip/sekme, orta kaydırılabilir DÖF listesi, DÖF seçilince konum/mahal bağlamlı ekran, sticky alt butonlar, ZIP İndir otomatik hazırlık, risk seviyesine göre kart renklendirme. **Bu bölüm bir plan kaydıdır — hiçbir kod bu güncellemeyle yazılmadı.**
