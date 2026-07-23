@@ -4308,24 +4308,44 @@ function _odaSesleYazTikla() {
     const alternatif = e && e.results && e.results[0] && e.results[0][0];
     const hamMetin = alternatif ? alternatif.transcript : '';
     const normalize = _sesMetniOdaKoduNormallestir(hamMetin);
+    // Codex NEEDS_FIX / P1: ham transcript boşsa veya normalize sonucu
+    // boşsa mevcut input DEĞİŞTİRİLMEZ (kullanıcının önceden elle girdiği
+    // değer korunur) -- `_katAlanOdaNoDegisti()` de ÇAĞRILMAZ (eşleşme
+    // state'i, hiçbir şey yazılmadığı için bozulmamalı). Yalnız anlamlı
+    // (boş olmayan) normalize sonucu varsa input güncellenir.
+    if (!normalize) {
+      _sesleYazDurumGoster('Sesle yazma sonucu boş geldi. Mevcut değer korunuyor.');
+      return;
+    }
     const input = document.getElementById('kat-alan-oda-no');
     if (input) {
       input.value = normalize;
       _katAlanOdaNoDegisti();   // OCR aday-chip seçimiyle AYNI davranış -- eşleşme state'i günceller
     }
-    _sesleYazDurumGoster(normalize ? `Algılandı: "${normalize}"` : 'Ses algılanamadı, elle yazabilirsiniz.');
+    _sesleYazDurumGoster(`Algılandı: "${normalize}"`);
   };
+  // Codex NEEDS_FIX / P2: `onerror`/`onend` YALNIZ bu callback'in ait
+  // olduğu `recognition` HÂLÂ güncel aktif örnekse (`_sesTanimaOrnegi ===
+  // recognition`) global state'i temizler. Abort edilmiş/durmuş ESKİ bir
+  // örneğin GECİKMELİ gelen onend/onerror'ı, o sırada başlamış YENİ bir
+  // recognition'ın state'ini (referansını/buton durumunu) SİLEMEZ --
+  // aksi halde bir sonraki tıklama, ikinci örneği durdurmak yerine
+  // yanlışlıkla üçüncü bir recognition başlatırdı. Stale (kendi örneği
+  // artık aktif olmayan) çağrılarda kullanıcıya mesaj da BASILMAZ --
+  // eski bir hatayı/yeni bir dinlemenin üstüne yazıp yanıltmamak için.
   recognition.onerror = (e) => {
+    if (_sesTanimaOrnegi !== recognition) return;   // stale -- yeni bir örnek zaten aktif
     _sesleYazDurumGoster('Ses tanıma hatası: ' + ((e && e.error) || 'bilinmeyen') + '. Elle giriş yapabilirsiniz.');
     // Spesifikasyona göre `error`'dan sonra `end` de tetiklenir, ama buna
     // GÜVENMİYORUZ (bazı motor/tarayıcı kombinasyonlarında sıralama garanti
     // değil) -- burada da doğrudan sıfırlanır, aksi halde buton "⏹" durumunda
     // asılı kalabilir. `onend` sonradan da çağrılırsa (muhtemel) bu adımlar
-    // zaten idempotent (null'a null atama, false'a false toggle).
+    // zaten idempotent (aynı guard sayesinde no-op).
     _sesTanimaOrnegi = null;
     _sesleYazButonDurumGuncelle(false);
   };
   recognition.onend = () => {
+    if (_sesTanimaOrnegi !== recognition) return;   // stale -- yeni bir örnek zaten aktif
     _sesTanimaOrnegi = null;
     _sesleYazButonDurumGuncelle(false);
   };
@@ -4334,7 +4354,7 @@ function _odaSesleYazTikla() {
   try {
     recognition.start();
   } catch (e) {
-    _sesTanimaOrnegi = null;
+    if (_sesTanimaOrnegi === recognition) _sesTanimaOrnegi = null;
     _sesleYazButonDurumGuncelle(false);
     _sesleYazDurumGoster('Ses tanıma başlatılamadı: ' + e.message);
   }
