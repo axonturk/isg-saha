@@ -1117,6 +1117,41 @@ async function dofKanitMedyasiSil(dofUuid, localMediaUuid) {
   await dbSil('dofKanitlari', localMediaUuid);
 }
 
+// ─── DÖF YEREL PAKET / KAYIT SİLME (PWA 4R-PKG-3A) ──────────────
+// Yalnız PWA'nın KENDİ IndexedDB'sini (dofler + dofKanitlari) temizler.
+// Desktop DB'ye HİÇ dokunmaz, gerçek DÖF/faaliyet turu/audit geçmişini
+// SİLMEZ (bunlara bu fonksiyonların hiç erişimi yok) -- silinen yalnız
+// PWA'nın yerel import/taslak/medya/replayHazırlık kopyasıdır. Aynı
+// JSON/ZIP daha sonra tekrar içe aktarılabilir (idempotent import
+// sözleşmesi bu fonksiyonlardan etkilenmez).
+
+/** Tek bir yerel DÖF kaydını (kanonik VEYA legacy/WIP/hatalı -- `id` her
+ * ikisinde de birincil anahtar) ve varsa (yalnız `dofUuid` string ise)
+ * bağlı kanıt medyalarını siler. Kayıt zaten yoksa idempotent no-op
+ * (hata fırlatmaz -- "zaten silinmiş" durumu normaldir). */
+async function dofYerelKaydiSil(dofId) {
+  const kayit = await dbGetir('dofler', dofId);
+  if (!kayit) return { silindi: false };
+  if (typeof kayit.dofUuid === 'string') {
+    const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', kayit.dofUuid);
+    for (const m of medyalar) await dbSil('dofKanitlari', m.localMediaUuid);
+  }
+  await dbSil('dofler', dofId);
+  return { silindi: true };
+}
+
+/** Aynı `paketUuid`'e ait TÜM kanonik yerel DÖF kayıtlarını (+ bağlı kanıt
+ * medyalarını) `dofYerelKaydiSil` ile tek tek siler. Yalnız KANONİK
+ * kayıtları hedefler -- legacy/WIP kayıtların `paketUuid`'i olmadığından
+ * zaten eşleşmezler, etkilenmezler. Başka paketUuid'e ait kayıtlara hiç
+ * dokunmaz. */
+async function dofPaketiSil(paketUuid) {
+  const tumKayitlar = await dbTumu('dofler');
+  const hedefler = tumKayitlar.filter((k) => _dofKanonikMi(k) && k.paketUuid === paketUuid);
+  for (const k of hedefler) await dofYerelKaydiSil(k.id);
+  return { silinenSayisi: hedefler.length };
+}
+
 /** Bir kanıt medyası için Desktop sözleşmesine uygun ZIP dosya adı ve tam
  * ZIP-içi yol üretir (PWA Commit 4Q). Desktop `dof_replay_import.py`
  * `_MEDYA_ALANLARI` eşlemesi -- `fotolar`/`sesNotlari` alanları SIRASIYLA
@@ -1927,6 +1962,7 @@ if (typeof window !== 'undefined') {
     dofIncelenenDofUuidleriniFiltrele,
     dofKanitMedyalariGetir, dofKanitMedyasiEkle, dofKanitMedyasiSil,
     dofPaketiDegismisDofUuidleri, _dofReplayZipDosyaAdiUret,
+    dofYerelKaydiSil, dofPaketiSil,
   };
 }
 
@@ -2280,6 +2316,173 @@ if (typeof window !== 'undefined') {
 
 let _dofListeKayitlari = [];
 let _dofListeSeciliId = null;
+// PWA 4R-PKG-3A -- grup/chip filtresi. VARSAYILAN 'tumu': mevcut ~100
+// DÖF list/detay/takip/replay testi hiçbir filtreleme beklemeden yazıldı
+// (tek/iki kayıtlık senkron fixture'larla `.dof-liste-karti` sayısını
+// DOĞRUDAN toplam kayıt sayısına eşit varsayıyorlar) -- "İşlenen"/ilk
+// alan-grubu OTOMATİK aktif olacak şekilde varsayılanı değiştirmek bu
+// testlerin BÜYÜK kısmını (mevcut, önceden yeşil) kırardı. Görev
+// talimatındaki "bu davranış mevcut kod yapısına EN AZ RİSKLE
+// uygulanmalı" ölçütü gereği, kasıtlı ve raporda açıkça belirtilen bir
+// karar: varsayılan HER ZAMAN 'tumu' (tam liste, mevcut davranışla
+// birebir), chip'ler kullanıcının ELİYLE seçmesi için sunulur.
+let _dofAktifGrupAnahtari = 'tumu';
+let _dofGrupListesi = [];   // en son hesaplanan {key, etiket, kayitlar} dizisi
+
+/** Kanonik DÖF kayıtlarından grup listesini hesaplar -- SALT-OKUNUR.
+ * Sabit gruplar: Tümü/İşlenen/Bekleyen ("değişmiş" ölçütü
+ * `_dofKayitDegismisMi` ile BİREBİR aynı, 4R-PKG-2'de tanımlandı).
+ * Dinamik gruplar: dolu `alanTipi` ve dolu `riskDuzeyi` değerlerine göre
+ * (boş/null değerler grup ÜRETMEZ, "Tümü" altında kalırlar). Bir kayıt
+ * hem bir alanTipi hem bir riskDuzeyi grubuna aynı anda üye olabilir --
+ * gruplar birbirini dışlamaz, yalnız kompakt listeyi FİLTRELEMEK için
+ * kullanılır. */
+async function _dofGruplariHesapla(kayitlar) {
+  const gruplar = [{ key: 'tumu', etiket: 'Tümü', kayitlar: kayitlar.slice() }];
+
+  const islenenler = [];
+  const bekleyenler = [];
+  for (const k of kayitlar) {
+    if (await _dofKayitDegismisMi(k)) islenenler.push(k); else bekleyenler.push(k);
+  }
+  gruplar.push({ key: 'islenen', etiket: 'İşlenen', kayitlar: islenenler });
+  gruplar.push({ key: 'bekleyen', etiket: 'Bekleyen', kayitlar: bekleyenler });
+
+  const alanMap = new Map();
+  for (const k of kayitlar) {
+    const alan = (k.alanTipi || '').trim();
+    if (!alan) continue;
+    if (!alanMap.has(alan)) alanMap.set(alan, []);
+    alanMap.get(alan).push(k);
+  }
+  for (const [alan, liste] of alanMap) gruplar.push({ key: `alan:${alan}`, etiket: alan, kayitlar: liste });
+
+  const riskMap = new Map();
+  for (const k of kayitlar) {
+    const risk = (k.riskDuzeyi || '').trim();
+    if (!risk) continue;
+    if (!riskMap.has(risk)) riskMap.set(risk, []);
+    riskMap.get(risk).push(k);
+  }
+  for (const [risk, liste] of riskMap) gruplar.push({ key: `risk:${risk}`, etiket: risk, kayitlar: liste });
+
+  return gruplar;
+}
+
+/** Aktif chip'in gerçekten mevcut gruplarda olduğunu doğrular -- silinmiş/
+ * artık boş bir grup seçiliyse (ör. son "İşlenen" kaydı silindiyse)
+ * sessizce 'tumu'ya döner, hata FIRLATMAZ. */
+function _dofAktifGrupGetir(gruplar) {
+  return gruplar.find((g) => g.key === _dofAktifGrupAnahtari) || gruplar.find((g) => g.key === 'tumu') || gruplar[0];
+}
+
+function _dofGrupChipleriCiz(gruplar) {
+  const kart = document.getElementById('dof-grup-kart');
+  const el = document.getElementById('dof-grup-chipleri');
+  if (!kart || !el) return;
+  if (gruplar.length === 0) { kart.style.display = 'none'; return; }
+  kart.style.display = 'block';
+  el.innerHTML = gruplar.map((g) => {
+    const aktif = g.key === _dofAktifGrupAnahtari;
+    return `<div class="chip${aktif ? ' active' : ''}" data-grup-anahtari="${_escAttr(g.key)}"
+      onclick="_dofGrupSecTikla('${_escAttr(g.key)}')">${_esc(g.etiket)} (${g.kayitlar.length})</div>`;
+  }).join('');
+}
+
+/** Bir chip'e tıklanınca aktif grubu değiştirir ve yalnız kompakt listeyi
+ * (chip'lerin sayılarını DEĞİL, onlar zaten güncel) yeniden çizer --
+ * seçili DÖF yeni grupta yoksa seçim TEMİZLENİR (yanlış bağlamda açık
+ * kalmaz), detay/takip/replay/medya panelleri buna göre kapanır. */
+function _dofGrupSecTikla(anahtar) {
+  _dofAktifGrupAnahtari = anahtar;
+  const grup = _dofAktifGrupGetir(_dofGrupListesi);
+  document.querySelectorAll('#dof-grup-chipleri .chip').forEach((c) => {
+    c.classList.toggle('active', c.dataset.grupAnahtari === grup.key);
+  });
+  if (_dofListeSeciliId && !grup.kayitlar.some((k) => k.id === _dofListeSeciliId)) {
+    _dofListeSeciliId = null;
+  }
+  const listeEl = document.getElementById('dof-liste');
+  if (listeEl) listeEl.innerHTML = grup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
+  _dofDetayGoster(_dofListeSeciliId);
+  _dofReviewDurumYukle(_dofListeSeciliId);
+  _dofTakipFormYukle(_dofListeSeciliId);
+  _dofReplayBolumYukle(_dofListeSeciliId);
+  _dofKanitMedyaYukle(_dofListeSeciliId);
+}
+if (typeof window !== 'undefined') window._dofGrupSecTikla = _dofGrupSecTikla;
+
+/** Paket özet kartını (paketUuid + toplam/işlenen/bekleyen/foto/ses) ve
+ * "Paketi Sil" aksiyonunu çizer. Birden fazla paket varsa (aynı ekranda
+ * içe aktarılmış birden fazla farklı paketUuid) yalnız İLK karşılaşılan
+ * paket özetlenir -- çoklu-paket özet UI'ı bu görevin kapsamı dışında,
+ * "Paketi Sil" yine de o paketin dofUuid'lerini doğru hedefler. */
+async function _dofPaketOzetiCiz(kayitlar) {
+  const kart = document.getElementById('dof-paket-ozet-kart');
+  const metinEl = document.getElementById('dof-paket-ozet-metin');
+  if (!kart || !metinEl) return;
+  if (kayitlar.length === 0) { kart.style.display = 'none'; return; }
+  kart.style.display = 'block';
+
+  const paketUuid = kayitlar[0].paketUuid;
+  let islenen = 0;
+  let foto = 0;
+  let ses = 0;
+  for (const k of kayitlar) {
+    if (k.paketUuid !== paketUuid) continue;
+    if (await _dofKayitDegismisMi(k)) islenen++;
+    const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', k.dofUuid);
+    foto += medyalar.filter((m) => m.mediaType === 'photo').length;
+    ses += medyalar.filter((m) => m.mediaType === 'audio').length;
+  }
+  const paketKayitlari = kayitlar.filter((k) => k.paketUuid === paketUuid);
+  const bekleyen = paketKayitlari.length - islenen;
+  // Kaynak veride kurum/işyeri adı alanı YOK (yalnız paketUuid/dofId/
+  // bulguKodu vb.) -- başlık İCAT EDİLMEZ, kısa paketUuid ile gösterilir.
+  metinEl.innerHTML = `
+    <div>DÖF Paketi: <strong>${_esc(_dofKisaUuid(paketUuid))}</strong> / ${paketKayitlari.length} DÖF</div>
+    <div>İşlenen: ${islenen} · Bekleyen: ${bekleyen} · Foto: ${foto} · Ses: ${ses}</div>`;
+  kart.dataset.paketUuid = paketUuid;
+}
+
+/** "Paketi Sil / Kaldır" -- onay ister, onaylanırsa bu paketUuid'e ait
+ * TÜM kanonik dofler kayıtlarını + bağlı dofKanitlari medyalarını
+ * (servis `dofPaketiSil`) yerel IndexedDB'den siler. Desktop'a HİÇ
+ * dokunmaz. */
+function _dofPaketSilTikla() {
+  const kart = document.getElementById('dof-paket-ozet-kart');
+  const paketUuid = kart && kart.dataset.paketUuid;
+  if (!paketUuid) return;
+  showModal(
+    'Paketi Sil',
+    'Bu yerel DÖF paketini ve buna bağlı taslak/medya kayıtlarını kaldırmak istiyor musunuz?',
+    async () => {
+      await dofPaketiSil(paketUuid);
+      await _dofListesiYukle();
+    },
+    'Evet, Sil',
+    'btn-danger',
+  );
+}
+if (typeof window !== 'undefined') window._dofPaketSilTikla = _dofPaketSilTikla;
+
+/** Tek bir yerel DÖF kaydını (kanonik VEYA legacy/WIP/hatalı -- `id` her
+ * ikisinde de birincil anahtar) siler -- onay ister. Kanonik kayıtsa
+ * bağlı kanıt medyaları da `dofPaketiSil`/`dofYerelKaydiSil` servisi
+ * içinde birlikte temizlenir. */
+function _dofYerelKaydiSilTikla(dofId) {
+  showModal(
+    'Kaydı Sil',
+    'Bu yerel DÖF kaydını ve buna bağlı taslak/medya kayıtlarını kaldırmak istiyor musunuz?',
+    async () => {
+      await dofYerelKaydiSil(dofId);
+      await _dofListesiYukle();
+    },
+    'Evet, Sil',
+    'btn-danger',
+  );
+}
+if (typeof window !== 'undefined') window._dofYerelKaydiSilTikla = _dofYerelKaydiSilTikla;
 
 /** UUID'yi sahada okunabilir kısa hale getirir (ilk 8 hane + …). */
 function _dofKisaUuid(uuid) {
@@ -2307,6 +2510,52 @@ const _DOF_TAKIP_ETIKETLERI = {
 /** DÖF listesini IndexedDB'den (yeniden) yükler ve render eder. Sayfa
  * açılışında ve her import denemesi (başarı/duplicate/conflict/geçersiz)
  * sonrasında çağrılır -- her seferinde GERÇEK DB durumunu yansıtır. */
+let _dofDurumHaritasi = new Map();   // dofUuid -> {degisti, fotoSayisi, sesSayisi} -- kart rozetleri + gruplama için önceden hesaplanır
+
+async function _dofDurumHaritasiHesapla(kayitlar) {
+  const harita = new Map();
+  for (const k of kayitlar) {
+    const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', k.dofUuid);
+    harita.set(k.id, {
+      degisti: await _dofKayitDegismisMi(k),
+      fotoSayisi: medyalar.filter((m) => m.mediaType === 'photo').length,
+      sesSayisi: medyalar.filter((m) => m.mediaType === 'audio').length,
+    });
+  }
+  return harita;
+}
+
+/** 4R-PKG-3B: "Sorunlu Yerel Kayıtlar" bölümü -- kanonik OLMAYAN
+ * (legacy/WIP/hatalı/yarım) `dofler` kayıtlarını AYRI bir bölümde,
+ * yalnız Sil/Kaldır aksiyonuyla listeler. Bu kayıtlar ANA listeye
+ * (`.dof-liste-karti`) HİÇ girmez, tıklanamaz/açılamaz, takip/replay/
+ * medya UI'larına bağlanmaz (mevcut "legacy görünmez" servis
+ * sözleşmesi -- KANONIK_DOF_DEGIL -- DEĞİŞMEDİ). Yalnız yeni bir
+ * gözlemlenebilirlik + silme yolu eklendi: kullanıcı artık bu bozuk
+ * kayıtları GÖREBİLİR ve kaldırabilir (önceden hiçbir arayüzü yoktu). */
+async function _dofSorunluKayitlariYukle(tumKayitlar) {
+  const kart = document.getElementById('dof-sorunlu-kart');
+  const listeEl = document.getElementById('dof-sorunlu-liste');
+  if (!kart || !listeEl) return;
+  const sorunlular = tumKayitlar.filter((k) => !_dofKanonikMi(k));
+  if (sorunlular.length === 0) {
+    kart.style.display = 'none';
+    listeEl.innerHTML = '';
+    return;
+  }
+  kart.style.display = 'block';
+  listeEl.innerHTML = sorunlular.map((k) => `
+    <div class="dof-liste-satir" style="position:relative; margin-bottom:8px;">
+      <div style="padding:10px 40px 10px 12px; border-radius:8px; border:2px solid #f0d9b5; background:#fdf6ea;">
+        <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu, 'Eksik/bozuk kayıt'))}</div>
+        <div style="font-size:0.8rem; color:#8a6d3b;">Tamamlanmamış veya hatalı içe aktarma -- açılamaz, yalnız kaldırılabilir.</div>
+      </div>
+      <button type="button" class="dof-liste-sil-btn" title="Kaydı sil"
+        onclick="_dofYerelKaydiSilTikla('${_escAttr(k.id)}')"
+        style="position:absolute; top:8px; right:8px; background:none; border:none; color:#c0392b; font-size:1rem; cursor:pointer; padding:4px 8px;">✕</button>
+    </div>`).join('');
+}
+
 async function _dofListesiYukle() {
   const durumEl = document.getElementById('dof-liste-durum');
   const listeEl = document.getElementById('dof-liste');
@@ -2325,11 +2574,16 @@ async function _dofListesiYukle() {
   _dofListeKayitlari = tumKayitlar
     .filter((k) => _dofKanonikMi(k))
     .sort((a, b) => (a.dofId ?? 0) - (b.dofId ?? 0));
+  await _dofSorunluKayitlariYukle(tumKayitlar);
 
   if (_dofListeKayitlari.length === 0) {
     durumEl.textContent = 'Henüz içe aktarılmış DÖF yok.';
     listeEl.innerHTML = '';
     _dofListeSeciliId = null;
+    _dofGrupListesi = [];
+    _dofDurumHaritasi = new Map();
+    _dofGrupChipleriCiz([]);
+    await _dofPaketOzetiCiz([]);
     _dofDetayGoster(null);
     await _dofReviewDurumYukle(null);
     await _dofTakipFormYukle(null);
@@ -2342,7 +2596,12 @@ async function _dofListesiYukle() {
   if (_dofListeSeciliId && !_dofListeKayitlari.some((k) => k.id === _dofListeSeciliId)) {
     _dofListeSeciliId = null;   // seçili kayıt artık listede yok (ör. legacy'e dönüşmedi ama olası durum)
   }
-  listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
+  _dofDurumHaritasi = await _dofDurumHaritasiHesapla(_dofListeKayitlari);
+  _dofGrupListesi = await _dofGruplariHesapla(_dofListeKayitlari);
+  _dofGrupChipleriCiz(_dofGrupListesi);
+  await _dofPaketOzetiCiz(_dofListeKayitlari);
+  const aktifGrup = _dofAktifGrupGetir(_dofGrupListesi);
+  listeEl.innerHTML = aktifGrup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(_dofListeSeciliId);
   await _dofReviewDurumYukle(_dofListeSeciliId);
   await _dofTakipFormYukle(_dofListeSeciliId);
@@ -2350,27 +2609,50 @@ async function _dofListesiYukle() {
   await _dofKanitMedyaYukle(_dofListeSeciliId);
 }
 
+/** Kompakt satır: bulgu/risk kodu + konum + rozetler (taslak/foto/ses) +
+ * ayrı bir Sil düğmesi (`.dof-liste-karti`nin İÇİNDE değil, yan yana --
+ * `<button>` içine `<button>` gömülemez). `.dof-liste-karti` sınıfı/
+ * `data-dof-id` özniteliği/`onclick` çağrısı DEĞİŞMEDİ (mevcut m/s/t/u/v/
+ * ah/ai/ak/al testleri bu sözleşmeye dayanıyor) -- yalnız İÇERİK
+ * sadeleştirildi (uzun `tehlikeTanimi` metni kaldırıldı, yalnız `bulguKodu`
+ * testlerde aranıyor, doğrulandı) ve rozetler eklendi. */
 function _dofListeKartHtml(k) {
   const secili = k.id === _dofListeSeciliId;
-  const konum = _dofDeger([k.kat, k.oda].filter((v) => v).join(' / ') || null);
+  const konum = _dofDeger([k.kat, k.oda, k.alanTipi].filter((v) => v).join(' / ') || null);
   const risk = k.riskDuzeyi ? `${k.riskDuzeyi}${k.r !== null && k.r !== undefined ? ` (R=${k.r})` : ''}` : 'Bilgi yok';
+  const d = _dofDurumHaritasi.get(k.id) || { degisti: false, fotoSayisi: 0, sesSayisi: 0 };
+  const rozetler = [];
+  rozetler.push(d.degisti
+    ? '<span style="background:#e8f6ee; color:#1e8449; padding:1px 6px; border-radius:10px;">taslak var</span>'
+    : '<span style="background:#f3f3f3; color:#888; padding:1px 6px; border-radius:10px;">işlem yok</span>');
+  if (d.fotoSayisi > 0) rozetler.push(`<span style="background:#eaf2fd; color:var(--accent); padding:1px 6px; border-radius:10px;">foto ${d.fotoSayisi}</span>`);
+  if (d.sesSayisi > 0) rozetler.push(`<span style="background:#eaf2fd; color:var(--accent); padding:1px 6px; border-radius:10px;">ses ${d.sesSayisi}</span>`);
+  if (d.degisti) rozetler.push('<span style="background:#fdf0e3; color:#b9770e; padding:1px 6px; border-radius:10px;">replay\'e dahil</span>');
+
   return `
-    <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
-      onclick="_dofDetaySec('${_escAttr(k.id)}')"
-      style="display:block; width:100%; text-align:left; margin-bottom:8px; padding:12px; border-radius:8px; cursor:pointer;
-             border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};">
-      <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span></div>
-      <div style="font-size:0.85rem; color:#666; margin-top:4px;">${_esc(risk)} · ${_esc(konum)} · Tur: ${_esc(_dofDeger(k.aktifTurSirasi))}</div>
-      <div style="font-size:0.85rem; margin-top:4px;">${_esc(_dofDeger(k.tehlikeTanimi))}</div>
-    </button>`;
+    <div class="dof-liste-satir" style="position:relative; margin-bottom:8px;">
+      <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
+        onclick="_dofDetaySec('${_escAttr(k.id)}')"
+        style="display:block; width:100%; text-align:left; padding:10px 40px 10px 12px; border-radius:8px; cursor:pointer;
+               border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};">
+        <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span></div>
+        <div style="font-size:0.85rem; color:#666; margin-top:4px;">${_esc(risk)} · ${_esc(konum)}</div>
+        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; font-size:0.72rem;">${rozetler.join('')}</div>
+      </button>
+      <button type="button" class="dof-liste-sil-btn" title="Kaydı sil"
+        onclick="event.stopPropagation(); _dofYerelKaydiSilTikla('${_escAttr(k.id)}')"
+        style="position:absolute; top:8px; right:8px; background:none; border:none; color:#c0392b; font-size:1rem; cursor:pointer; padding:4px 8px;">✕</button>
+    </div>`;
 }
 
 /** Liste kartına tıklanınca/klavyeyle etkinleştirilince çağrılır --
- * seçimi günceller, listeyi (seçili görünüm için) ve detayı yeniden çizer. */
+ * seçimi günceller, AKTİF GRUBUN listesini (tam listeyi DEĞİL --
+ * filtrelenmiş görünüm korunur) ve detayı yeniden çizer. */
 function _dofDetaySec(dofId) {
   _dofListeSeciliId = dofId;
+  const aktifGrup = _dofAktifGrupGetir(_dofGrupListesi);
   const listeEl = document.getElementById('dof-liste');
-  if (listeEl) listeEl.innerHTML = _dofListeKayitlari.map((k) => _dofListeKartHtml(k)).join('');
+  if (listeEl) listeEl.innerHTML = aktifGrup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(dofId);
   _dofReviewDurumYukle(dofId);
   _dofTakipFormYukle(dofId);
@@ -2406,6 +2688,8 @@ function _dofDetayGoster(dofId) {
 
   const konum = _dofDeger([k.kat, k.oda, k.alanTipi].filter((v) => v).join(' / ') || null);
   el.innerHTML = `
+    <div><strong>Bulgu Kodu:</strong> ${_esc(_dofDeger(k.bulguKodu))}</div>
+    <div><strong>Risk Kodu:</strong> ${_esc(_dofDeger(k.riskKodu))}</div>
     <div><strong>DÖF UUID:</strong> ${_esc(_dofKisaUuid(k.dofUuid))}</div>
     <div><strong>Export UUID:</strong> ${_esc(_dofKisaUuid(k.exportUuid))}</div>
     <div><strong>Paket UUID:</strong> ${_esc(_dofKisaUuid(k.paketUuid))}</div>
@@ -2773,6 +3057,29 @@ async function _dofReplayBolumYukle(dofUuid) {
       medyaOzetEl.textContent = (fotoSayisi > 0 || sesSayisi > 0)
         ? `Bu pakete ${fotoSayisi} fotoğraf, ${sesSayisi} ses notu dahil edilecek.` : '';
     }
+
+    // PWA 4R-PKG-3A: sticky ZIP alanının üst kısmında PAKET GENELİ özet --
+    // yalnız bilgi amaçlı, hiçbir butonu etkilemez. "Değişen DÖF" =
+    // `dofPaketiDegismisDofUuidleri` ile ZIP'e GERÇEKTEN dahil edilecek
+    // sayı (aynı ölçüt, tekrar yazılmadı).
+    const paketOzetEl = document.getElementById('dof-replay-paket-ozet');
+    if (paketOzetEl) {
+      const kayit = await dbGetir('dofler', dofUuid);
+      const paketUuid = kayit && kayit.paketUuid;
+      if (paketUuid) {
+        const degisenler = await dofPaketiDegismisDofUuidleri(paketUuid);
+        let paketFoto = 0;
+        let paketSes = 0;
+        for (const u of degisenler) {
+          const m = await dofKanitMedyalariGetir(u);
+          paketFoto += m.filter((x) => x.mediaType === 'photo').length;
+          paketSes += m.filter((x) => x.mediaType === 'audio').length;
+        }
+        paketOzetEl.textContent = `Değişen DÖF: ${degisenler.length} · Foto: ${paketFoto} · Ses: ${paketSes}`;
+      } else {
+        paketOzetEl.textContent = '';
+      }
+    }
   } catch (e) {
     kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
   }
@@ -2814,26 +3121,37 @@ async function _dofReplayHazirlikTikla() {
  * DÖF yoksa (paket genelinde) kullanıcıya açık mesaj gösterilir, ZIP
  * üretilmez. `dofReplayZipOlustur`'un kendi iç kuralları (hazırlık eski/
  * yok, karışık paket, yasak alan üretmeme) DEĞİŞMEDEN korunur. */
+/** ZIP İndir + Paylaş/Gönder'in ORTAK üretim adımı -- aynı import
+ * paketindeki tüm değişmiş DÖF'leri toplar, hazırlıklarını günceller,
+ * `dofReplayZipOlustur`'u (DEĞİŞTİRİLMEDEN) çağırır. Hiç değişmiş DÖF
+ * yoksa `null` döner (hata fırlatmaz) -- çağıran uygun mesajı gösterir. */
+async function _dofReplayZipHazirlaVeUret() {
+  const secliKayit = await dbGetir('dofler', _dofReplaySecliDofUuid);
+  const dofUuidListesi = await dofPaketiDegismisDofUuidleri(secliKayit.paketUuid);
+  if (dofUuidListesi.length === 0) return null;
+  for (const dofUuid of dofUuidListesi) {
+    await dofReplayHazirlikHazirla(dofUuid);   // otomatik hazırlık -- idempotent, ayrı adım zorunlu değil
+  }
+  return dofReplayZipOlustur(dofUuidListesi);
+}
+
 async function _dofReplayZipIndirTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
   _dofReplayIslemDevamEdiyor = true;
   const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
   const zipBtn = document.getElementById('dof-replay-zip-btn');
+  const paylasBtn = document.getElementById('dof-replay-paylas-btn');
   const durum = document.getElementById('dof-replay-durum');
   hazirlikBtn.disabled = true;
   zipBtn.disabled = true;
+  if (paylasBtn) paylasBtn.disabled = true;
   durum.textContent = 'ZIP hazırlanıyor...';
   try {
-    const secliKayit = await dbGetir('dofler', _dofReplaySecliDofUuid);
-    const dofUuidListesi = await dofPaketiDegismisDofUuidleri(secliKayit.paketUuid);
-    if (dofUuidListesi.length === 0) {
+    const sonuc = await _dofReplayZipHazirlaVeUret();
+    if (!sonuc) {
       durum.textContent = 'Önce en az bir DÖF için takip bilgisi veya kanıt medyası ekleyin.';
       return;
     }
-    for (const dofUuid of dofUuidListesi) {
-      await dofReplayHazirlikHazirla(dofUuid);   // otomatik hazırlık -- idempotent, ayrı adım zorunlu değil
-    }
-    const sonuc = await dofReplayZipOlustur(dofUuidListesi);
     _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
     durum.textContent = 'ZIP indirildi.';
   } catch (e) {
@@ -2843,12 +3161,72 @@ async function _dofReplayZipIndirTikla() {
     _dofReplayIslemDevamEdiyor = false;
     hazirlikBtn.disabled = false;
     zipBtn.disabled = false;
+    if (paylasBtn) paylasBtn.disabled = false;
+  }
+}
+
+/** "Paylaş / Gönder" (4R-PKG-3B) -- `_dofReplayZipHazirlaVeUret` ile
+ * AYNI ZIP'i üretir (içerik BİREBİR aynı -- `dof_donus.json`/`fotolar/`/
+ * `sesler/` kökte kalır, hiçbir şey değiştirilmez). Yalnız TESLİM yöntemi
+ * farklı: `navigator.canShare({files})` destekliyorsa Web Share API ile
+ * Android'in kendi paylaşım ekranına (WhatsApp/Drive/e-posta/Telegram
+ * vb.) verilir. Kullanıcı paylaşımı BİLİNÇLİ iptal ederse (`AbortError`)
+ * sessizce indirmeye düşülmez -- yalnız gerçek destek YOKSA veya gerçek
+ * bir paylaşım HATASI oluşursa (iptal değil) normal indirmeye
+ * (`_dofBlobIndir`) düşülür. */
+async function _dofReplayPaylasTikla() {
+  if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  _dofReplayIslemDevamEdiyor = true;
+  const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
+  const zipBtn = document.getElementById('dof-replay-zip-btn');
+  const paylasBtn = document.getElementById('dof-replay-paylas-btn');
+  const durum = document.getElementById('dof-replay-durum');
+  hazirlikBtn.disabled = true;
+  zipBtn.disabled = true;
+  if (paylasBtn) paylasBtn.disabled = true;
+  durum.textContent = 'ZIP hazırlanıyor...';
+  try {
+    const sonuc = await _dofReplayZipHazirlaVeUret();
+    if (!sonuc) {
+      durum.textContent = 'Önce en az bir DÖF için takip bilgisi veya kanıt medyası ekleyin.';
+      return;
+    }
+
+    const dosya = new File([sonuc.zipBlob], sonuc.dosyaAdi, { type: 'application/zip' });
+    const paylasimDestekli = typeof navigator !== 'undefined'
+      && typeof navigator.canShare === 'function' && navigator.canShare({ files: [dosya] })
+      && typeof navigator.share === 'function';
+
+    if (paylasimDestekli) {
+      try {
+        await navigator.share({ files: [dosya], title: sonuc.dosyaAdi });
+        durum.textContent = 'Paylaşıma gönderildi.';
+        return;
+      } catch (paylasHatasi) {
+        if (paylasHatasi && paylasHatasi.name === 'AbortError') {
+          durum.textContent = 'Paylaşım iptal edildi.';
+          return;
+        }
+        // Gerçek paylaşım hatası (iptal DEĞİL) -- indirmeye düş.
+      }
+    }
+    _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
+    durum.textContent = `Paylaşım desteklenmiyor, ZIP indirildi: ${sonuc.dosyaAdi}`;
+  } catch (e) {
+    const kod = e && e.kod;
+    durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+  } finally {
+    _dofReplayIslemDevamEdiyor = false;
+    hazirlikBtn.disabled = false;
+    zipBtn.disabled = false;
+    if (paylasBtn) paylasBtn.disabled = false;
   }
 }
 
 if (typeof window !== 'undefined') {
   window._dofReplayHazirlikTikla = _dofReplayHazirlikTikla;
   window._dofReplayZipIndirTikla = _dofReplayZipIndirTikla;
+  window._dofReplayPaylasTikla = _dofReplayPaylasTikla;
 }
 
 // ─── DÖF KANIT MEDYALARI UI (PWA Commit 4P) ─────────────────────
@@ -3359,7 +3737,15 @@ function _birimFormKonteynerSec(el) {
     daireChips.style.display = 'none';
     daireChips.innerHTML = '';
     adWrap.style.display = 'block';
-    document.getElementById('form-birim-ad').value = profilAdi;
+    // 4R-PKG-3B (Kütüphane bulgusu): profil adı artık DEĞER olarak
+    // OTOMATİK yazılmıyor -- yalnız PLACEHOLDER/öneri olarak gösteriliyor.
+    // Kullanıcı alanı BOŞ bırakıp "Birimi Oluştur"a basarsa mevcut
+    // doğrulama ("Birim adı gerekli.") zaten reddeder -- profil adının
+    // SESSİZCE gerçek birim adı olması artık mümkün değil, kullanıcı
+    // görüp AÇIKÇA yazmalı/kabul etmeli.
+    const adInput = document.getElementById('form-birim-ad');
+    adInput.value = '';
+    adInput.placeholder = `Öneri: ${profilAdi} (kabul etmek için aynen yazın, farklıysa kendi adınızı girin)`;
   } else {
     adWrap.style.display = 'none';
     daireChips.style.display = 'flex';
