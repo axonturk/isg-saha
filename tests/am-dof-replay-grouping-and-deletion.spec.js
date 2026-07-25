@@ -94,16 +94,16 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
 
   test('3. Tümü/İşlenen/Bekleyen + dinamik alan/risk chipleri doğru sayılarla görünür', async ({ page }) => {
     await gercekPaketiSec(page);
-    await expect(page.locator('.chip', { hasText: 'Tümü (59)' })).toBeVisible();
-    await expect(page.locator('.chip', { hasText: 'İşlenen (0)' })).toBeVisible();
-    await expect(page.locator('.chip', { hasText: 'Bekleyen (59)' })).toBeVisible();
+    await expect(page.locator('.chip', { hasText: 'Tümü 59' })).toBeVisible();
+    await expect(page.locator('.chip', { hasText: 'İşlenen 0' })).toBeVisible();
+    await expect(page.locator('.chip', { hasText: 'Bekleyen 59' })).toBeVisible();
     // Gerçek paketteki bilinen bir alanTipi ("Asansör makine dairesi") en az bir chip üretmeli.
     await expect(page.locator('#dof-grup-chipleri')).toContainText('Asansör');
 
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'İşlenen testi' });
-    await expect(page.locator('.chip', { hasText: 'İşlenen (1)' })).toBeVisible();
-    await expect(page.locator('.chip', { hasText: 'Bekleyen (58)' })).toBeVisible();
+    await expect(page.locator('.chip', { hasText: 'İşlenen 1' })).toBeVisible();
+    await expect(page.locator('.chip', { hasText: 'Bekleyen 58' })).toBeVisible();
   });
 
   test('4. Chip seçimi listeyi filtreler -- yalnız o gruba ait DÖF\'ler görünür, tüm kartlar birden görünmez', async ({ page }) => {
@@ -150,16 +150,20 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     await expect(page.locator('#dof-replay-kart')).toHaveClass(/dof-replay-sticky/);
   });
 
-  test('9. Her DÖF kartında Sil düğmesi var -- tek kayıt silinir, liste/sayaç güncellenir, tekrar import edilebilir', async ({ page }) => {
+  test('9. Canonical DÖF satırında tekil Sil (kırmızı X) YOK -- yalnız Paketi Sil/Kaldır ile kaldırılabilir (4R-PKG-3C)', async ({ page }) => {
+    // Gerçek Android testinde kullanıcı satırdaki kırmızı X'i "DÖF'ü sil"
+    // gibi tehlikeli algıladı -- bu yüzden canonical satırdan KALDIRILDI.
+    // Alttaki servis (`dofYerelKaydiSil`) DEĞİŞMEDİ, yalnız bu UI kaldırıldı.
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dosyaSec(page, JSON.stringify(paket));
     const dofUuid = paket.tehlikeler[0].dofUuid;
 
-    await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"] ~ .dof-liste-sil-btn, .dof-liste-sil-btn`)).toHaveCount(1);
-    page.once('dialog', () => {});   // showModal kendi DOM modalı -- native dialog kullanmaz, güvenlik için no-op bırakıldı
-    await page.locator('.dof-liste-sil-btn').click();
-    await page.locator('button', { hasText: 'Evet, Sil' }).click();
+    await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`)).toBeVisible();
+    await expect(page.locator('.dof-liste-sil-btn')).toHaveCount(0);   // canonical satırda YOK
 
+    // Paketi Sil / Kaldır hâlâ çalışıyor (tek yol artık bu).
+    await page.locator('button', { hasText: 'Paketi Sil / Kaldır' }).click();
+    await page.locator('button', { hasText: 'Evet, Sil' }).click();
     await expect(page.locator('.dof-liste-karti')).toHaveCount(0);
     await expect(page.locator('#dof-liste-durum')).toHaveText('Henüz içe aktarılmış DÖF yok.');
 

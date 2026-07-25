@@ -2376,6 +2376,18 @@ function _dofAktifGrupGetir(gruplar) {
   return gruplar.find((g) => g.key === _dofAktifGrupAnahtari) || gruplar.find((g) => g.key === 'tumu') || gruplar[0];
 }
 
+/** Uzun grup etiketini (ör. uzun alanTipi metni) mobilde tek satırda
+ * kalacak şekilde kısaltır -- yalnız GÖRÜNTÜLEME, gruplama anahtarı
+ * (`g.key`) ve filtreleme mantığı DEĞİŞMEZ. */
+function _dofGrupEtiketKisalt(etiket, maxUzunluk = 14) {
+  if (etiket.length <= maxUzunluk) return etiket;
+  return `${etiket.slice(0, maxUzunluk - 1)}…`;
+}
+
+/** 4R-PKG-3C: kompakt pill/chip tasarımı -- büyük blok görünümü YERİNE
+ * küçük, tek satır yatay kaydırılabilir pill'ler ("Tümü 7" gibi, parantez
+ * YOK). Ayrı `.dof-grup-chip` sınıfı kullanılır -- genel `.chip` sınıfı
+ * (normal saha kat/oda seçiminde kullanılıyor) DEĞİŞTİRİLMEDİ. */
 function _dofGrupChipleriCiz(gruplar) {
   const kart = document.getElementById('dof-grup-kart');
   const el = document.getElementById('dof-grup-chipleri');
@@ -2384,8 +2396,9 @@ function _dofGrupChipleriCiz(gruplar) {
   kart.style.display = 'block';
   el.innerHTML = gruplar.map((g) => {
     const aktif = g.key === _dofAktifGrupAnahtari;
-    return `<div class="chip${aktif ? ' active' : ''}" data-grup-anahtari="${_escAttr(g.key)}"
-      onclick="_dofGrupSecTikla('${_escAttr(g.key)}')">${_esc(g.etiket)} (${g.kayitlar.length})</div>`;
+    return `<div class="chip dof-grup-chip${aktif ? ' active' : ''}" data-grup-anahtari="${_escAttr(g.key)}"
+      title="${_escAttr(g.etiket)}"
+      onclick="_dofGrupSecTikla('${_escAttr(g.key)}')">${_esc(_dofGrupEtiketKisalt(g.etiket))} ${g.kayitlar.length}</div>`;
   }).join('');
 }
 
@@ -2609,13 +2622,17 @@ async function _dofListesiYukle() {
   await _dofKanitMedyaYukle(_dofListeSeciliId);
 }
 
-/** Kompakt satır: bulgu/risk kodu + konum + rozetler (taslak/foto/ses) +
- * ayrı bir Sil düğmesi (`.dof-liste-karti`nin İÇİNDE değil, yan yana --
- * `<button>` içine `<button>` gömülemez). `.dof-liste-karti` sınıfı/
- * `data-dof-id` özniteliği/`onclick` çağrısı DEĞİŞMEDİ (mevcut m/s/t/u/v/
- * ah/ai/ak/al testleri bu sözleşmeye dayanıyor) -- yalnız İÇERİK
- * sadeleştirildi (uzun `tehlikeTanimi` metni kaldırıldı, yalnız `bulguKodu`
- * testlerde aranıyor, doğrulandı) ve rozetler eklendi. */
+/** Kompakt satır: bulgu/risk kodu + konum + rozetler (taslak/foto/ses).
+ * `.dof-liste-karti` sınıfı/`data-dof-id` özniteliği/`onclick` çağrısı
+ * DEĞİŞMEDİ (mevcut m/s/t/u/v/ah/ai/ak/al testleri bu sözleşmeye
+ * dayanıyor). 4R-PKG-3C: canonical satırdaki tekil Sil (✕) düğmesi
+ * KALDIRILDI -- gerçek Android testinde kullanıcı bunu "DÖF'ü/paketten
+ * kaydı sil" gibi tehlikeli algıladı. Tekil canonical silme ayrı bir
+ * ürün kararı olmadan sunulmayacak; paket bazlı silme hâlâ paket özeti
+ * kartındaki "Paketi Sil / Kaldır" ile, sorunlu/tamamlanmamış (kanonik
+ * OLMAYAN) kayıtlar hâlâ "Tamamlanmamış Kayıtlar" bölümünde Sil ile
+ * yapılabiliyor (`dofYerelKaydiSil`/`dofPaketiSil` servisleri DEĞİŞMEDİ,
+ * yalnız bu satırdan çağıran UI kaldırıldı). */
 function _dofListeKartHtml(k) {
   const secili = k.id === _dofListeSeciliId;
   const konum = _dofDeger([k.kat, k.oda, k.alanTipi].filter((v) => v).join(' / ') || null);
@@ -2630,18 +2647,15 @@ function _dofListeKartHtml(k) {
   if (d.degisti) rozetler.push('<span style="background:#fdf0e3; color:#b9770e; padding:1px 6px; border-radius:10px;">replay\'e dahil</span>');
 
   return `
-    <div class="dof-liste-satir" style="position:relative; margin-bottom:8px;">
+    <div class="dof-liste-satir" style="margin-bottom:8px;">
       <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
         onclick="_dofDetaySec('${_escAttr(k.id)}')"
-        style="display:block; width:100%; text-align:left; padding:10px 40px 10px 12px; border-radius:8px; cursor:pointer;
+        style="display:block; width:100%; text-align:left; padding:10px 12px; border-radius:8px; cursor:pointer;
                border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};">
         <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span></div>
         <div style="font-size:0.85rem; color:#666; margin-top:4px;">${_esc(risk)} · ${_esc(konum)}</div>
         <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; font-size:0.72rem;">${rozetler.join('')}</div>
       </button>
-      <button type="button" class="dof-liste-sil-btn" title="Kaydı sil"
-        onclick="event.stopPropagation(); _dofYerelKaydiSilTikla('${_escAttr(k.id)}')"
-        style="position:absolute; top:8px; right:8px; background:none; border:none; color:#c0392b; font-size:1rem; cursor:pointer; padding:4px 8px;">✕</button>
     </div>`;
 }
 
@@ -2660,6 +2674,29 @@ function _dofDetaySec(dofId) {
   _dofKanitMedyaYukle(dofId);
 }
 
+/** 4R-PKG-3C: aktif DÖF çalışma alanının üstünde -- normal saha
+ * denetimindeki "aktif konum" başlığına benzer -- kompakt, salt-okunur
+ * bir "Aktif DÖF" özeti gösterir. Kullanıcı her yerde hangi DÖF üzerinde
+ * çalıştığını görebilsin diye takip/kanıt bölümlerinin de üstünde durur.
+ * Yalnız görüntüleme -- düzenlenebilir alan YOK. */
+function _dofAktifBaslikGoster(k) {
+  const kart = document.getElementById('dof-aktif-baslik-kart');
+  const el = document.getElementById('dof-aktif-baslik-metin');
+  if (!kart || !el) return;
+  if (!k) {
+    kart.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  kart.style.display = 'block';
+  const konum = _dofDeger([k.kat, k.oda, k.alanTipi].filter((v) => v).join(' / ') || null, '');
+  const risk = k.riskDuzeyi ? `${k.riskDuzeyi}${k.r !== null && k.r !== undefined ? ` · R=${k.r}` : ''}` : '';
+  el.innerHTML = `
+    <div style="font-size:0.75rem; color:#666; text-transform:uppercase; letter-spacing:0.03em;">Aktif DÖF</div>
+    <div style="font-weight:700; font-size:1.05rem;">${_esc(_dofDeger(k.bulguKodu))}${k.riskKodu ? ` · ${_esc(k.riskKodu)}` : ''}</div>
+    <div style="font-size:0.85rem; color:#666;">${[risk, konum].filter(Boolean).map(_esc).join(' · ')}</div>`;
+}
+
 function _dofDetayGoster(dofId) {
   const kart = document.getElementById('dof-detay-kart');
   const el = document.getElementById('dof-detay');
@@ -2667,15 +2704,18 @@ function _dofDetayGoster(dofId) {
   if (!dofId) {
     kart.style.display = 'none';
     el.innerHTML = '';
+    _dofAktifBaslikGoster(null);
     return;
   }
   const k = _dofListeKayitlari.find((x) => x.id === dofId);
   if (!k) {
     kart.style.display = 'block';
     el.innerHTML = '<p>DÖF detayı yüklenemedi.</p>';
+    _dofAktifBaslikGoster(null);
     return;
   }
   kart.style.display = 'block';
+  _dofAktifBaslikGoster(k);
 
   let taslakHtml = '';
   if (k.takipTaslagi && typeof k.takipTaslagi === 'object') {
@@ -3019,12 +3059,22 @@ function _dofBlobIndir(blob, dosyaAdi) {
 /** Seçili DÖF değiştiğinde (veya liste yenilendiğinde) çağrılır -- yalnız
  * `dofReplayHazirlikGetir` (salt-okunur) ile mevcut hazırlık durumunu
  * gösterir. Kanonik olmayan/bulunamayan DÖF için bölüm AÇILMAZ. */
+/** Sabit/fixed alt bar görünürken içerik alanına (`#screen-setup`) yeterli
+ * bottom padding verir -- bar hiçbir zaman form alanlarını/"Tüm Veriyi
+ * Sıfırla" butonunu ÖRTMEZ. Bar gizliyken padding de kaldırılır (gereksiz
+ * boşluk kalmaz). */
+function _dofReplayBarPaddingAyarla(gorunur) {
+  const ekran = document.getElementById('screen-setup');
+  if (ekran) ekran.classList.toggle('dof-replay-bar-aktif', gorunur);
+}
+
 async function _dofReplayBolumYukle(dofUuid) {
   const kart = document.getElementById('dof-replay-kart');
   if (!kart) return;
   _dofReplaySecliDofUuid = dofUuid;
   if (!dofUuid) {
     kart.style.display = 'none';
+    _dofReplayBarPaddingAyarla(false);
     return;
   }
   const durum = document.getElementById('dof-replay-durum');
@@ -3033,6 +3083,7 @@ async function _dofReplayBolumYukle(dofUuid) {
   try {
     const sonuc = await dofReplayHazirlikGetir(dofUuid);
     kart.style.display = 'block';
+    _dofReplayBarPaddingAyarla(true);
     durum.textContent = sonuc.replayHazirlik ? 'Hazırlık hazır' : 'Hazırlık yok';
 
     // PWA Commit 4O: pasif, ENGELLEMEYEN not -- yalnız takip alanı hiç
@@ -3082,6 +3133,7 @@ async function _dofReplayBolumYukle(dofUuid) {
     }
   } catch (e) {
     kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
+    _dofReplayBarPaddingAyarla(false);
   }
 }
 
@@ -3184,7 +3236,7 @@ async function _dofReplayPaylasTikla() {
   hazirlikBtn.disabled = true;
   zipBtn.disabled = true;
   if (paylasBtn) paylasBtn.disabled = true;
-  durum.textContent = 'ZIP hazırlanıyor...';
+  durum.textContent = 'Paylaşım hazırlanıyor...';
   try {
     const sonuc = await _dofReplayZipHazirlaVeUret();
     if (!sonuc) {
@@ -3207,11 +3259,17 @@ async function _dofReplayPaylasTikla() {
           durum.textContent = 'Paylaşım iptal edildi.';
           return;
         }
-        // Gerçek paylaşım hatası (iptal DEĞİL) -- indirmeye düş.
+        // Gerçek paylaşım hatası (iptal DEĞİL) -- kullanıcıya bildir, sonra indirmeye düş.
+        durum.textContent = 'Paylaşım başarısız oldu. ZIP indiriliyor.';
+        _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
+        durum.textContent = `ZIP indirildi: ${sonuc.dosyaAdi}`;
+        return;
       }
     }
+    // Gerçek destek YOK -- sessiz fallback DEĞİL, önce açık mesaj gösterilir.
+    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.';
     _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
-    durum.textContent = `Paylaşım desteklenmiyor, ZIP indirildi: ${sonuc.dosyaAdi}`;
+    durum.textContent = `ZIP indirildi: ${sonuc.dosyaAdi}`;
   } catch (e) {
     const kod = e && e.kod;
     durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';

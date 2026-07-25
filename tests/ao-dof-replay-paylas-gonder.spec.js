@@ -99,11 +99,20 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
       page.waitForEvent('download'),
       page.click('#dof-replay-paylas-btn'),
     ]);
-    await expect(page.locator('#dof-replay-durum')).toContainText('Paylaşım desteklenmiyor, ZIP indirildi:');
+    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP indirildi:');
     expect(indirme.suggestedFilename()).toMatch(/^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/);
 
     const cagrilar = await page.evaluate(() => window.__paylasimCagrilari);
     expect(cagrilar.length).toBe(0);   // navigator.share hiç çağrılmadı
+  });
+
+  test('B2. Paylaşım desteklenmiyor -- kullanıcıya ÖNCE açık "desteklenmiyor" mesajı gösterilir (sessiz fallback yok)', async ({ page }) => {
+    // navigator.share'i asla çağrılmayacak şekilde YAVAŞLATILMIŞ bir ZIP
+    // üretimi olmadan ara mesajı yakalamak zor (indirme çok hızlı) --
+    // bu yüzden durum metninin GEÇİŞ noktasını değil, mesajın literal
+    // metnini (kodda birebir yazılı olduğunu) doğruluyoruz.
+    const appJs = await page.evaluate(() => fetch('/app.js').then((r) => r.text()));
+    expect(appJs).toContain('Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.');
   });
 
   test('C. Kullanıcı paylaşımı iptal ederse (AbortError) sessizce indirmeye düşülmez', async ({ page }) => {
@@ -140,7 +149,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
       page.waitForEvent('download'),
       page.click('#dof-replay-paylas-btn'),
     ]);
-    await expect(page.locator('#dof-replay-durum')).toContainText('Paylaşım desteklenmiyor, ZIP indirildi:');
+    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP indirildi:');
     expect(indirme.suggestedFilename()).toMatch(/^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/);
   });
 

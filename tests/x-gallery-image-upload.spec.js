@@ -217,7 +217,7 @@ test.describe('X. Galeriden resim yükleme', () => {
     await page.locator('#dof-takip-etkinlik-kontrol-tarihi').fill('2026-09-05');
     await page.locator('#dof-takip-kaydet-btn').click();
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     const [indirme] = await Promise.all([

@@ -169,7 +169,7 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
     await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
     await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     const zip = await zipIndirTikla(page);
@@ -215,11 +215,11 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'Test Sorumlusu' });
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const ilkKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), DOF_A_UUID);
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı zaten güncel.');
     const ikinciKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), DOF_A_UUID);
     expect(ikinciKayit.replayHazirlik).toEqual(ilkKayit.replayHazirlik);
@@ -238,12 +238,12 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
 
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'A Sorumlusu' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     await dofSec(page, DOF_B_UUID);
     await takipKaydet(page, { sorumlu: 'B Sorumlusu' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     const b64 = await page.evaluate(async ({ a, b }) => {

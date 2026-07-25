@@ -63,13 +63,14 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await expect(page.locator('#dof-replay-kart')).toBeHidden();
   });
 
-  test('B. DÖF seçilince replay bölümü görünür -- butonlar görünür', async ({ page }) => {
+  test('B. DÖF seçilince replay bölümü görünür -- ZIP/Paylaş görünür, "Hazırlık Oluştur" TAMAMEN gizli (4R-PKG-3C Closure)', async ({ page }) => {
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dosyaSec(page, JSON.stringify(paket));
     await dofSecVeFormBekle(page);
 
-    await expect(page.locator('#dof-replay-hazirlik-btn')).toBeVisible();
+    await expect(page.locator('#dof-replay-hazirlik-btn')).toBeHidden();
     await expect(page.locator('#dof-replay-zip-btn')).toBeVisible();
+    await expect(page.locator('#dof-replay-paylas-btn')).toBeVisible();
     await expect(page.locator('#dof-replay-durum')).toHaveText('Hazırlık yok');
   });
 
@@ -79,7 +80,7 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Takip bilgisi yok. Önce takip bilgisi girin.');
 
     const kayit = await dofKaydiGetir(page, dofUuid);
@@ -93,7 +94,7 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await dofSecVeFormBekle(page);
 
     await takipKaydet(page, { sorumlu: 'Ahmet Yilmaz', gerceklesen_faaliyet: 'Korkuluk sabitlendi' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     const kayit = await dofKaydiGetir(page, dofUuid);
@@ -108,11 +109,11 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await dofSecVeFormBekle(page);
 
     await takipKaydet(page, { sorumlu: 'Ahmet' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const ilkKayit = await dofKaydiGetir(page, dofUuid);
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı zaten güncel.');
     const ikinciKayit = await dofKaydiGetir(page, dofUuid);
     expect(ikinciKayit.replayHazirlik).toEqual(ilkKayit.replayHazirlik);
@@ -151,7 +152,7 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
     await takipKaydet(page, { sorumlu: 'Ahmet Yilmaz', gerceklesen_faaliyet: 'Korkuluk sabitlendi' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const kayit = await dofKaydiGetir(page, dofUuid);
 
@@ -182,7 +183,7 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
     await takipKaydet(page, { sorumlu: 'Ahmet' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const eskiKayit = await dofKaydiGetir(page, dofUuid);
 
@@ -206,12 +207,12 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
     await takipKaydet(page, { sorumlu: 'Ahmet' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const eskiKayit = await dofKaydiGetir(page, dofUuid);
 
     await takipKaydet(page, { sorumlu: 'Mehmet' });
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
     const yeniKayit = await dofKaydiGetir(page, dofUuid);
     expect(yeniKayit.replayHazirlik.submissionUuid).not.toBe(eskiKayit.replayHazirlik.submissionUuid);
@@ -234,7 +235,7 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await page.locator('#dof-takip-kaydet-btn').click();
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
 
-    await page.locator('#dof-replay-hazirlik-btn').click();
+    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
     const zipYolu = await zipIndirTikla(page);
