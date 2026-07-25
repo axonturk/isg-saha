@@ -226,21 +226,39 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
   });
 
   test('E. paketUuid anomali kontrolü -- iki FARKLI DÖF\'ün replay ZIP\'i aynı paketUuid, farklı dofUuid/exportUuid/submissionUuid taşır (import-batch kimliği, bug DEĞİL)', async ({ page }) => {
+    // NOT (4R-PKG-2): Bu test artık `dofReplayZipOlustur`'u SERVİS
+    // seviyesinde, AÇIKÇA tek elemanlı listeyle çağırıyor -- UI'daki
+    // "ZIP İndir" butonu artık kasıtlı olarak aynı paketteki TÜM değişmiş
+    // DÖF'leri topluyor (bkz. tests/al-dof-replay-multi-export-timestamp.spec.js),
+    // bu yüzden buton tıklanarak İKİ AYRI tek-DÖF'lük ZIP izole edilemez.
+    // Bu testin orijinal amacı (paketUuid paylaşımı + per-DÖF kimlik
+    // benzersizliği, servis seviyesinde) `dofReplayZipOlustur([uuid])`'u
+    // doğrudan çağırarak KORUNUYOR.
     await dosyaSec(page);
 
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'A Sorumlusu' });
     await page.locator('#dof-replay-hazirlik-btn').click();
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
-    const zipA = await zipIndirTikla(page);
-    const belgeA = JSON.parse(zipA.readAsText('dof_donus.json', 'utf8'));
 
     await dofSec(page, DOF_B_UUID);
     await takipKaydet(page, { sorumlu: 'B Sorumlusu' });
     await page.locator('#dof-replay-hazirlik-btn').click();
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
-    const zipB = await zipIndirTikla(page);
-    const belgeB = JSON.parse(zipB.readAsText('dof_donus.json', 'utf8'));
+
+    const b64 = await page.evaluate(async ({ a, b }) => {
+      async function zipB64(uuid) {
+        const r = await window._dofImport.dofReplayZipOlustur([uuid]);
+        const buf = new Uint8Array(await r.zipBlob.arrayBuffer());
+        let ikili = '';
+        const PARCA = 0x8000;
+        for (let i = 0; i < buf.length; i += PARCA) ikili += String.fromCharCode.apply(null, buf.subarray(i, i + PARCA));
+        return btoa(ikili);
+      }
+      return { a: await zipB64(a), b: await zipB64(b) };
+    }, { a: DOF_A_UUID, b: DOF_B_UUID });
+    const belgeA = JSON.parse(new AdmZip(Buffer.from(b64.a, 'base64')).readAsText('dof_donus.json', 'utf8'));
+    const belgeB = JSON.parse(new AdmZip(Buffer.from(b64.b, 'base64')).readAsText('dof_donus.json', 'utf8'));
 
     // paketUuid = içe aktarılan PAKETİN kimliği (app.js _dofYerelKayitOlustur
     // -> her kayda import anında yazılır, replay export'ta ortakPaketUuid

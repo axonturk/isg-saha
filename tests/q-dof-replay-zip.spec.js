@@ -116,7 +116,12 @@ test.describe('Q. DÖF replay ZIP üretimi (medyasız)', () => {
     expect(zip.blobTipi).toBe('application/zip');
     expect(zip.dofSayisi).toBe(1);
     expect(zip.paketUuid).toBe(kayit.paketUuid);
-    expect(zip.dosyaAdi).toBe(`dof_replay_${kayit.paketUuid}.zip`);
+    // 4R-PKG-2: dosya adı artık yalnız paketUuid'den değil, zaman damgası +
+    // paketUuid'in ilk 8 karakteri + DÖF adedinden üretiliyor (bkz.
+    // _dofReplayZipDosyaAdiUret) -- aynı paketten art arda alınan ZIP'lerin
+    // hep aynı ada sahip olup tarayıcıda çoğaltılmasını (dosya (2), (7)...)
+    // önlemek için kasıtlı değişiklik.
+    expect(zip.dosyaAdi).toMatch(new RegExp(`^dof_replay_\\d{8}_\\d{6}_${kayit.paketUuid.slice(0, 8)}_1dof\\.zip$`));
 
     expect(zipEntryAdlari(zip.zipB64)).toEqual(['dof_donus.json']);
 
@@ -284,8 +289,9 @@ test.describe('Q. DÖF replay ZIP üretimi (medyasız)', () => {
     expect(adlar.includes('denetimler.json')).toBe(false);
     expect(adlar.includes('manifest.json')).toBe(false);
 
-    // Dosya adı güvenli: path ayracı yok, beklenen desen.
-    expect(zip.dosyaAdi).toMatch(/^dof_replay_[0-9a-f-]+\.zip$/i);
+    // Dosya adı güvenli: path ayracı yok, beklenen desen (4R-PKG-2:
+    // zaman damgası + kısa paketUuid + DÖF adedi, bkz. Q-A üstündeki not).
+    expect(zip.dosyaAdi).toMatch(/^dof_replay_\d{8}_\d{6}_[0-9a-f]{8}_\d+dof\.zip$/i);
     expect(zip.dosyaAdi.includes('/')).toBe(false);
     expect(zip.dosyaAdi.includes('\\')).toBe(false);
   });

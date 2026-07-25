@@ -1836,12 +1836,83 @@ async function dofReplayZipOlustur(dofUuidListesi) {
 
   return {
     zipBlob,
-    // paketUuid kanonik import doğrulamasından geçmiş bir UUID metnidir
-    // (kullanıcı girdisi değildir) -- path ayracı/tehlikeli karakter içermez.
-    dosyaAdi: `dof_replay_${belge.paketUuid}.zip`,
+    dosyaAdi: _dofReplayZipDosyaAdiUret(belge.paketUuid, belge.dofKontrolleri.length),
     dofSayisi: belge.dofKontrolleri.length,
     paketUuid: belge.paketUuid,
   };
+}
+
+// ─── DÖF REPLAY ZAMAN DAMGALI DOSYA ADI (4R-PKG-2) ───────────────
+// paketUuid TEK BAŞINA dosya adı için yetersizdir: aynı import partisinden
+// (paketUuid import PARTİSİNİN kimliğidir, replay'in değil -- bkz.
+// _dofYerelKayitOlustur/dofDonusBelgesiOlustur yorumları) art arda alınan
+// replay ZIP'leri hep AYNI dosya adını üretir, tarayıcı bunu "(2)", "(7)"
+// gibi çoğaltır. Çözüm: dosya adına yerel zaman damgası + kısa paket id +
+// DÖF adedi eklemek -- paketUuid'in KENDİSİ/anlamı DEĞİŞMEZ, yalnız dosya
+// adı üretimi merkezi hale getirildi.
+
+/** İki haneli sıfır dolgulu metin. */
+function _dofIkiHaneli(n) {
+  return String(n).padStart(2, '0');
+}
+
+/** Yerel cihaz saatine göre `YYYYMMDD_HHMMSS` biçiminde, dosya adında
+ * güvenle kullanılabilir (Türkçe karakter/boşluk/ayraç YOK) bir zaman
+ * damgası üretir. */
+function _dofZamanDamgasiDosyaAdiIcin(tarih = new Date()) {
+  return `${tarih.getFullYear()}${_dofIkiHaneli(tarih.getMonth() + 1)}${_dofIkiHaneli(tarih.getDate())}`
+    + `_${_dofIkiHaneli(tarih.getHours())}${_dofIkiHaneli(tarih.getMinutes())}${_dofIkiHaneli(tarih.getSeconds())}`;
+}
+
+/** DÖF replay ZIP dosya adını üretir: `dof_replay_<zaman>_<kisaPaket>_<n>dof.zip`.
+ * `paketUuid` zaten kanonik import doğrulamasından geçmiş bir UUID metnidir
+ * (kullanıcı girdisi değildir); ilk 8 karakteri (UUID'nin ilk segmenti,
+ * tire İÇERMEZ) kısa kimlik olarak kullanılır. Aynı paketten art arda
+ * indirilen ZIP'ler zaman damgası nedeniyle FARKLI ad taşır. */
+function _dofReplayZipDosyaAdiUret(paketUuid, dofSayisi, tarih = new Date()) {
+  const kisaPaket = String(paketUuid).slice(0, 8);
+  return `dof_replay_${_dofZamanDamgasiDosyaAdiIcin(tarih)}_${kisaPaket}_${dofSayisi}dof.zip`;
+}
+
+// ─── DÖF REPLAY ÇOKLU EXPORT TOPLAMA (4R-PKG-2) ──────────────────
+// Saha kullanımında kullanıcı aynı import partisi içinde birden çok DÖF
+// üzerinde (farklı DÖF'lere geçip dönerek) takip/medya değişikliği
+// yapabilir. Tek "ZIP İndir" eylemi artık yalnız o an açık DÖF'ü değil,
+// AYNI paketUuid'e ait TÜM "değişmiş" (takip alanı dokunulmuş VEYA
+// reviewStatus incelenmiş VEYA kanıt medyası eklenmiş) kanonik DÖF'leri
+// toplar -- her birinin kendi taslağı (başka DÖF'e geçilse bile IndexedDB
+// kaydında kalıcı olduğundan) KAYBOLMAZ. `dofReplayZipOlustur`'un kendisi
+// DEĞİŞTİRİLMEDİ (zaten çoklu `dofUuidListesi` kabul ediyordu) -- yalnız
+// hangi listenin verileceğini belirleyen bu toplama katmanı YENİDİR.
+
+/** Bir kanonik DÖF kaydının replay export'a "dahil edilecek kadar
+ * değişmiş" sayılıp sayılmayacağını, `_dofHazirlikKayitDogrula`/
+ * `dofDonusBelgesiOlustur`'daki AYNI "boş değil" ölçütüyle (taslak
+ * dokunulmuş VEYA reviewStatus incelenmiş VEYA kanıt medyası var) --
+ * ama fırlatmadan, salt-okunur bir boolean olarak -- değerlendirir. */
+async function _dofKayitDegismisMi(kayit) {
+  const taslak = (kayit.takipTaslagi && typeof kayit.takipTaslagi === 'object') ? kayit.takipTaslagi : {};
+  const dokunulan = _DOF_TAKIP_ALANLARI.some((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
+  if (dokunulan) return true;
+  if (_dofReviewStatusExportEdilebilirMi(kayit)) return true;
+  const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', kayit.dofUuid);
+  return medyalar.length > 0;
+}
+
+/** Aynı import paketindeki (`paketUuid`) TÜM kanonik ve "değişmiş"
+ * DÖF'lerin `dofUuid` listesini döner -- SALT-OKUNUR, DB'ye yazmaz.
+ * Sıra `dofler` store'undan okunan doğal sırayla tutarlıdır (deterministik
+ * değildir ama testler yalnız KÜME/uzunluk doğrular, sıra değil). Hiç
+ * değişmiş DÖF yoksa boş dizi döner (hata fırlatmaz -- çağıran taraf
+ * kullanıcıya uygun mesajı gösterir). */
+async function dofPaketiDegismisDofUuidleri(paketUuid) {
+  const tumKayitlar = await dbTumu('dofler');
+  const sonuc = [];
+  for (const kayit of tumKayitlar) {
+    if (!_dofKanonikMi(kayit) || kayit.paketUuid !== paketUuid) continue;
+    if (await _dofKayitDegismisMi(kayit)) sonuc.push(kayit.dofUuid);
+  }
+  return sonuc;
 }
 
 // Test/kullanım için global erişim -- aynı sınırlı namespace genişletildi.
@@ -1855,6 +1926,7 @@ if (typeof window !== 'undefined') {
     dofDonusGirdileriHazirla, dofReplayZipOlustur,
     dofIncelenenDofUuidleriniFiltrele,
     dofKanitMedyalariGetir, dofKanitMedyasiEkle, dofKanitMedyasiSil,
+    dofPaketiDegismisDofUuidleri, _dofReplayZipDosyaAdiUret,
   };
 }
 
@@ -2732,10 +2804,16 @@ async function _dofReplayHazirlikTikla() {
   }
 }
 
-/** "ZIP İndir" -- `dofReplayZipOlustur([dofUuid])`'yi (değiştirilmeden,
- * yalnız seçili TEK DÖF ile) çağırır, dönen Blob'u indirir. Hazırlık yok/
- * eski durumlarını servis KENDİSİ reddeder (`REPLAY_HAZIRLIK_YOK`/
- * `REPLAY_HAZIRLIK_ESKI`) -- burada tekrar doğrulanmaz. */
+/** "ZIP İndir" -- (4R-PKG-2) artık yalnız seçili DÖF'ü DEĞİL, aynı import
+ * paketindeki (`paketUuid`) TÜM "değişmiş" kanonik DÖF'leri toplar
+ * (`dofPaketiDegismisDofUuidleri`), her biri için hazırlığı otomatik
+ * güncel tutar (`dofReplayHazirlikHazirla` -- idempotent, ayrı "Hazırlık
+ * Oluştur" adımı zorunlu değildir), sonra TEK bir `dofReplayZipOlustur`
+ * çağrısıyla hepsini tek ZIP'e yazar. Seçili DÖF'te değişiklik yoksa ama
+ * pakette başka değişmiş DÖF varsa onlar yine dahil edilir; hiç değişmiş
+ * DÖF yoksa (paket genelinde) kullanıcıya açık mesaj gösterilir, ZIP
+ * üretilmez. `dofReplayZipOlustur`'un kendi iç kuralları (hazırlık eski/
+ * yok, karışık paket, yasak alan üretmeme) DEĞİŞMEDEN korunur. */
 async function _dofReplayZipIndirTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
   _dofReplayIslemDevamEdiyor = true;
@@ -2746,7 +2824,16 @@ async function _dofReplayZipIndirTikla() {
   zipBtn.disabled = true;
   durum.textContent = 'ZIP hazırlanıyor...';
   try {
-    const sonuc = await dofReplayZipOlustur([_dofReplaySecliDofUuid]);
+    const secliKayit = await dbGetir('dofler', _dofReplaySecliDofUuid);
+    const dofUuidListesi = await dofPaketiDegismisDofUuidleri(secliKayit.paketUuid);
+    if (dofUuidListesi.length === 0) {
+      durum.textContent = 'Önce en az bir DÖF için takip bilgisi veya kanıt medyası ekleyin.';
+      return;
+    }
+    for (const dofUuid of dofUuidListesi) {
+      await dofReplayHazirlikHazirla(dofUuid);   // otomatik hazırlık -- idempotent, ayrı adım zorunlu değil
+    }
+    const sonuc = await dofReplayZipOlustur(dofUuidListesi);
     _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
     durum.textContent = 'ZIP indirildi.';
   } catch (e) {

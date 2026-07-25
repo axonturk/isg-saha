@@ -118,18 +118,31 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     expect(ikinciKayit.replayHazirlik).toEqual(ilkKayit.replayHazirlik);
   });
 
-  test('F. ZIP hazırlık yokken reddedilir -- indirme oluşmaz', async ({ page }) => {
+  test('F. ZIP İndir hazırlık yokken bile başarılı -- 4R-PKG-2 otomatik hazırlık oluşturur', async ({ page }) => {
+    // Önceki davranış (hazırlık yoksa reddet) 4R-PKG-2'de kasıtlı olarak
+    // değiştirildi: "ZIP İndir" artık dahil edeceği her DÖF için hazırlığı
+    // KENDİSİ oluşturur/günceller -- ayrı "Hazırlık Oluştur" adımı artık
+    // zorunlu değil (saha kullanımını kolaylaştırmak için). Servisin
+    // kendisi (`dofReplayZipOlustur`) hazırlıksız/hazırlık-eski girdi
+    // için hâlâ REPLAY_HAZIRLIK_YOK/REPLAY_HAZIRLIK_ESKI fırlatır --
+    // bkz. tests/p-dof-replay-hazirlik.spec.js, tests/q-dof-replay-zip.spec.js
+    // (servis seviyesinde, doğrudan çağrı ile, DEĞİŞMEDİ).
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dosyaSec(page, JSON.stringify(paket));
+    const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
-    await takipKaydet(page, { sorumlu: 'Ahmet' });   // hazırlık OLUŞTURULMADI
+    await takipKaydet(page, { sorumlu: 'Ahmet' });   // "Hazırlık Oluştur" BİLEREK tıklanmadı
 
-    let indirmeOldu = false;
-    page.once('download', () => { indirmeOldu = true; });
-    await page.locator('#dof-replay-zip-btn').click();
-    await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı yok. Önce hazırlık oluşturun.');
-    await page.waitForTimeout(300);
-    expect(indirmeOldu).toBe(false);
+    const zipYolu = await zipIndirTikla(page);
+    await expect(page.locator('#dof-replay-durum')).toHaveText('ZIP indirildi.');
+
+    const kayit = await dofKaydiGetir(page, dofUuid);
+    expect(kayit.replayHazirlik).toBeTruthy();   // otomatik oluşturuldu
+
+    const zip = new AdmZip(zipYolu);
+    const belge = JSON.parse(zip.readAsText('dof_donus.json', 'utf8'));
+    expect(belge.dofKontrolleri[0].submissionUuid).toBe(kayit.replayHazirlik.submissionUuid);
+    expect(belge.dofKontrolleri[0].sorumlu).toBe('Ahmet');
   });
 
   test('G. ZIP indirme başarılı -- tek entry dof_donus.json, JSON takip+submissionUuid doğru', async ({ page }) => {
@@ -159,22 +172,32 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     expect(Object.prototype.hasOwnProperty.call(k, 'dofId')).toBe(false);
   });
 
-  test('H. Takip değişince eski hazırlıkla ZIP reddi -- indirme oluşmaz', async ({ page }) => {
+  test('H. Takip değişince ZIP İndir eski hazırlığı otomatik yeniler -- 4R-PKG-2', async ({ page }) => {
+    // Önceki davranış (eski hazırlıkla reddet) 4R-PKG-2'de kasıtlı olarak
+    // değiştirildi -- bkz. Test F üstündeki not. "ZIP İndir" burada ARAYA
+    // "Hazırlık Oluştur" tıklaması GİRMEDEN doğrudan tıklanıyor; buton
+    // kendisi taslağın değiştiğini görüp hazırlığı yeniden üretmeli.
     const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
     await dosyaSec(page, JSON.stringify(paket));
+    const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSecVeFormBekle(page);
     await takipKaydet(page, { sorumlu: 'Ahmet' });
     await page.locator('#dof-replay-hazirlik-btn').click();
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
+    const eskiKayit = await dofKaydiGetir(page, dofUuid);
 
-    await takipKaydet(page, { sorumlu: 'Mehmet' });   // hazırlıktan SONRA değişti
+    await takipKaydet(page, { sorumlu: 'Mehmet' });   // hazırlıktan SONRA değişti, "Hazırlık Oluştur" tekrar tıklanmadı
 
-    let indirmeOldu = false;
-    page.once('download', () => { indirmeOldu = true; });
-    await page.locator('#dof-replay-zip-btn').click();
-    await expect(page.locator('#dof-replay-durum')).toHaveText('Takip bilgileri değişmiş. Hazırlığı yeniden oluşturun.');
-    await page.waitForTimeout(300);
-    expect(indirmeOldu).toBe(false);
+    const zipYolu = await zipIndirTikla(page);
+    await expect(page.locator('#dof-replay-durum')).toHaveText('ZIP indirildi.');
+
+    const yeniKayit = await dofKaydiGetir(page, dofUuid);
+    expect(yeniKayit.replayHazirlik.submissionUuid).not.toBe(eskiKayit.replayHazirlik.submissionUuid);
+
+    const zip = new AdmZip(zipYolu);
+    const belge = JSON.parse(zip.readAsText('dof_donus.json', 'utf8'));
+    expect(belge.dofKontrolleri[0].sorumlu).toBe('Mehmet');   // YENİ değer, eski değil
+    expect(belge.dofKontrolleri[0].submissionUuid).toBe(yeniKayit.replayHazirlik.submissionUuid);
   });
 
   test('I. Yeniden hazırlık sonrası ZIP başarılı -- yeni submissionUuid, yeni takip JSON\'da', async ({ page }) => {
