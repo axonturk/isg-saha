@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3E0';
-const APP_CACHE = 'isg-saha-v23';
+const APP_BUILD = '4R-PKG-3E-FINAL';
+const APP_CACHE = 'isg-saha-v24';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -2328,6 +2328,15 @@ if (typeof window !== 'undefined') {
 
 let _dofListeKayitlari = [];
 let _dofListeSeciliId = null;
+// 4R-PKG-3E-FINAL: hash route tabanlı liste/çalışma modu -- gerçek Android
+// canlı testte kullanıcı "DÖF kartına basınca hâlâ liste altında inline
+// detay açılıyor" diye şikayet etti; artık iki AYRI ekran var:
+// `#dof-list` (yalnız liste/chip/paket özeti) ve `#dof-work/<dofUuid>`
+// (yalnız aktif DÖF -- liste TAMAMEN gizli). Route DEĞİŞTİRME TEK
+// noktadan (`_dofRotaGuncelle`, `hashchange` + ilk yüklemede çağrılır) --
+// `_dofKartTiklandi`/`_dofListeyeDon` yalnız `location.hash`'i günceller,
+// gerçek DOM güncellemesi/render zinciri hep `_dofRotaGuncelle` içinde olur.
+let _dofRotaModu = 'list';   // 'list' | 'work'
 // PWA 4R-PKG-3A -- grup/chip filtresi. VARSAYILAN 'tumu': mevcut ~100
 // DÖF list/detay/takip/replay testi hiçbir filtreleme beklemeden yazıldı
 // (tek/iki kayıtlık senkron fixture'larla `.dof-liste-karti` sayısını
@@ -2541,11 +2550,8 @@ async function _dofDurumHaritasiHesapla(kayitlar) {
   const harita = new Map();
   for (const k of kayitlar) {
     const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', k.dofUuid);
-    harita.set(k.id, {
-      degisti: await _dofKayitDegismisMi(k),
-      fotoSayisi: medyalar.filter((m) => m.mediaType === 'photo').length,
-      sesSayisi: medyalar.filter((m) => m.mediaType === 'audio').length,
-    });
+    const { fotoSayisi, sesSayisi } = _dofMedyaSayaclariHesapla(medyalar);
+    harita.set(k.id, { degisti: await _dofKayitDegismisMi(k), fotoSayisi, sesSayisi });
   }
   return harita;
 }
@@ -2614,10 +2620,22 @@ async function _dofListesiYukle() {
     await _dofTakipFormYukle(null);
     await _dofReplayBolumYukle(null);
     await _dofKanitMedyaYukle(null);
+    _dofRotaDogrula();
     return;
   }
 
   durumEl.textContent = '';
+  // 4R-PKG-3E-FINAL: sayfa yenilenince (veya ilk yüklemede) `_dofListeSeciliId`
+  // JS state'i sıfırdan başlar (null) -- ama hash hâlâ `#dof-work/<uuid>`
+  // olabilir (kullanıcı o DÖF'ü çalışırken yeniledi). Hash geçerli bir
+  // kanonik kayda işaret ediyorsa render'dan ÖNCE seçili DÖF'ü hash'ten
+  // türetiriz, aksi halde reload sonrası çalışma ekranı GÖRÜNÜR ama İÇİ
+  // BOŞ kalırdı (route görünürlüğü doğru, veri yanlış -- gerçek regresyon,
+  // düzeltildi).
+  const hashDofUuid = _dofRotaHashDofUuid();
+  if (hashDofUuid && _dofListeKayitlari.some((k) => k.id === hashDofUuid)) {
+    _dofListeSeciliId = hashDofUuid;
+  }
   if (_dofListeSeciliId && !_dofListeKayitlari.some((k) => k.id === _dofListeSeciliId)) {
     _dofListeSeciliId = null;   // seçili kayıt artık listede yok (ör. legacy'e dönüşmedi ama olası durum)
   }
@@ -2632,6 +2650,7 @@ async function _dofListesiYukle() {
   await _dofTakipFormYukle(_dofListeSeciliId);
   await _dofReplayBolumYukle(_dofListeSeciliId);
   await _dofKanitMedyaYukle(_dofListeSeciliId);
+  _dofRotaDogrula();
 }
 
 /** Kompakt satır: bulgu/risk kodu + konum + rozetler (taslak/foto/ses).
@@ -2664,7 +2683,7 @@ function _dofListeKartHtml(k) {
   return `
     <div class="dof-liste-satir" style="margin-bottom:8px;">
       <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
-        onclick="_dofDetaySec('${_escAttr(k.id)}')"
+        onclick="_dofKartTiklandi('${_escAttr(k.id)}')"
         style="display:block; width:100%; text-align:left; padding:10px 12px; border-radius:8px; cursor:pointer;
                border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};
                ${secili ? 'box-shadow:0 0 0 3px rgba(52,152,219,0.18);' : ''}">
@@ -2692,6 +2711,113 @@ function _dofDetaySec(dofId) {
   _dofReplayBolumYukle(dofId);
   _dofKanitMedyaYukle(dofId);
 }
+
+/** İki route bloğunun (`#dof-list-mod-blok`/`#dof-work-mod-blok`) DOM
+ * görünürlüğünü `_dofRotaModu`'a göre ayarlar -- SALT DOM, hiçbir veri
+ * okumaz/yazmaz. */
+/** Mevcut hash `#dof-work/<dofUuid>` biçimindeyse dofUuid'i döner, değilse
+ * `null` -- route fonksiyonlarının hepsi bu TEK ayrıştırmayı paylaşır. */
+function _dofRotaHashDofUuid() {
+  const hash = (typeof location !== 'undefined' && location.hash) || '';
+  const eslesme = hash.match(/^#dof-work\/(.+)$/);
+  return eslesme ? decodeURIComponent(eslesme[1]) : null;
+}
+
+function _dofRotaUygula() {
+  const listeBlok = document.getElementById('dof-list-mod-blok');
+  const calismaBlok = document.getElementById('dof-work-mod-blok');
+  if (listeBlok) listeBlok.style.display = _dofRotaModu === 'work' ? 'none' : '';
+  if (calismaBlok) calismaBlok.style.display = _dofRotaModu === 'work' ? 'block' : 'none';
+}
+
+/** `_dofListesiYukle` SONUNDA çağrılan HAFİF sürüm -- `_dofRotaGuncelle`
+ * ile AYNI hash/kayıt doğrulamasını yapar ama `_dofDetaySec`'i TEKRAR
+ * ÇAĞIRMAZ (o render zaten `_dofListesiYukle`'nin kendi gövdesinde,
+ * AWAIT'lenmiş olarak yapıldı). Amaç: paket silinirken/route hash'i artık
+ * geçersizken bile liste/çalışma blok görünürlüğünü doğru tutmak --
+ * `_dofDetaySec`'i tekrar (unawaited/fire-and-forget) çağırmak bir önceki
+ * sürümde "Kaydedildi" mesajının ANLIK olarak yeniden boşalan bir
+ * `#dof-takip-durum` yazmasıyla YARIŞA girip ÜZERİNE YAZIYORDU (gerçek
+ * regresyon, düzeltildi) -- bu yüzden burada YALNIZ görünürlük/route
+ * modu güncellenir, render zinciri TEKRARLANMAZ. */
+function _dofRotaDogrula() {
+  const hash = (typeof location !== 'undefined' && location.hash) || '';
+  const eslesme = hash.match(/^#dof-work\/(.+)$/);
+  if (eslesme) {
+    const dofUuid = decodeURIComponent(eslesme[1]);
+    _dofRotaModu = _dofListeKayitlari.some((k) => k.id === dofUuid) ? 'work' : 'list';
+  } else {
+    _dofRotaModu = 'list';
+  }
+  _dofRotaUygula();
+  // Liste modunun kanonik URL'i `#dof-list` -- ilk yükleme/import sonrası
+  // boş/normalize edilmemiş hash'i sessizce düzeltir (render zinciri
+  // TETİKLEMEZ, yalnız URL yazar).
+  if (_dofRotaModu === 'list' && hash !== '#dof-list' && typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(history.state, '', '#dof-list');
+  }
+}
+
+/** Hash route'un TEK doğruluk kaynağı -- `hashchange` ve ilk yüklemede
+ * çağrılır. `#dof-work/<dofUuid>` ise ve kayıt kanonik listede varsa
+ * çalışma moduna geçer (yalnız o DÖF render edilir, liste gizlenir);
+ * kayıt bulunamazsa (silinmiş/geçersiz/yazım hatası) GÜVENLİ şekilde
+ * listeye döner -- hiçbir zaman boş/kırık bir çalışma ekranında kalınmaz.
+ * Diğer her hash (`#dof-list`, boş, ilgisiz) liste modudur. */
+function _dofRotaGuncelle() {
+  const hash = (typeof location !== 'undefined' && location.hash) || '';
+  const eslesme = hash.match(/^#dof-work\/(.+)$/);
+  if (eslesme) {
+    const dofUuid = decodeURIComponent(eslesme[1]);
+    const kayitVarMi = _dofListeKayitlari.some((k) => k.id === dofUuid);
+    if (kayitVarMi) {
+      _dofRotaModu = 'work';
+      _dofRotaUygula();
+      _dofDetaySec(dofUuid);
+      return;
+    }
+    // Geçersiz/bulunamayan dofUuid -- kırık ekranda bırakma, listeye dön.
+    _dofRotaModu = 'list';
+    _dofRotaUygula();
+    _dofDetaySec(null);
+    const durumEl = document.getElementById('dof-liste-durum');
+    if (durumEl && _dofListeKayitlari.length > 0) durumEl.textContent = 'DÖF bulunamadı, listeye dönüldü.';
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState(history.state, '', '#dof-list');
+    }
+    return;
+  }
+  _dofRotaModu = 'list';
+  _dofRotaUygula();
+  // Liste modunun kendi kanonik URL'i `#dof-list` -- boş/ilgisiz hash'ler
+  // (ör. ilk yükleme) sessizce normalize edilir, `replaceState` yeni
+  // history seviyesi EKLEMEZ/hashchange TETİKLEMEZ (döngü riski yok).
+  if (hash !== '#dof-list' && typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(history.state, '', '#dof-list');
+  }
+}
+if (typeof window !== 'undefined') window.addEventListener('hashchange', _dofRotaGuncelle);
+
+/** Liste kartına tıklanınca çağrılır (onclick) -- hash'i günceller VE
+ * rotayı DOĞRUDAN uygular (hashchange olayının asenkron gelmesini
+ * BEKLEMEZ -- render anında olur). `hashchange` olayı da (hash gerçekten
+ * değiştiyse) ayrıca tetiklenir ve `_dofRotaGuncelle`'i tekrar çağırır --
+ * idempotent olduğu için zararsızdır, yalnız güvenlik amaçlı (ör. tarayıcı
+ * geri/ileri tuşu). */
+function _dofKartTiklandi(dofId) {
+  location.hash = `#dof-work/${encodeURIComponent(dofId)}`;
+  _dofRotaGuncelle();
+}
+if (typeof window !== 'undefined') window._dofKartTiklandi = _dofKartTiklandi;
+
+/** "Listeye Dön" butonu -- çalışma modundan liste moduna döner. Hash
+ * güncellensin/güncellenmesin (aynı zaten '#dof-list' olsa bile) rotayı
+ * doğrudan uygular -- `_dofKartTiklandi` ile aynı senkron-render deseni. */
+function _dofListeyeDon() {
+  location.hash = '#dof-list';
+  _dofRotaGuncelle();
+}
+if (typeof window !== 'undefined') window._dofListeyeDon = _dofListeyeDon;
 
 /** 4R-PKG-3C: aktif DÖF çalışma alanının üstünde -- normal saha
  * denetimindeki "aktif konum" başlığına benzer -- kompakt, salt-okunur
@@ -2982,7 +3108,13 @@ async function _dofTakipKaydet() {
   if (!_dofTakipSecliDofUuid) return;
   const durum = document.getElementById('dof-takip-durum');
 
-  if (_dofTakipDokunulanAlanlar.size === 0) {
+  // 4R-PKG-3E-FINAL: savunma guard -- buton native `disabled` iken VEYA
+  // hiçbir alana dokunulmamışken kayıt YAPILMAZ. İkisi normalde AYNI anda
+  // doğrudur (_dofTakipButonDurumGuncelle disabled'ı dirty-set boyutundan
+  // türetir), ama guard programatik çağrılara (ör. `window._dofTakipKaydet()`
+  // ile disabled buton üzerinden doğrudan tetikleme) karşı da korur.
+  const kaydetBtnOn = document.getElementById('dof-takip-kaydet-btn');
+  if ((kaydetBtnOn && kaydetBtnOn.disabled) || _dofTakipDokunulanAlanlar.size === 0) {
     durum.textContent = 'Değişiklik yok.';
     return;
   }
@@ -3129,8 +3261,9 @@ async function _dofReplayBolumYukle(dofUuid) {
         let paketSes = 0;
         for (const u of degisenler) {
           const m = await dofKanitMedyalariGetir(u);
-          paketFoto += m.filter((x) => x.mediaType === 'photo').length;
-          paketSes += m.filter((x) => x.mediaType === 'audio').length;
+          const sayac = _dofMedyaSayaclariHesapla(m);
+          paketFoto += sayac.fotoSayisi;
+          paketSes += sayac.sesSayisi;
         }
         paketOzetEl.textContent = `${degisenler.length} DÖF · ${paketFoto} Foto · ${paketSes} Ses`;
       } else {
@@ -3223,15 +3356,17 @@ async function _dofReplayZipIndirTikla() {
   }
 }
 
-/** "Paylaş / Gönder" (4R-PKG-3B) -- `_dofReplayZipHazirlaVeUret` ile
- * AYNI ZIP'i üretir (içerik BİREBİR aynı -- `dof_donus.json`/`fotolar/`/
+/** "Paylaşmayı Dene" (4R-PKG-3E-FINAL kesin ürün kararı) -- `_dofReplayZipHazirlaVeUret`
+ * ile AYNI ZIP'i üretir (içerik BİREBİR aynı -- `dof_donus.json`/`fotolar/`/
  * `sesler/` kökte kalır, hiçbir şey değiştirilmez). Yalnız TESLİM yöntemi
  * farklı: `navigator.canShare({files})` destekliyorsa Web Share API ile
  * Android'in kendi paylaşım ekranına (WhatsApp/Drive/e-posta/Telegram
- * vb.) verilir. Kullanıcı paylaşımı BİLİNÇLİ iptal ederse (`AbortError`)
- * sessizce indirmeye düşülmez -- yalnız gerçek destek YOKSA veya gerçek
- * bir paylaşım HATASI oluşursa (iptal değil) normal indirmeye
- * (`_dofBlobIndir`) düşülür. */
+ * vb.) verilir. Bu buton ARTIK HİÇBİR DURUMDA otomatik ZIP indirmesi
+ * YAPMAZ (önceki 3B/3D davranışı kasıtlı olarak KALDIRILDI -- canlı
+ * Android testinde kullanıcı "Paylaşmayı Dene her zaman indiriyor" diye
+ * şikayet etti). Destek yok/AbortError/gerçek hata -- ÜÇÜNDE de yalnız
+ * açık bir mesaj gösterilir, kullanıcı isterse AYRI "ZIP İndir" butonunu
+ * kullanır (`_dofReplayZipIndirTikla`, DEĞİŞMEDİ). */
 async function _dofReplayPaylasTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
   _dofReplayIslemDevamEdiyor = true;
@@ -3265,17 +3400,13 @@ async function _dofReplayPaylasTikla() {
           durum.textContent = 'Paylaşım iptal edildi.';
           return;
         }
-        // Gerçek paylaşım hatası (iptal DEĞİL) -- kullanıcıya bildir, sonra indirmeye düş.
-        durum.textContent = 'Paylaşım başarısız oldu. ZIP indiriliyor.';
-        _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
-        durum.textContent = `ZIP indirildi: ${sonuc.dosyaAdi}`;
+        // Gerçek paylaşım hatası (iptal DEĞİL) -- otomatik indirme YOK, yalnız mesaj.
+        durum.textContent = 'Paylaşım başarısız oldu. ZIP indirmek için ZIP İndir düğmesini kullanın.';
         return;
       }
     }
-    // Gerçek destek YOK -- sessiz fallback DEĞİL, önce açık mesaj gösterilir.
-    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.';
-    _dofBlobIndir(sonuc.zipBlob, sonuc.dosyaAdi);
-    durum.textContent = `ZIP indirildi: ${sonuc.dosyaAdi}`;
+    // Gerçek destek YOK -- otomatik indirme YOK, yalnız açık mesaj.
+    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.';
   } catch (e) {
     const kod = e && e.kod;
     durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
@@ -3316,17 +3447,29 @@ function _dofKanitObjectUrlleriTemizle() {
   _dofKanitAktifObjectUrller = [];
 }
 
-/** Kanıt medyaları özet metnini TEK bir yerden, aynı `medyalar` dizisinden
- * hesaplar -- ZIP alt barındaki foto/ses sayaçlarıyla (bkz.
- * `_dofReplayBolumYukle`) aynı ölçütü (`mediaType`) kullanır. Transient
- * aksiyon mesajından (`#dof-kanit-medya-durum`, "Fotoğraf eklendi."/"Ses
- * notu eklendi.") TAMAMEN AYRI -- o mesajlar DEĞİŞMEDİ. */
-function _dofKanitMedyaOzetMetni(medyalar) {
+/** 4R-PKG-3E-FINAL — TEK ortak sayaç hesaplama: ZIP alt barı, liste kartı
+ * rozetleri, kanıt medya özeti ve ZIP üretim öncesi özet HEPSİ bu
+ * fonksiyondan beslenir (3E-0 teşhis raporunun D.5 maddesinde işaretlenen
+ * "aynı filtre 3 ayrı yerde bağımsız tekrar yazılmış" riski burada
+ * kapatıldı). Girdi her zaman `dofKanitMedyalariGetir`/`dbIndexTumu(
+ * 'dofKanitlari', 'dofUuid', ...)` sonucu -- ham `medyalar` dizisi. */
+function _dofMedyaSayaclariHesapla(medyalar) {
   const fotoSayisi = medyalar.filter((m) => m.mediaType === 'photo').length;
   const sesSayisi = medyalar.filter((m) => m.mediaType === 'audio').length;
+  return { fotoSayisi, sesSayisi };
+}
+
+/** Kanıt medyaları özet metnini TEK bir yerden, aynı `medyalar` dizisinden
+ * hesaplar -- ZIP alt barındaki foto/ses sayaçlarıyla (bkz.
+ * `_dofReplayBolumYukle`, `_dofMedyaSayaclariHesapla`) aynı ölçütü
+ * kullanır. Transient aksiyon mesajından (`#dof-kanit-medya-durum`,
+ * "Fotoğraf eklendi."/"Ses notu eklendi.") TAMAMEN AYRI -- o mesajlar
+ * DEĞİŞMEDİ. */
+function _dofKanitMedyaOzetMetni(medyalar) {
+  const { fotoSayisi, sesSayisi } = _dofMedyaSayaclariHesapla(medyalar);
   if (fotoSayisi === 0 && sesSayisi === 0) return 'Henüz kanıt eklenmedi.';
-  if (fotoSayisi === 0) return `Fotoğraf eklenmedi. · ${sesSayisi} ses notu eklendi.`;
-  if (sesSayisi === 0) return `${fotoSayisi} fotoğraf eklendi. · Ses notu eklenmedi.`;
+  if (fotoSayisi === 0) return `${sesSayisi} ses notu eklendi.`;
+  if (sesSayisi === 0) return `${fotoSayisi} fotoğraf eklendi.`;
   return `${fotoSayisi} fotoğraf · ${sesSayisi} ses notu`;
 }
 
@@ -3384,6 +3527,27 @@ async function _dofKanitMedyaYukle(dofUuid) {
   _dofKanitMedyaListesiRenderEt(medyalar);
 }
 
+/** 4R-PKG-3E-FINAL: medya ekleme/silme sonrası TEK çağrı noktası --
+ * kanıt liste/özet, alt fixed ZIP bar (paket özeti dahil) ve liste kartı
+ * rozetini AYNI ANDA tazeler (canlı Android şikayeti: "alt bar/liste/kanıt
+ * sayaçları bazen eski veya sıfır kalıyor"). Takip formuna/reviewStatus'a
+ * DOKUNMAZ -- `_dofListesiYukle()`'nin tam yeniden yüklemesini kasıtlı
+ * KULLANMIYORUZ, çünkü o `_dofTakipFormYukle` üzerinden kullanıcının
+ * KAYDEDİLMEMİŞ takip taslağı düzenlemesini/dirty-state'ini sıfırlardı. */
+async function _dofMedyaSonrasiYenile(dofUuid) {
+  await _dofKanitMedyaYukle(dofUuid);
+  await _dofReplayBolumYukle(dofUuid);
+  const kayit = _dofListeKayitlari.find((k) => k.id === dofUuid);
+  if (!kayit) return;   // legacy/silinmiş -- liste rozeti güncellenecek bir şey yok
+  const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', dofUuid);
+  const { fotoSayisi, sesSayisi } = _dofMedyaSayaclariHesapla(medyalar);
+  const degisti = await _dofKayitDegismisMi(kayit);
+  _dofDurumHaritasi.set(dofUuid, { degisti, fotoSayisi, sesSayisi });
+  const aktifGrup = _dofAktifGrupGetir(_dofGrupListesi);
+  const listeEl = document.getElementById('dof-liste');
+  if (listeEl) listeEl.innerHTML = aktifGrup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
+}
+
 async function _dofKanitFotoKaydet(sonuc, source) {
   const dofUuid = _dofKanitAktifDofUuid;
   const durum = document.getElementById('dof-kanit-medya-durum');
@@ -3396,7 +3560,7 @@ async function _dofKanitFotoKaydet(sonuc, source) {
       width: sonuc.genislik || null, height: sonuc.yukseklik || null,
     });
     if (durum) durum.textContent = 'Fotoğraf eklendi.';
-    await _dofKanitMedyaYukle(dofUuid);
+    await _dofMedyaSonrasiYenile(dofUuid);
   } catch (e) {
     if (durum) durum.textContent = (e && e.message) || 'Fotoğraf eklenemedi.';
   }
@@ -3474,7 +3638,7 @@ async function toggleDofSesKaydi() {
           blob, mimeType: 'audio/webm', size: blob.size, durationMs: sureMs,
         });
         if (durum) durum.textContent = 'Ses notu eklendi.';
-        await _dofKanitMedyaYukle(kaydedilecekDofUuid);
+        await _dofMedyaSonrasiYenile(kaydedilecekDofUuid);
       } catch (e) {
         if (durum) durum.textContent = (e && e.message) || 'Ses notu eklenemedi.';
       }
@@ -3504,7 +3668,7 @@ async function _dofKanitMedyaSilTikla(localMediaUuid) {
   try {
     await dofKanitMedyasiSil(dofUuid, localMediaUuid);
     if (durum) durum.textContent = '';
-    await _dofKanitMedyaYukle(dofUuid);
+    await _dofMedyaSonrasiYenile(dofUuid);
   } catch (e) {
     if (durum) durum.textContent = (e && e.message) || 'Kanıt silinemedi.';
   }

@@ -84,7 +84,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     expect(indirmeOldu).toBe(false);   // paylaşım yolu -- indirme tetiklenmedi
   });
 
-  test('B. Paylaşım desteklenmiyor -- normal indirmeye düşer, dosya adı gösterilir', async ({ page }) => {
+  test('B. Paylaşım desteklenmiyor -- indirmeye DÜŞMEZ (4R-PKG-3E-FINAL), yalnız açık mesaj gösterilir', async ({ page }) => {
     await paylasimMockKur(page, { destekli: false });
     await page.goto('/index.html');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
@@ -95,24 +95,30 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'Fallback Testi' });
 
-    const [indirme] = await Promise.all([
-      page.waitForEvent('download'),
-      page.click('#dof-replay-paylas-btn'),
-    ]);
-    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP indirildi:');
-    expect(indirme.suggestedFilename()).toMatch(/^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/);
+    let indirmeOldu = false;
+    page.once('download', () => { indirmeOldu = true; });
+    await page.click('#dof-replay-paylas-btn');
+    await expect(page.locator('#dof-replay-durum')).toHaveText(
+      'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.'
+    );
+    await page.waitForTimeout(300);
+    expect(indirmeOldu).toBe(false);
 
     const cagrilar = await page.evaluate(() => window.__paylasimCagrilari);
     expect(cagrilar.length).toBe(0);   // navigator.share hiç çağrılmadı
+
+    // ZIP İndir hâlâ çalışıyor -- kullanıcı isterse KENDİSİ indirir.
+    const [indirme] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('#dof-replay-zip-btn'),
+    ]);
+    expect(indirme.suggestedFilename()).toMatch(/^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/);
   });
 
-  test('B2. Paylaşım desteklenmiyor -- kullanıcıya ÖNCE açık "desteklenmiyor" mesajı gösterilir (sessiz fallback yok)', async ({ page }) => {
-    // navigator.share'i asla çağrılmayacak şekilde YAVAŞLATILMIŞ bir ZIP
-    // üretimi olmadan ara mesajı yakalamak zor (indirme çok hızlı) --
-    // bu yüzden durum metninin GEÇİŞ noktasını değil, mesajın literal
-    // metnini (kodda birebir yazılı olduğunu) doğruluyoruz.
+  test('B2. Paylaşım desteklenmiyor -- mesaj literal metni kodda birebir yazılı (otomatik indirme kaldırıldı)', async ({ page }) => {
     const appJs = await page.evaluate(() => fetch('/app.js').then((r) => r.text()));
-    expect(appJs).toContain('Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.');
+    expect(appJs).toContain('Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.');
+    expect(appJs).not.toContain('ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.');
   });
 
   test('C. Kullanıcı paylaşımı iptal ederse (AbortError) sessizce indirmeye düşülmez', async ({ page }) => {
@@ -134,7 +140,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     expect(indirmeOldu).toBe(false);
   });
 
-  test('D. Gerçek paylaşım hatasında (iptal DEĞİL) indirmeye düşülür', async ({ page }) => {
+  test('D. Gerçek paylaşım hatasında (iptal DEĞİL) indirmeye DÜŞMEZ (4R-PKG-3E-FINAL), yalnız açık mesaj gösterilir', async ({ page }) => {
     await paylasimMockKur(page, { destekli: true, hataAt: { ad: 'NotAllowedError', mesaj: 'izin yok' } });
     await page.goto('/index.html');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
@@ -145,11 +151,20 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'Hata Testi' });
 
+    let indirmeOldu = false;
+    page.once('download', () => { indirmeOldu = true; });
+    await page.click('#dof-replay-paylas-btn');
+    await expect(page.locator('#dof-replay-durum')).toHaveText(
+      'Paylaşım başarısız oldu. ZIP indirmek için ZIP İndir düğmesini kullanın.'
+    );
+    await page.waitForTimeout(300);
+    expect(indirmeOldu).toBe(false);
+
+    // ZIP İndir hâlâ çalışıyor -- kullanıcı isterse KENDİSİ indirir.
     const [indirme] = await Promise.all([
       page.waitForEvent('download'),
-      page.click('#dof-replay-paylas-btn'),
+      page.click('#dof-replay-zip-btn'),
     ]);
-    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP indirildi:');
     expect(indirme.suggestedFilename()).toMatch(/^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/);
   });
 

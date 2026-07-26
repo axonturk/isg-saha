@@ -241,6 +241,8 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
     await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
 
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- başka DÖF'e geçmeden önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await dofSec(page, DOF_B_UUID);
     await takipKaydet(page, { sorumlu: 'B Sorumlusu' });
     await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor

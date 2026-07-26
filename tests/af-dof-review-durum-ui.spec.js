@@ -72,10 +72,13 @@ test.describe('AF. DÖF inceleme durumu (reviewStatus) UI', () => {
     await expect.poll(async () => (await dofKaydiGetir(page, dofUuid)).reviewStatus)
       .toBe('inceledi_degisiklik_yok');
 
+    // 4R-PKG-3E-FINAL: hash route (#dof-work/<uuid>) sayfa yenilemesinde
+    // KORUNUR -- kullanıcı hangi DÖF'ü çalışıyorsa reload sonrası da AYNI
+    // DÖF'ün çalışma ekranında kalır, listeye atılmaz. Bu yüzden tekrar
+    // karta tıklamaya gerek YOK (liste zaten gizli -- çalışma modundayız).
     await page.reload();
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
-    await page.locator('.dof-liste-karti').first().click();
-
+    await expect(page.locator('#dof-work-mod-blok')).toBeVisible();
     await expect(page.locator('#dof-review-durum-secici')).toHaveValue('inceledi_degisiklik_yok');
   });
 

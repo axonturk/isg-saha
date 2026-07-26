@@ -104,6 +104,9 @@ test.describe('T. DÖF liste ve detay UI', () => {
     await kartlar.nth(0).click();
     await expect(page.locator('#dof-detay')).toContainText('Birinci tehlike');
 
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- ikinci karta geçmeden
+    // önce Listeye Dön ile liste moduna dönülmeli.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await kartlar.nth(1).click();
     await expect(page.locator('#dof-detay')).toContainText('Ikinci tehlike');
     await expect(page.locator('#dof-detay')).not.toContainText('Birinci tehlike');

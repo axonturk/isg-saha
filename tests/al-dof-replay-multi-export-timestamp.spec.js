@@ -105,10 +105,13 @@ test.describe('AL. DÖF replay çoklu export + zaman damgalı dosya adı (4R-PKG
     await takipKaydet(page, { sorumlu: 'A Sorumlu', gerceklesen_faaliyet: 'A faaliyeti' });
     await dofGaleriFotoYukle(page);
 
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- başka DÖF'e geçmeden önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await dofSec(page, DOF_B_UUID);
     await takipKaydet(page, { sorumlu: 'B Sorumlu', gerceklesen_faaliyet: 'B faaliyeti' });
     await dofGaleriFotoYukle(page);
 
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await dofSec(page, DOF_C_UUID);
     await takipKaydet(page, { sorumlu: 'C Sorumlu' });   // yalnız takip, medyasız
 
@@ -164,6 +167,7 @@ test.describe('AL. DÖF replay çoklu export + zaman damgalı dosya adı (4R-PKG
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'Yalnız A' });
 
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await dofSec(page, DOF_B_UUID);   // seçilir/açılır ama takip/medya girilmez
 
     const { zip } = await zipIndirTikla(page);

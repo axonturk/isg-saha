@@ -102,6 +102,9 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
 
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'İşlenen testi' });
+    // 4R-PKG-3E-FINAL: chip'ler liste modunda -- çalışma modundan (Kaydet
+    // sonrası hâlâ çalışma modundayız) önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await expect(page.locator('.chip', { hasText: 'İşlenen 1' })).toBeVisible();
     await expect(page.locator('.chip', { hasText: 'Bekleyen 58' })).toBeVisible();
   });
@@ -110,6 +113,7 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     await gercekPaketiSec(page);
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'X' });   // 1 DÖF "İşlenen" oldu
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
 
     await page.locator('.chip', { hasText: 'İşlenen' }).click();
     await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
@@ -123,6 +127,7 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     await gercekPaketiSec(page);
     await dofSec(page, DOF_B_UUID);   // "Bekleyen" grubunda (henüz değişmedi)
     await expect(page.locator('#dof-detay-kart')).toBeVisible();
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
 
     await page.locator('.chip', { hasText: 'İşlenen' }).click();   // DOF_B bu grupta YOK (henüz işlenmedi)
     await expect(page.locator('#dof-detay-kart')).toBeHidden();   // seçim temizlendi, yanlış bağlamda kalmadı
@@ -184,6 +189,8 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     const dofUuidX = paketX.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuidX);
     await takipKaydet(page, { sorumlu: 'X sorumlusu' });   // taslak oluştur
+    // 4R-PKG-3E-FINAL: "Paketi Sil / Kaldır" liste modunda -- önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
 
     await page.locator('button', { hasText: 'Paketi Sil / Kaldır' }).click();
     await page.locator('button', { hasText: 'Evet, Sil' }).click();

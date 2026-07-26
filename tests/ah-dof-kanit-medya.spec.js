@@ -217,8 +217,11 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     expect(medyalarB.sonuc.length).toBe(0);
 
     // UI üzerinden de doğrula: DÖF B seçilince liste boş, DÖF A'ya dönünce dolu.
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- ikinci karta geçmeden
+    // önce Listeye Dön ile liste moduna dönülmeli.
     await page.locator('.dof-liste-karti').filter({ hasText: 'B-2' }).click();
     await expect(page.locator('#dof-kanit-medya-kart')).toContainText('Henüz kanıt eklenmedi.');
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await page.locator('.dof-liste-karti').filter({ hasText: 'B-1' }).click();
     await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(1);
   });
@@ -408,7 +411,9 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     await expect(sesBtn).toContainText('Durdur');
     await page.waitForTimeout(300);
 
-    // Kayıt DEVAM EDERKEN başka bir DÖF'e geç.
+    // Kayıt DEVAM EDERKEN başka bir DÖF'e geç. 4R-PKG-3E-FINAL: çalışma
+    // modunda liste gizli -- önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await page.locator('.dof-liste-karti').filter({ hasText: 'B-2' }).click();
     await expect(page.locator('#dof-kanit-ses-btn')).toContainText('Ses Notu');   // otomatik durduruldu
 
@@ -436,7 +441,10 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     const revokeSayisiIlkIki = await page.evaluate(() => window.__revokeSayisi);
     expect(revokeSayisiIlkIki).toBeGreaterThanOrEqual(1);   // ikinci ekleme öncesi ilkin URL'i revoke edildi
 
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- tekrar seçmeden önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await page.locator('.dof-liste-karti').first().click();   // aynı DÖF -- yine de kart yeniden yüklenir
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await page.locator('.dof-liste-karti').first().click();
 
     const medyalar = await medyalarGetirDene(page, dofUuid);

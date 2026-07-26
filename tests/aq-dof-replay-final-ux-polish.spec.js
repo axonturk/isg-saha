@@ -102,11 +102,11 @@ test.describe('AQ. DÖF replay son UX polish (4R-PKG-3D)', () => {
       await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('Henüz kanıt eklenmedi.');
     });
 
-    test('2. Yalnız ses notu eklenince özet çelişkisiz -- "Fotoğraf eklenmedi." + ses sayısı', async ({ page }) => {
+    test('2. Yalnız ses notu eklenince özet çelişkisiz -- "N ses notu eklendi." (4R-PKG-3E-FINAL sadeleştirilmiş metin)', async ({ page }) => {
       const dofUuid = await tekDofKur(page);
       await medyaEkleDene(page, dofUuid, { mediaType: 'audio', source: 'audio', mimeType: 'audio/webm', size: 4, durationMs: 800 });
       await dofSecVeFormBekle(page);
-      await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('Fotoğraf eklenmedi. · 1 ses notu eklendi.');
+      await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('1 ses notu eklendi.');
       // Liste ile çelişki YOK -- audio elementi de var, "Henüz kanıt eklenmedi." metni YOK.
       await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
       await expect(page.locator('#dof-kanit-medya-liste')).not.toContainText('Henüz kanıt eklenmedi.');
@@ -240,6 +240,10 @@ test.describe('AQ. DÖF replay son UX polish (4R-PKG-3D)', () => {
       await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofA}"]`)).toContainText('✓ Seçili');
       await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofB}"]`)).not.toContainText('✓ Seçili');
 
+      // 4R-PKG-3E-FINAL: çalışma modunda liste GİZLİ -- başka bir karta
+      // geçmeden önce Listeye Dön ile liste moduna dönülmeli (yeni route
+      // mimarisi, bkz. as-dof-replay-route-state-final.spec.js).
+      await page.locator('button', { hasText: 'Listeye Dön' }).click();
       await page.locator(`.dof-liste-karti[data-dof-id="${dofB}"]`).click();
       await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofB}"]`)).toContainText('✓ Seçili');
       await expect(page.locator(`.dof-liste-karti[data-dof-id="${dofA}"]`)).not.toContainText('✓ Seçili');

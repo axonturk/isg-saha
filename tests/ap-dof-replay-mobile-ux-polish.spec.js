@@ -123,6 +123,9 @@ test.describe('AP. DÖF replay mobil UX polish (4R-PKG-3C)', () => {
     await dofSec(page, dofA);
     await expect(page.locator('#dof-aktif-baslik-metin')).toContainText('AKTIF-A');
 
+    // 4R-PKG-3E-FINAL: çalışma modunda liste gizli -- başka bir DÖF'e
+    // geçmek için önce Listeye Dön.
+    await page.locator('button', { hasText: 'Listeye Dön' }).click();
     await dofSec(page, dofB);
     await expect(page.locator('#dof-aktif-baslik-metin')).toContainText('AKTIF-B');
     await expect(page.locator('#dof-aktif-baslik-metin')).not.toContainText('AKTIF-A');
