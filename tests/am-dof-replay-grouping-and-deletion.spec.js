@@ -23,16 +23,38 @@ const PAKET = JSON.parse(PAKET_METNI);
 const DOF_A_UUID = '83f68019-f0ed-46ac-a5ed-0101a7117975';
 const DOF_B_UUID = 'a71621ad-7c60-4073-a7fe-5a40f4fb0723';
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu iki yardımcı
+ * (başarılı) importtan hemen sonra o paketi otomatik açar. Reddedilen/
+ * çakışan importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
+async function _paketiAcDene(page, paketUuid) {
+  if (!paketUuid) return;
+  try {
+    // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+    // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+    // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+    await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+    const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+    if (durumMetni === 'İçe aktarma tamamlandı') {
+      await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+      await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+    }
+  } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+}
+
 async function gercekPaketiSec(page) {
   await page.setInputFiles('#dof-import-input', {
     name: 'DOF_Kutuphane_2026-07-03.json', mimeType: 'application/json', buffer: Buffer.from(PAKET_METNI, 'utf-8'),
   });
+  await _paketiAcDene(page, PAKET.paketUuid);
 }
 
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi, mimeType: 'application/json', buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  await _paketiAcDene(page, paketUuid);
 }
 
 async function dofSec(page, dofUuid) {
@@ -180,30 +202,49 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
   });
 
   test('10. Paketi Sil -- pakete ait tüm DÖF/taslak/medya silinir, başka paket etkilenmez, tekrar import edilebilir', async ({ page }) => {
+    // 4R-PKG-3F: liste artık PAKET-SCOPED -- iki farklı paket aynı anda
+    // TEK bir düz listede görünmez, her paketin kendi #dof-package/<uuid>
+    // ekranı vardır. Bu test her paketi kendi ekranında ayrı doğrular.
     const paketX = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1, bulguKodu: 'PAKET-X' })] });
     const paketY = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 2, bulguKodu: 'PAKET-Y' })] });
     await dosyaSec(page, JSON.stringify(paketX), 'x.json');
-    await dosyaSec(page, JSON.stringify(paketY), 'y.json');
-    await expect(page.locator('.dof-liste-karti')).toHaveCount(2);
+    // X'in kendi ekranına açılma render zincirinin TAMAMEN yerleşmesini
+    // bekle -- aksi halde hemen ardından gelen Y importu ile X'in
+    // (henüz bitmemiş) render'ı YARIŞA girip birbirinin üzerine yazabilir.
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-X');
+    await dosyaSec(page, JSON.stringify(paketY), 'y.json');   // dosyaSec importtan sonra Y'yi otomatik açar
+    await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-Y');
 
     const dofUuidX = paketX.tehlikeler[0].dofUuid;
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketX.paketUuid);
+    await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-X');
+
     await dofSec(page, dofUuidX);
     await takipKaydet(page, { sorumlu: 'X sorumlusu' });   // taslak oluştur
-    // 4R-PKG-3E-FINAL: "Paketi Sil / Kaldır" liste modunda -- önce Listeye Dön.
+    // "Listeye Dön" -- work'ten kendi paketine (X) döner.
     await page.locator('button', { hasText: 'Listeye Dön' }).click();
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-X');
 
     await page.locator('button', { hasText: 'Paketi Sil / Kaldır' }).click();
     await page.locator('button', { hasText: 'Evet, Sil' }).click();
 
-    await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
-    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-Y');   // başka paket ETKİLENMEDİ
+    // Açık olduğun paket silindiği için ana sayfaya dönülür.
+    await expect(page).toHaveURL(/#home$/);
 
     const silinenKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuidX);
     expect(silinenKayit).toBeUndefined();
 
+    // Paket Y'nin kendi ekranı hâlâ 1 kayıt gösterir -- başka paket ETKİLENMEDİ.
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketY.paketUuid);
+    await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-Y');
+
     // Aynı paket X tekrar import edilebiliyor, eski taslak geri GELMİYOR.
     await dosyaSec(page, JSON.stringify(paketX), 'x-tekrar.json');
-    await expect(page.locator('.dof-liste-karti')).toHaveCount(2);
+    await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
+    await expect(page.locator('.dof-liste-karti')).toContainText('PAKET-X');
     const yeniKayitX = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuidX);
     expect(yeniKayitX.takipTaslagi).toBeUndefined();
   });
@@ -223,6 +264,9 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
     await expect(page.locator('.dof-liste-karti')).not.toContainText('YARIM-1');
 
+    // 4R-PKG-3F: reload sonrası hash (dosyaSec'in açtığı paket ekranı)
+    // KORUNUR -- "Tamamlanmamış Kayıtlar" artık ana ekrana özgü, önce home'a dön.
+    await page.evaluate(() => { location.hash = '#home'; });
     // Ama "Tamamlanmamış Kayıtlar" bölümünde görünür ve Sil düğmesi var.
     await expect(page.locator('#dof-sorunlu-kart')).toBeVisible();
     await expect(page.locator('#dof-sorunlu-liste')).toContainText('YARIM-1');
@@ -232,7 +276,9 @@ test.describe('AM. DÖF replay gruplama/paket özeti/yerel silme (4R-PKG-3A)', (
     await expect(page.locator('#dof-sorunlu-kart')).toBeHidden();
     const kalanKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), 'dof_wip_am11');
     expect(kalanKayit).toBeUndefined();
-    // Sağlam paket ETKİLENMEDİ.
+    // Sağlam paket ETKİLENMEDİ -- ana ekrandaki paket kartı hâlâ 1 DÖF gösterir.
+    await expect(page.locator(`#dof-paket-listesi [data-paket-uuid="${paket.paketUuid}"]`)).toContainText('1 DÖF');
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paket.paketUuid);
     await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
     await expect(page.locator('.dof-liste-karti')).toContainText('SAGLAM-1');
   });

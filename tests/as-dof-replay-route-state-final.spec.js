@@ -1,7 +1,9 @@
-// PWA 4R-PKG-3E-FINAL -- hash route tabanlı DÖF liste/çalışma modu, ortak
-// sayaç/source-of-truth (_dofMedyaSayaclariHesapla), Kaydet native disabled
+// PWA 4R-PKG-3E-FINAL/3F -- hash route tabanlı DÖF ekranları, ortak sayaç/
+// source-of-truth (_dofMedyaSayaclariHesapla), Kaydet native disabled
 // sözleşmesi ve Paylaşmayı Dene'nin otomatik ZIP indirme fallback'inin
-// KALDIRILMASI. Gerçek servisler (dofReplayZipOlustur, dofDonusBelgesiOlustur,
+// KALDIRILMASI. 3F ile üç seviyeli route'a (home/package/work) geçildi --
+// bu dosya artık "paketi aç" adımını (home -> package) içerir. Gerçek
+// servisler (dofReplayZipOlustur, dofDonusBelgesiOlustur,
 // dofPaketiDegismisDofUuidleri, dofKanitMedyasiEkle/Sil) DEĞİŞTİRİLMEDİ --
 // bu dosya yalnız UI/route/state katmanını test eder.
 //
@@ -35,7 +37,14 @@ async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
 async function tekDofKur(page, dofId = 1, bulguKodu = 'AS-1') {
   const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId, bulguKodu })] });
   await dosyaSec(page, JSON.stringify(paket));
-  return paket.tehlikeler[0].dofUuid;
+  return { dofUuid: paket.tehlikeler[0].dofUuid, paketUuid: paket.paketUuid };
+}
+
+/** 4R-PKG-3F: paket ekranına gir -- ana ekrandaki paket kartının "Aç"
+ * butonuna basar (gerçek UI akışı, doğrudan hash yazmaz). */
+async function paketiAc(page, paketUuid) {
+  await page.locator(`[data-paket-uuid="${paketUuid}"] button`, { hasText: 'Aç' }).click();
+  await expect(page).toHaveURL(new RegExp(`#dof-package/${paketUuid}$`));
 }
 
 async function paylasimMockKur(page, { destekli, hataAt = null }) {
@@ -50,7 +59,7 @@ async function paylasimMockKur(page, { destekli, hataAt = null }) {
   }, { destekli, hataAt });
 }
 
-test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
+test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/tests/fixtures/blank.html');
     await dbTemizle(page);
@@ -63,22 +72,25 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
     await dbTemizle(page);
   });
 
-  test('1. Liste route -- import sonrası #dof-list, liste görünür, çalışma alanı görünmez', async ({ page }) => {
-    await tekDofKur(page);
-    await expect(page).toHaveURL(/#dof-list$/);
-    await expect(page.locator('#dof-list-mod-blok')).toBeVisible();
-    await expect(page.locator('#dof-liste')).toBeVisible();
+  test('1. Home route -- import sonrası #home, paket kartı görünür, paket/çalışma alanları görünmez', async ({ page }) => {
+    const { paketUuid } = await tekDofKur(page);
+    await expect(page).toHaveURL(/#home$/);
+    await expect(page.locator('#home-mod-blok')).toBeVisible();
+    await expect(page.locator(`[data-paket-uuid="${paketUuid}"]`)).toBeVisible();
+    await expect(page.locator('#dof-package-mod-blok')).toBeHidden();
     await expect(page.locator('#dof-work-mod-blok')).toBeHidden();
     await expect(page.locator('#dof-takip-form-kart')).toBeHidden();
     await expect(page.locator('#dof-replay-kart')).toBeHidden();
   });
 
-  test('2. Work route -- DÖF kartına tıkla, #dof-work/<uuid>, liste görünmez, yalnız aktif DÖF görünür', async ({ page }) => {
-    const dofUuid = await tekDofKur(page);
+  test('2. Work route -- paketi aç, DÖF kartına tıkla, #dof-work/<uuid>, paket/liste görünmez, yalnız aktif DÖF görünür', async ({ page }) => {
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
 
     await expect(page).toHaveURL(new RegExp(`#dof-work/${dofUuid}$`));
-    await expect(page.locator('#dof-list-mod-blok')).toBeHidden();
+    await expect(page.locator('#home-mod-blok')).toBeHidden();
+    await expect(page.locator('#dof-package-mod-blok')).toBeHidden();
     await expect(page.locator('#dof-work-mod-blok')).toBeVisible();
     await expect(page.locator('#dof-takip-form-kart')).toBeVisible();
     await expect(page.locator('#dof-kanit-medya-kart')).toBeVisible();
@@ -86,37 +98,61 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
     await expect(page.locator('#dof-aktif-baslik-metin')).toContainText('AS-1');
   });
 
-  test('2b. Geçersiz dofUuid -- güvenli şekilde listeye döner, kırık ekranda kalınmaz', async ({ page }) => {
+  test('2b. Geçersiz dofUuid -- güvenli şekilde home\'a döner, kırık ekranda kalınmaz', async ({ page }) => {
     await tekDofKur(page);
     // hashchange olayı asenkron gelir -- `toHaveURL`/`toBeVisible` otomatik
     // tekrar dener, doğrudan bir router fonksiyonu çağırmaya gerek yok.
     await page.evaluate(() => { location.hash = '#dof-work/uydurma-uuid-yok'; });
-    await expect(page).toHaveURL(/#dof-list$/);
-    await expect(page.locator('#dof-list-mod-blok')).toBeVisible();
+    await expect(page).toHaveURL(/#home$/);
+    await expect(page.locator('#home-mod-blok')).toBeVisible();
     await expect(page.locator('#dof-work-mod-blok')).toBeHidden();
-    await expect(page.locator('#dof-liste-durum')).toContainText('DÖF bulunamadı');
+    await expect(page.locator('#dof-liste-durum')).toContainText('bulunamadı');
   });
 
-  test('3. Listeye Dön / browser back -- ikisi de listeye döner', async ({ page }) => {
-    const dofUuid = await tekDofKur(page);
+  test('2c. Geçersiz paketUuid -- güvenli şekilde home\'a döner, kırık ekranda kalınmaz', async ({ page }) => {
+    await tekDofKur(page);
+    await page.evaluate(() => { location.hash = '#dof-package/uydurma-paket-yok'; });
+    await expect(page).toHaveURL(/#home$/);
+    await expect(page.locator('#home-mod-blok')).toBeVisible();
+    await expect(page.locator('#dof-package-mod-blok')).toBeHidden();
+    await expect(page.locator('#dof-liste-durum')).toContainText('bulunamadı');
+  });
+
+  test('3. Listeye Dön / browser back -- work -> package, package -> home', async ({ page }) => {
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await expect(page.locator('#dof-work-mod-blok')).toBeVisible();
 
+    // "Listeye Dön" -- work'ten PAKET ekranına döner (home'a değil).
     await page.locator('button', { hasText: 'Listeye Dön' }).click();
-    await expect(page).toHaveURL(/#dof-list$/);
-    await expect(page.locator('#dof-list-mod-blok')).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`#dof-package/${paketUuid}$`));
+    await expect(page.locator('#dof-package-mod-blok')).toBeVisible();
     await expect(page.locator('#dof-work-mod-blok')).toBeHidden();
 
-    // Tekrar çalışma moduna gir, bu kez tarayıcı geri tuşuyla dön.
+    // "Ana Sayfaya Dön" -- package'dan home'a döner.
+    await page.locator('button', { hasText: 'Ana Sayfaya Dön' }).click();
+    await expect(page).toHaveURL(/#home$/);
+    await expect(page.locator('#home-mod-blok')).toBeVisible();
+    await expect(page.locator('#dof-package-mod-blok')).toBeHidden();
+
+    // Tekrar work moduna gir, bu kez tarayıcı geri tuşuyla package'a dön.
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await expect(page.locator('#dof-work-mod-blok')).toBeVisible();
     await page.goBack();
-    await expect(page.locator('#dof-list-mod-blok')).toBeVisible();
+    await expect(page.locator('#dof-package-mod-blok')).toBeVisible();
     await expect(page.locator('#dof-work-mod-blok')).toBeHidden();
+
+    // Package'dan browser back ile home'a dön.
+    await page.goBack();
+    await expect(page.locator('#home-mod-blok')).toBeVisible();
+    await expect(page.locator('#dof-package-mod-blok')).toBeHidden();
   });
 
   test('4. Kaydet state -- pasifken kayıt yapmaz, sorumlu yazınca aktifleşir, kaydet sonrası pasif olur, alt bar günceli gösterir', async ({ page }) => {
-    const dofUuid = await tekDofKur(page);
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await expect(page.locator('#dof-takip-form-kart')).toBeVisible();
 
@@ -148,7 +184,8 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
     await page.goto('/index.html');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
-    const dofUuid = await tekDofKur(page);
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('Henüz kanıt eklenmedi.');
 
@@ -186,7 +223,8 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
     await paylasimMockKur(page, { destekli: false });
     await page.goto('/index.html');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
-    const dofUuid = await tekDofKur(page);
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await page.locator('#dof-takip-sorumlu').fill('Paylas Testi');
     await page.locator('#dof-takip-kaydet-btn').click();
@@ -207,7 +245,8 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
   });
 
   test('7. ZIP sözleşmesi -- root yapısı değişmez, dof_donus.json/fotolar//sesler/ kökte, yasak alan yok', async ({ page }) => {
-    const dofUuid = await tekDofKur(page);
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
     await page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`).click();
     await page.locator('#dof-takip-sorumlu').fill('ZIP Sozlesme Testi');
     await page.locator('#dof-takip-kaydet-btn').click();
@@ -237,10 +276,10 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL)', () => {
     expect(k.dofUuid).toBe(dofUuid);
   });
 
-  test('8. Version badge -- PWA isg-saha-v24 · 4R-PKG-3E-FINAL görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v25 · 4R-PKG-3F görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v24');
-    await expect(rozet).toContainText('4R-PKG-3E-FINAL');
+    await expect(rozet).toContainText('isg-saha-v25');
+    await expect(rozet).toContainText('4R-PKG-3F');
   });
 });

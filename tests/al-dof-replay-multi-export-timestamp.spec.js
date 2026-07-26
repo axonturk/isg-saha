@@ -30,12 +30,23 @@ const DOF_C_UUID = 'dcaa52ea-45c7-4b05-9f4c-75acb3178233';   // 2026-KUT-RAFA-00
 const DOSYA_ADI_TEK_DESENI = /^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_1dof\.zip$/;
 const DOSYA_ADI_COKLU_DESENI = /^dof_replay_\d{8}_\d{6}_[a-f0-9]{8}_3dof\.zip$/;
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu yardımcı importtan
+ * hemen sonra o paketi otomatik açar. */
 async function dosyaSec(page) {
   await page.setInputFiles('#dof-import-input', {
     name: 'DOF_Kutuphane_2026-07-03.json',
     mimeType: 'application/json',
     buffer: Buffer.from(PAKET_METNI, 'utf-8'),
   });
+  // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi halde
+  // duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ) mevcut
+  // work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+  await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+  const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+  if (durumMetni === 'İçe aktarma tamamlandı') {
+    await page.locator(`[data-paket-uuid="${PAKET.paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, PAKET.paketUuid);
+  }
 }
 
 async function dofSec(page, dofUuid) {

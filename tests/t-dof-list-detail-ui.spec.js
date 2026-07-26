@@ -7,12 +7,32 @@ const { test, expect } = require('@playwright/test');
 const { storeTumu } = require('./helpers');
 const { gecerliDofKaydi, gecerliDofPaketi, sentetikUuidV4 } = require('./dof-import-fixtures');
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- DÖF listesi artık
+ * `#dof-package/<paketUuid>` rotasının ARKASINDA. Bu yardımcı, mevcut
+ * testlerin `.dof-liste-karti` ile DOĞRUDAN etkileşimini KORUMAK için
+ * (başarılı) importtan hemen sonra o paketi otomatik açar -- reddedilen/
+ * çakışan importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi,
     mimeType: 'application/json',
     buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  if (paketUuid) {
+    try {
+      // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+      // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+      // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+      await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+      const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+      if (durumMetni === 'İçe aktarma tamamlandı') {
+        await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+        await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+      }
+    } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+  }
 }
 
 async function taslakGuncelleDene(page, dofUuid, degisiklikler) {
@@ -33,8 +53,11 @@ test.describe('T. DÖF liste ve detay UI', () => {
   });
 
   test('A. Boş liste -- DÖF yokken bölüm görünür, boş durum mesajı', async ({ page }) => {
-    await expect(page.locator('h2', { hasText: "İçe Aktarılan DÖF'ler" })).toBeVisible();
-    await expect(page.locator('#dof-liste-durum')).toHaveText('Henüz içe aktarılmış DÖF yok.');
+    // 4R-PKG-3F: "İçe Aktarılan DÖF'ler" listesi artık #dof-package-mod-blok
+    // içinde (yalnız bir paket açıkken görünür) -- DÖF hiç yokken ana
+    // ekrandaki "Yüklü DÖF Paketleri" kartı boş-durum mesajını gösterir.
+    await expect(page.locator('#dof-paket-listesi-kart')).toBeVisible();
+    await expect(page.locator('#dof-paket-listesi')).toContainText('Henüz içe aktarılmış DÖF yok.');
     await expect(page.locator('.dof-liste-karti')).toHaveCount(0);
     await expect(page.locator('#dof-detay-kart')).toBeHidden();
   });

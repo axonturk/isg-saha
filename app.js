@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3E-FINAL';
-const APP_CACHE = 'isg-saha-v24';
+const APP_BUILD = '4R-PKG-3F';
+const APP_CACHE = 'isg-saha-v25';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -2328,15 +2328,19 @@ if (typeof window !== 'undefined') {
 
 let _dofListeKayitlari = [];
 let _dofListeSeciliId = null;
-// 4R-PKG-3E-FINAL: hash route tabanlı liste/çalışma modu -- gerçek Android
-// canlı testte kullanıcı "DÖF kartına basınca hâlâ liste altında inline
-// detay açılıyor" diye şikayet etti; artık iki AYRI ekran var:
-// `#dof-list` (yalnız liste/chip/paket özeti) ve `#dof-work/<dofUuid>`
-// (yalnız aktif DÖF -- liste TAMAMEN gizli). Route DEĞİŞTİRME TEK
-// noktadan (`_dofRotaGuncelle`, `hashchange` + ilk yüklemede çağrılır) --
-// `_dofKartTiklandi`/`_dofListeyeDon` yalnız `location.hash`'i günceller,
-// gerçek DOM güncellemesi/render zinciri hep `_dofRotaGuncelle` içinde olur.
-let _dofRotaModu = 'list';   // 'list' | 'work'
+// 4R-PKG-3F: hash route tabanlı ÜÇ ekran -- gerçek Android canlı testte
+// kullanıcı önce "DÖF kartına basınca hâlâ liste altında inline detay
+// açılıyor" (3E-FINAL'de çözüldü: work modu), sonra "çalışma ekranındayken
+// hâlâ Yeni Denetim/Kurum/Yedekle/DÖF Paketi Al görünüyor" diye şikayet
+// etti. Artık üç AYRI ekran var: `#home` (ana ekran + paket kartları),
+// `#dof-package/<paketUuid>` (seçili paketin grup/liste'i), `#dof-work/<dofUuid>`
+// (yalnız aktif DÖF). Route DEĞİŞTİRME TEK noktadan (`_dofRotaGuncelle`,
+// `hashchange` + navigasyon fonksiyonlarınca çağrılır) -- `_dofKartTiklandi`/
+// `_dofPaketKartiAcTikla`/`_dofPaketeDon`/`_dofAnaSayfayaDon` yalnız
+// `location.hash`'i günceller, gerçek DOM güncellemesi/render zinciri hep
+// `_dofRotaGuncelle` içinde olur.
+let _dofRotaModu = 'home';   // 'home' | 'package' | 'work'
+let _dofAktifPaketUuid = null;   // 'package'/'work' modunda aktif paketUuid
 // PWA 4R-PKG-3A -- grup/chip filtresi. VARSAYILAN 'tumu': mevcut ~100
 // DÖF list/detay/takip/replay testi hiçbir filtreleme beklemeden yazıldı
 // (tek/iki kayıtlık senkron fixture'larla `.dof-liste-karti` sayısını
@@ -2358,13 +2362,19 @@ let _dofGrupListesi = [];   // en son hesaplanan {key, etiket, kayitlar} dizisi
  * hem bir alanTipi hem bir riskDuzeyi grubuna aynı anda üye olabilir --
  * gruplar birbirini dışlamaz, yalnız kompakt listeyi FİLTRELEMEK için
  * kullanılır. */
-async function _dofGruplariHesapla(kayitlar) {
+async function _dofGruplariHesapla(kayitlar, durumHaritasi = null) {
   const gruplar = [{ key: 'tumu', etiket: 'Tümü', kayitlar: kayitlar.slice() }];
 
+  // 4R-PKG-3F performans: `durumHaritasi` verilmişse (bkz. `_dofListesiYukle`/
+  // `_dofPaketSec`, `_dofDurumHaritasiHesapla`'dan ÖNCEDEN hesaplanmış) her
+  // kayıt için TEKRAR IndexedDB taraması (`_dofKayitDegismisMi`) YAPILMAZ --
+  // 59 kayıtlık gerçek pakette bu tekrar tarama yavaş ortamlarda test zaman
+  // aşımına yol açacak kadar gecikmeye neden oluyordu.
   const islenenler = [];
   const bekleyenler = [];
   for (const k of kayitlar) {
-    if (await _dofKayitDegismisMi(k)) islenenler.push(k); else bekleyenler.push(k);
+    const degisti = durumHaritasi ? !!(durumHaritasi.get(k.id) && durumHaritasi.get(k.id).degisti) : await _dofKayitDegismisMi(k);
+    if (degisti) islenenler.push(k); else bekleyenler.push(k);
   }
   gruplar.push({ key: 'islenen', etiket: 'İşlenen', kayitlar: islenenler });
   gruplar.push({ key: 'bekleyen', etiket: 'Bekleyen', kayitlar: bekleyenler });
@@ -2446,57 +2456,112 @@ function _dofGrupSecTikla(anahtar) {
 }
 if (typeof window !== 'undefined') window._dofGrupSecTikla = _dofGrupSecTikla;
 
-/** Paket özet kartını (paketUuid + toplam/işlenen/bekleyen/foto/ses) ve
- * "Paketi Sil" aksiyonunu çizer. Birden fazla paket varsa (aynı ekranda
- * içe aktarılmış birden fazla farklı paketUuid) yalnız İLK karşılaşılan
- * paket özetlenir -- çoklu-paket özet UI'ı bu görevin kapsamı dışında,
- * "Paketi Sil" yine de o paketin dofUuid'lerini doğru hedefler. */
-async function _dofPaketOzetiCiz(kayitlar) {
+/** 4R-PKG-3F: Paket özet kartını (paket ekranında, `#dof-package-mod-blok`
+ * içinde) çizer -- ARTIK yalnız TEK, açıkça belirtilen `paketUuid`'e ait
+ * `kayitlar` (paket-scoped alt küme, bkz. `_dofListesiYukle`) kullanılır.
+ * Kaynak veride kurum/işyeri adı alanı YOK (yalnız paketUuid/dofId/
+ * bulguKodu vb.) -- başlık İCAT EDİLMEZ, kısa paketUuid ile gösterilir. */
+function _dofPaketOzetiCiz(kayitlar, paketUuid, durumHaritasi) {
   const kart = document.getElementById('dof-paket-ozet-kart');
   const metinEl = document.getElementById('dof-paket-ozet-metin');
   if (!kart || !metinEl) return;
-  if (kayitlar.length === 0) { kart.style.display = 'none'; return; }
+  if (!paketUuid || kayitlar.length === 0) { kart.style.display = 'none'; return; }
   kart.style.display = 'block';
 
-  const paketUuid = kayitlar[0].paketUuid;
+  const { islenen, foto, ses } = _dofPaketSayaclariHesapla(kayitlar, durumHaritasi);
+  const bekleyen = kayitlar.length - islenen;
+  metinEl.innerHTML = `
+    <div>DÖF Paketi: <strong>${_esc(_dofKisaUuid(paketUuid))}</strong> / ${kayitlar.length} DÖF</div>
+    <div>İşlenen: ${islenen} · Bekleyen: ${bekleyen} · Foto: ${foto} · Ses: ${ses}</div>`;
+  kart.dataset.paketUuid = paketUuid;
+}
+
+/** Bir kayıt kümesinin işlenen/foto/ses toplamlarını, ÖNCEDEN hesaplanmış
+ * `_dofDurumHaritasiHesapla` sonucundan (`durumHaritasi`, kayıt id'sine
+ * göre) SALT-OKUNUR toplar -- hem ana ekran paket kartlarında
+ * (`_dofPaketKartlariCiz`) hem paket ekranı özetinde (`_dofPaketOzetiCiz`)
+ * AYNI mantık kullanılır. 4R-PKG-3F performans notu: önceden her ikisi de
+ * KENDİ IndexedDB taramasını (kayıt başına `_dofKayitDegismisMi` +
+ * `dbIndexTumu`) yeniden yapıyordu -- 59 kayıtlık gerçek pakette bu
+ * TEKRARLANAN tarama (`_dofDurumHaritasiHesapla` zaten `_dofListesiYukle`'de
+ * bir kez yapılıyor) yavaş ortamlarda test zaman aşımına yol açacak kadar
+ * gecikmeye neden oluyordu -- artık salt-DOM, senkron bir toplama. */
+function _dofPaketSayaclariHesapla(kayitlar, durumHaritasi) {
   let islenen = 0;
   let foto = 0;
   let ses = 0;
   for (const k of kayitlar) {
-    if (k.paketUuid !== paketUuid) continue;
-    if (await _dofKayitDegismisMi(k)) islenen++;
-    const medyalar = await dbIndexTumu('dofKanitlari', 'dofUuid', k.dofUuid);
-    foto += medyalar.filter((m) => m.mediaType === 'photo').length;
-    ses += medyalar.filter((m) => m.mediaType === 'audio').length;
+    const d = durumHaritasi.get(k.id);
+    if (!d) continue;
+    if (d.degisti) islenen++;
+    foto += d.fotoSayisi;
+    ses += d.sesSayisi;
   }
-  const paketKayitlari = kayitlar.filter((k) => k.paketUuid === paketUuid);
-  const bekleyen = paketKayitlari.length - islenen;
-  // Kaynak veride kurum/işyeri adı alanı YOK (yalnız paketUuid/dofId/
-  // bulguKodu vb.) -- başlık İCAT EDİLMEZ, kısa paketUuid ile gösterilir.
-  metinEl.innerHTML = `
-    <div>DÖF Paketi: <strong>${_esc(_dofKisaUuid(paketUuid))}</strong> / ${paketKayitlari.length} DÖF</div>
-    <div>İşlenen: ${islenen} · Bekleyen: ${bekleyen} · Foto: ${foto} · Ses: ${ses}</div>`;
-  kart.dataset.paketUuid = paketUuid;
+  return { islenen, foto, ses };
+}
+
+/** 4R-PKG-3F: Ana ekrandaki (`#home-mod-blok`) paket/kurum kartları --
+ * içe aktarılmış HER FARKLI paketUuid için ayrı bir kompakt kart (toplam/
+ * işlenen/bekleyen/foto/ses özeti + Aç/Sil). Kurum/birim adı kaynak
+ * veride YOK -- İCAT EDİLMEZ (ör. yanlış "Kütüphane" gibi varsayılan
+ * üretilmez), kısa paketUuid gösterilir. "Aç" -- `#dof-package/<paketUuid>`
+ * rotasına geçer. */
+function _dofPaketKartlariCiz(kayitlar, durumHaritasi) {
+  const kart = document.getElementById('dof-paket-listesi-kart');
+  const el = document.getElementById('dof-paket-listesi');
+  if (!kart || !el) return;
+  kart.style.display = 'block';
+  if (kayitlar.length === 0) {
+    el.innerHTML = '<p style="color:#999; font-size:0.9rem;">Henüz içe aktarılmış DÖF yok.</p>';
+    return;
+  }
+
+  const paketUuidler = [...new Set(kayitlar.map((k) => k.paketUuid))];
+  const kartlarHtml = [];
+  for (const paketUuid of paketUuidler) {
+    const paketKayitlari = kayitlar.filter((k) => k.paketUuid === paketUuid);
+    const { islenen, foto, ses } = _dofPaketSayaclariHesapla(paketKayitlari, durumHaritasi);
+    const bekleyen = paketKayitlari.length - islenen;
+    kartlarHtml.push(`
+      <div class="finding-item" data-paket-uuid="${_escAttr(paketUuid)}">
+        <div style="font-weight:700;">DÖF Paketi ${_esc(_dofKisaUuid(paketUuid))}</div>
+        <div style="font-size:0.85rem; color:#666; margin-top:4px;">${paketKayitlari.length} DÖF · İşlenen ${islenen} · Bekleyen ${bekleyen}</div>
+        <div style="font-size:0.85rem; color:#666;">Foto ${foto} · Ses ${ses}</div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn btn-outline" style="width:auto; padding:8px 14px; font-size:0.85rem;" onclick="_dofPaketKartiAcTikla('${_escAttr(paketUuid)}')">Aç</button>
+          <button class="btn btn-outline" style="width:auto; padding:8px 14px; font-size:0.85rem; color:#c0392b; border-color:#c0392b;" onclick="_dofPaketKartiSilTikla('${_escAttr(paketUuid)}')">Sil / Kaldır</button>
+        </div>
+      </div>`);
+  }
+  kart.style.display = 'block';
+  el.innerHTML = kartlarHtml.join('');
 }
 
 /** "Paketi Sil / Kaldır" -- onay ister, onaylanırsa bu paketUuid'e ait
  * TÜM kanonik dofler kayıtlarını + bağlı dofKanitlari medyalarını
  * (servis `dofPaketiSil`) yerel IndexedDB'den siler. Desktop'a HİÇ
- * dokunmaz. */
-function _dofPaketSilTikla() {
-  const kart = document.getElementById('dof-paket-ozet-kart');
-  const paketUuid = kart && kart.dataset.paketUuid;
+ * dokunmaz. Hem ana ekran paket kartından hem paket ekranındaki "Paketi
+ * Sil / Kaldır" butonundan (bkz. `_dofPaketSilTikla`) çağrılır. */
+function _dofPaketKartiSilTikla(paketUuid) {
   if (!paketUuid) return;
   showModal(
     'Paketi Sil',
     'Bu yerel DÖF paketini ve buna bağlı taslak/medya kayıtlarını kaldırmak istiyor musunuz?',
     async () => {
+      const silinenAktifMi = paketUuid === _dofAktifPaketUuid;
       await dofPaketiSil(paketUuid);
+      if (silinenAktifMi) location.hash = '#home';   // açık olduğun paket silindiyse ana sayfaya dön
       await _dofListesiYukle();
     },
     'Evet, Sil',
     'btn-danger',
   );
+}
+if (typeof window !== 'undefined') window._dofPaketKartiSilTikla = _dofPaketKartiSilTikla;
+
+/** Paket ekranındaki "Paketi Sil / Kaldır" butonu -- aktif paketi hedefler. */
+function _dofPaketSilTikla() {
+  if (_dofAktifPaketUuid) _dofPaketKartiSilTikla(_dofAktifPaketUuid);
 }
 if (typeof window !== 'undefined') window._dofPaketSilTikla = _dofPaketSilTikla;
 
@@ -2607,14 +2672,28 @@ async function _dofListesiYukle() {
     .sort((a, b) => (a.dofId ?? 0) - (b.dofId ?? 0));
   await _dofSorunluKayitlariYukle(tumKayitlar);
 
+  // 4R-PKG-3F: TEK geçişte hesaplanır -- hem liste rozetleri hem ana ekran
+  // paket kartları hem paket özeti AYNI haritayı (kayıt id'sine göre foto/
+  // ses/işlenme durumu) kullanır (performans: 59 kayıtlık gerçek pakette
+  // her biri kendi IndexedDB taramasını YAPARSA -- yavaş cihaz/CI'de test
+  // zaman aşımına yol açabilecek gereksiz tekrar sorgular önlenir).
+  _dofDurumHaritasi = await _dofDurumHaritasiHesapla(_dofListeKayitlari);
+
+  // 4R-PKG-3F: ana ekran paket kartları HER ZAMAN (aktif route ne olursa
+  // olsun) güncel tutulur -- ucuz, salt-DOM; home dışındaki route'larda
+  // görünmez ama içerik yine de tutarlı kalır (ör. work modundan home'a
+  // dönüldüğünde eski/yanlış sayı görünmez).
+  _dofPaketKartlariCiz(_dofListeKayitlari, _dofDurumHaritasi);
+
   if (_dofListeKayitlari.length === 0) {
     durumEl.textContent = 'Henüz içe aktarılmış DÖF yok.';
     listeEl.innerHTML = '';
     _dofListeSeciliId = null;
+    _dofAktifPaketUuid = null;
     _dofGrupListesi = [];
     _dofDurumHaritasi = new Map();
     _dofGrupChipleriCiz([]);
-    await _dofPaketOzetiCiz([]);
+    await _dofPaketOzetiCiz([], null);
     _dofDetayGoster(null);
     await _dofReviewDurumYukle(null);
     await _dofTakipFormYukle(null);
@@ -2625,13 +2704,13 @@ async function _dofListesiYukle() {
   }
 
   durumEl.textContent = '';
-  // 4R-PKG-3E-FINAL: sayfa yenilenince (veya ilk yüklemede) `_dofListeSeciliId`
-  // JS state'i sıfırdan başlar (null) -- ama hash hâlâ `#dof-work/<uuid>`
-  // olabilir (kullanıcı o DÖF'ü çalışırken yeniledi). Hash geçerli bir
-  // kanonik kayda işaret ediyorsa render'dan ÖNCE seçili DÖF'ü hash'ten
-  // türetiriz, aksi halde reload sonrası çalışma ekranı GÖRÜNÜR ama İÇİ
-  // BOŞ kalırdı (route görünürlüğü doğru, veri yanlış -- gerçek regresyon,
-  // düzeltildi).
+  // 4R-PKG-3E-FINAL/3F: sayfa yenilenince (veya ilk yüklemede) `_dofListeSeciliId`/
+  // `_dofAktifPaketUuid` JS state'i sıfırdan başlar (null) -- ama hash hâlâ
+  // `#dof-work/<uuid>` veya `#dof-package/<uuid>` olabilir (kullanıcı o
+  // ekranı çalışırken yeniledi). Hash geçerli bir kanonik kayda/pakete
+  // işaret ediyorsa render'dan ÖNCE seçimi hash'ten türetiriz, aksi halde
+  // reload sonrası ekran GÖRÜNÜR ama İÇİ BOŞ kalırdı (3E-FINAL'de
+  // keşfedilen gerçek regresyonla AYNI desen -- burada da önlendi).
   const hashDofUuid = _dofRotaHashDofUuid();
   if (hashDofUuid && _dofListeKayitlari.some((k) => k.id === hashDofUuid)) {
     _dofListeSeciliId = hashDofUuid;
@@ -2639,10 +2718,30 @@ async function _dofListesiYukle() {
   if (_dofListeSeciliId && !_dofListeKayitlari.some((k) => k.id === _dofListeSeciliId)) {
     _dofListeSeciliId = null;   // seçili kayıt artık listede yok (ör. legacy'e dönüşmedi ama olası durum)
   }
-  _dofDurumHaritasi = await _dofDurumHaritasiHesapla(_dofListeKayitlari);
-  _dofGrupListesi = await _dofGruplariHesapla(_dofListeKayitlari);
+
+  const hashPaketUuid = _dofRotaHashPaketUuid();
+  if (hashPaketUuid && _dofListeKayitlari.some((k) => k.paketUuid === hashPaketUuid)) {
+    _dofAktifPaketUuid = hashPaketUuid;
+  } else if (_dofListeSeciliId) {
+    // Çalışma modundaysa aktif paket, seçili DÖF'ün kendi paketidir
+    // ("Listeye Dön" doğru pakete dönebilsin diye).
+    const seciliKayit = _dofListeKayitlari.find((k) => k.id === _dofListeSeciliId);
+    if (seciliKayit) _dofAktifPaketUuid = seciliKayit.paketUuid;
+  }
+  if (_dofAktifPaketUuid && !_dofListeKayitlari.some((k) => k.paketUuid === _dofAktifPaketUuid)) {
+    _dofAktifPaketUuid = null;   // paket silinmiş
+  }
+
+  // Grup/liste/paket özeti ARTIK paket-scoped -- yalnız `_dofAktifPaketUuid`e
+  // ait kayıtlar (paket ekranı dışında boş dizi, o kartlar zaten gizli).
+  const paketKayitlari = _dofAktifPaketUuid
+    ? _dofListeKayitlari.filter((k) => k.paketUuid === _dofAktifPaketUuid)
+    : [];
+  // `_dofDurumHaritasi` bu fonksiyonun BAŞINDA zaten hesaplandı (bkz.
+  // yukarıdaki yorum) -- burada TEKRAR hesaplanmaz.
+  _dofGrupListesi = await _dofGruplariHesapla(paketKayitlari, _dofDurumHaritasi);
   _dofGrupChipleriCiz(_dofGrupListesi);
-  await _dofPaketOzetiCiz(_dofListeKayitlari);
+  _dofPaketOzetiCiz(paketKayitlari, _dofAktifPaketUuid, _dofDurumHaritasi);
   const aktifGrup = _dofAktifGrupGetir(_dofGrupListesi);
   listeEl.innerHTML = aktifGrup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
   _dofDetayGoster(_dofListeSeciliId);
@@ -2712,9 +2811,34 @@ function _dofDetaySec(dofId) {
   _dofKanitMedyaYukle(dofId);
 }
 
-/** İki route bloğunun (`#dof-list-mod-blok`/`#dof-work-mod-blok`) DOM
- * görünürlüğünü `_dofRotaModu`'a göre ayarlar -- SALT DOM, hiçbir veri
- * okumaz/yazmaz. */
+/** 4R-PKG-3F: `#dof-package/<paketUuid>` rotasına girerken (`_dofRotaGuncelle`)
+ * çağrılır -- SEÇİLİ paketUuid'e ait grup/liste/paket özetini YENİDEN
+ * hesaplar ve çizer. `_dofListesiYukle`'nin bir önceki çalıştırmasında
+ * hesaplanan `_dofGrupListesi` BAŞKA (veya boş) bir paket bağlamına ait
+ * olabilir -- `_dofDetaySec`'in DÖF seçimi için yaptığı tazelemeyle AYNI
+ * desen, yalnız paket seviyesinde. Hiçbir DÖF seçili değildir (work
+ * render'ları null ile temizlenir). */
+async function _dofPaketSec(paketUuid) {
+  _dofAktifPaketUuid = paketUuid;
+  _dofListeSeciliId = null;
+  const paketKayitlari = _dofListeKayitlari.filter((k) => k.paketUuid === paketUuid);
+  // `_dofDurumHaritasi` en son `_dofListesiYukle` çalıştığında hesaplandı --
+  // navigasyon veri DEĞİŞTİRMEZ, o yüzden burada güvenle TEKRAR KULLANILIR
+  // (59 kayıtlık gerçek pakette tekrar IndexedDB taraması yavaş ortamlarda
+  // gecikmeye/test zaman aşımına yol açıyordu).
+  _dofGrupListesi = await _dofGruplariHesapla(paketKayitlari, _dofDurumHaritasi);
+  _dofGrupChipleriCiz(_dofGrupListesi);
+  _dofPaketOzetiCiz(paketKayitlari, paketUuid, _dofDurumHaritasi);
+  const aktifGrup = _dofAktifGrupGetir(_dofGrupListesi);
+  const listeEl = document.getElementById('dof-liste');
+  if (listeEl) listeEl.innerHTML = aktifGrup.kayitlar.map((k) => _dofListeKartHtml(k)).join('');
+  _dofDetayGoster(null);
+  await _dofReviewDurumYukle(null);
+  await _dofTakipFormYukle(null);
+  await _dofReplayBolumYukle(null);
+  await _dofKanitMedyaYukle(null);
+}
+
 /** Mevcut hash `#dof-work/<dofUuid>` biçimindeyse dofUuid'i döner, değilse
  * `null` -- route fonksiyonlarının hepsi bu TEK ayrıştırmayı paylaşır. */
 function _dofRotaHashDofUuid() {
@@ -2723,77 +2847,121 @@ function _dofRotaHashDofUuid() {
   return eslesme ? decodeURIComponent(eslesme[1]) : null;
 }
 
+/** Mevcut hash `#dof-package/<paketUuid>` biçimindeyse paketUuid'i döner,
+ * değilse `null`. */
+function _dofRotaHashPaketUuid() {
+  const hash = (typeof location !== 'undefined' && location.hash) || '';
+  const eslesme = hash.match(/^#dof-package\/(.+)$/);
+  return eslesme ? decodeURIComponent(eslesme[1]) : null;
+}
+
+/** Üç route bloğunun (`#home-mod-blok`/`#dof-package-mod-blok`/
+ * `#dof-work-mod-blok`) DOM görünürlüğünü `_dofRotaModu`'a göre ayarlar --
+ * SALT DOM, hiçbir veri okumaz/yazmaz. 4R-PKG-3F: gerçek Android canlı
+ * testte "DÖF çalışma ekranındayken üstte hâlâ Yeni Denetim/Kurum/Yedekle/
+ * DÖF Paketi Al görünüyor" şikayeti buradan çözüldü -- ana ekran artık
+ * AYRI bir wrapper (`#home-mod-blok`), yalnız 'home' modunda görünür. */
 function _dofRotaUygula() {
-  const listeBlok = document.getElementById('dof-list-mod-blok');
+  const homeBlok = document.getElementById('home-mod-blok');
+  const paketBlok = document.getElementById('dof-package-mod-blok');
   const calismaBlok = document.getElementById('dof-work-mod-blok');
-  if (listeBlok) listeBlok.style.display = _dofRotaModu === 'work' ? 'none' : '';
+  if (homeBlok) homeBlok.style.display = _dofRotaModu === 'home' ? '' : 'none';
+  if (paketBlok) paketBlok.style.display = _dofRotaModu === 'package' ? 'block' : 'none';
   if (calismaBlok) calismaBlok.style.display = _dofRotaModu === 'work' ? 'block' : 'none';
 }
 
 /** `_dofListesiYukle` SONUNDA çağrılan HAFİF sürüm -- `_dofRotaGuncelle`
- * ile AYNI hash/kayıt doğrulamasını yapar ama `_dofDetaySec`'i TEKRAR
- * ÇAĞIRMAZ (o render zaten `_dofListesiYukle`'nin kendi gövdesinde,
- * AWAIT'lenmiş olarak yapıldı). Amaç: paket silinirken/route hash'i artık
- * geçersizken bile liste/çalışma blok görünürlüğünü doğru tutmak --
- * `_dofDetaySec`'i tekrar (unawaited/fire-and-forget) çağırmak bir önceki
- * sürümde "Kaydedildi" mesajının ANLIK olarak yeniden boşalan bir
- * `#dof-takip-durum` yazmasıyla YARIŞA girip ÜZERİNE YAZIYORDU (gerçek
- * regresyon, düzeltildi) -- bu yüzden burada YALNIZ görünürlük/route
- * modu güncellenir, render zinciri TEKRARLANMAZ. */
+ * ile AYNI hash/kayıt doğrulamasını yapar ama render zincirini (`_dofDetaySec`)
+ * TEKRAR ÇAĞIRMAZ (o render zaten `_dofListesiYukle`'nin kendi gövdesinde,
+ * AWAIT'lenmiş olarak yapıldı -- tekrar çağırmak 3E-FINAL'de "Kaydedildi"
+ * mesajının anlık boşalan bir alanla YARIŞA girip üzerine yazması gibi
+ * gerçek bir regresyona yol açmıştı). Burada YALNIZ görünürlük/route modu
+ * güncellenir -- `_dofAktifPaketUuid`/`_dofListeSeciliId` zaten
+ * `_dofListesiYukle` tarafından hash'ten ÖNCEDEN türetilmiş olmalı. */
 function _dofRotaDogrula() {
   const hash = (typeof location !== 'undefined' && location.hash) || '';
-  const eslesme = hash.match(/^#dof-work\/(.+)$/);
-  if (eslesme) {
-    const dofUuid = decodeURIComponent(eslesme[1]);
-    _dofRotaModu = _dofListeKayitlari.some((k) => k.id === dofUuid) ? 'work' : 'list';
+  const workUuid = _dofRotaHashDofUuid();
+  const paketUuid = _dofRotaHashPaketUuid();
+  if (workUuid) {
+    _dofRotaModu = _dofListeKayitlari.some((k) => k.id === workUuid) ? 'work' : 'home';
+  } else if (paketUuid) {
+    _dofRotaModu = _dofListeKayitlari.some((k) => k.paketUuid === paketUuid) ? 'package' : 'home';
   } else {
-    _dofRotaModu = 'list';
+    _dofRotaModu = 'home';
   }
   _dofRotaUygula();
-  // Liste modunun kanonik URL'i `#dof-list` -- ilk yükleme/import sonrası
-  // boş/normalize edilmemiş hash'i sessizce düzeltir (render zinciri
-  // TETİKLEMEZ, yalnız URL yazar).
-  if (_dofRotaModu === 'list' && hash !== '#dof-list' && typeof history !== 'undefined' && history.replaceState) {
-    history.replaceState(history.state, '', '#dof-list');
+  // Home modunun kanonik URL'i `#home` -- ilk yükleme/import sonrası boş/
+  // normalize edilmemiş hash'i sessizce düzeltir (render zinciri TETİKLEMEZ,
+  // yalnız URL yazar).
+  if (_dofRotaModu === 'home' && hash !== '#home' && typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(history.state, '', '#home');
   }
 }
 
-/** Hash route'un TEK doğruluk kaynağı -- `hashchange` ve ilk yüklemede
- * çağrılır. `#dof-work/<dofUuid>` ise ve kayıt kanonik listede varsa
- * çalışma moduna geçer (yalnız o DÖF render edilir, liste gizlenir);
- * kayıt bulunamazsa (silinmiş/geçersiz/yazım hatası) GÜVENLİ şekilde
- * listeye döner -- hiçbir zaman boş/kırık bir çalışma ekranında kalınmaz.
- * Diğer her hash (`#dof-list`, boş, ilgisiz) liste modudur. */
+/** Hash route'un TEK doğruluk kaynağı -- `hashchange` ve navigasyon
+ * fonksiyonlarınca çağrılır. Üç rota:
+ * - `#dof-work/<dofUuid>` -- kanonik listede varsa çalışma moduna geçer
+ *   (yalnız o DÖF render edilir); YOKSA güvenli şekilde `#home`'a döner
+ *   (hangi pakete ait olduğu bilinemediği için package'a dönülemez).
+ * - `#dof-package/<paketUuid>` -- o paketUuid'e ait en az bir kanonik kayıt
+ *   varsa paket moduna geçer (yalnız o paketin grup/liste'i görünür);
+ *   YOKSA güvenli şekilde `#home`'a döner.
+ * - Diğer her hash (`#home`, boş, ilgisiz) home modudur.
+ * Hiçbir zaman boş/kırık bir çalışma veya paket ekranında kalınmaz. */
 function _dofRotaGuncelle() {
-  const hash = (typeof location !== 'undefined' && location.hash) || '';
-  const eslesme = hash.match(/^#dof-work\/(.+)$/);
-  if (eslesme) {
-    const dofUuid = decodeURIComponent(eslesme[1]);
-    const kayitVarMi = _dofListeKayitlari.some((k) => k.id === dofUuid);
-    if (kayitVarMi) {
+  const workUuid = _dofRotaHashDofUuid();
+  const paketUuidHash = _dofRotaHashPaketUuid();
+
+  if (workUuid) {
+    const kayit = _dofListeKayitlari.find((k) => k.id === workUuid);
+    if (kayit) {
       _dofRotaModu = 'work';
+      _dofAktifPaketUuid = kayit.paketUuid;
       _dofRotaUygula();
-      _dofDetaySec(dofUuid);
+      _dofDetaySec(workUuid);
       return;
     }
-    // Geçersiz/bulunamayan dofUuid -- kırık ekranda bırakma, listeye dön.
-    _dofRotaModu = 'list';
-    _dofRotaUygula();
-    _dofDetaySec(null);
-    const durumEl = document.getElementById('dof-liste-durum');
-    if (durumEl && _dofListeKayitlari.length > 0) durumEl.textContent = 'DÖF bulunamadı, listeye dönüldü.';
-    if (typeof history !== 'undefined' && history.replaceState) {
-      history.replaceState(history.state, '', '#dof-list');
-    }
+    _dofRotaGeriDon('DÖF bulunamadı, ana sayfaya dönüldü.');
     return;
   }
-  _dofRotaModu = 'list';
+
+  if (paketUuidHash) {
+    const paketVarMi = _dofListeKayitlari.some((k) => k.paketUuid === paketUuidHash);
+    if (paketVarMi) {
+      _dofRotaModu = 'package';
+      _dofRotaUygula();
+      _dofPaketSec(paketUuidHash);
+      return;
+    }
+    _dofRotaGeriDon('DÖF paketi bulunamadı, ana sayfaya dönüldü.');
+    return;
+  }
+
+  _dofRotaModu = 'home';
+  _dofAktifPaketUuid = null;
+  _dofListeSeciliId = null;
   _dofRotaUygula();
-  // Liste modunun kendi kanonik URL'i `#dof-list` -- boş/ilgisiz hash'ler
-  // (ör. ilk yükleme) sessizce normalize edilir, `replaceState` yeni
-  // history seviyesi EKLEMEZ/hashchange TETİKLEMEZ (döngü riski yok).
-  if (hash !== '#dof-list' && typeof history !== 'undefined' && history.replaceState) {
-    history.replaceState(history.state, '', '#dof-list');
+  // Home modunun kendi kanonik URL'i `#home` -- boş/ilgisiz hash'ler (ör.
+  // ilk yükleme) sessizce normalize edilir, `replaceState` yeni history
+  // seviyesi EKLEMEZ/hashchange TETİKLEMEZ (döngü riski yok).
+  const hash = (typeof location !== 'undefined' && location.hash) || '';
+  if (hash !== '#home' && typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(history.state, '', '#home');
+  }
+}
+
+/** Geçersiz/bulunamayan dofUuid veya paketUuid -- kırık ekranda bırakmadan
+ * güvenli şekilde `#home`'a döner, kullanıcıya açık mesaj gösterir. */
+function _dofRotaGeriDon(mesaj) {
+  _dofRotaModu = 'home';
+  _dofAktifPaketUuid = null;
+  _dofListeSeciliId = null;
+  _dofRotaUygula();
+  _dofDetaySec(null);
+  const durumEl = document.getElementById('dof-liste-durum');
+  if (durumEl && _dofListeKayitlari.length > 0) durumEl.textContent = mesaj;
+  if (typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(history.state, '', '#home');
   }
 }
 if (typeof window !== 'undefined') window.addEventListener('hashchange', _dofRotaGuncelle);
@@ -2810,14 +2978,29 @@ function _dofKartTiklandi(dofId) {
 }
 if (typeof window !== 'undefined') window._dofKartTiklandi = _dofKartTiklandi;
 
-/** "Listeye Dön" butonu -- çalışma modundan liste moduna döner. Hash
- * güncellensin/güncellenmesin (aynı zaten '#dof-list' olsa bile) rotayı
- * doğrudan uygular -- `_dofKartTiklandi` ile aynı senkron-render deseni. */
-function _dofListeyeDon() {
-  location.hash = '#dof-list';
+/** Ana ekrandaki paket kartında "Aç" -- `#dof-package/<paketUuid>` rotasına geçer. */
+function _dofPaketKartiAcTikla(paketUuid) {
+  location.hash = `#dof-package/${encodeURIComponent(paketUuid)}`;
   _dofRotaGuncelle();
 }
-if (typeof window !== 'undefined') window._dofListeyeDon = _dofListeyeDon;
+if (typeof window !== 'undefined') window._dofPaketKartiAcTikla = _dofPaketKartiAcTikla;
+
+/** Çalışma ekranındaki "Listeye Dön" -- aktif DÖF'ün paketine
+ * (`_dofAktifPaketUuid`, `_dofRotaGuncelle` work moduna girerken zaten
+ * ayarladı) döner. Paket artık bilinmiyorsa (olağan akışta oluşmaz,
+ * savunma amaçlı) `#home`'a düşer. */
+function _dofPaketeDon() {
+  location.hash = _dofAktifPaketUuid ? `#dof-package/${encodeURIComponent(_dofAktifPaketUuid)}` : '#home';
+  _dofRotaGuncelle();
+}
+if (typeof window !== 'undefined') window._dofPaketeDon = _dofPaketeDon;
+
+/** Paket ekranındaki "Ana Sayfaya Dön" -- `#home`'a döner. */
+function _dofAnaSayfayaDon() {
+  location.hash = '#home';
+  _dofRotaGuncelle();
+}
+if (typeof window !== 'undefined') window._dofAnaSayfayaDon = _dofAnaSayfayaDon;
 
 /** 4R-PKG-3C: aktif DÖF çalışma alanının üstünde -- normal saha
  * denetimindeki "aktif konum" başlığına benzer -- kompakt, salt-okunur

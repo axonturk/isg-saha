@@ -11,12 +11,30 @@ const { gecerliDofKaydi, gecerliDofPaketi } = require('./dof-import-fixtures');
 
 const UUID_V4_DESENI = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu yardımcı (başarılı)
+ * importtan hemen sonra o paketi otomatik açar. Reddedilen/çakışan
+ * importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi,
     mimeType: 'application/json',
     buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  if (paketUuid) {
+    try {
+      // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+      // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+      // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+      await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+      const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+      if (durumMetni === 'İçe aktarma tamamlandı') {
+        await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+        await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+      }
+    } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+  }
 }
 
 async function dofSecVeFormBekle(page, index = 0) {
@@ -323,7 +341,10 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await expect(page.locator('#setup-kurum')).toBeVisible();
     await expect(page.locator('button', { hasText: 'Devam' })).toBeVisible();
     await expect(page.locator('h2', { hasText: 'DÖF Paketi Al' })).toBeVisible();
-    await expect(page.locator('h2', { hasText: "İçe Aktarılan DÖF'ler" })).toBeVisible();
+    // 4R-PKG-3F: "İçe Aktarılan DÖF'ler" listesi artık yalnız
+    // #dof-package/<paketUuid> rotasında görünür -- ana ekranda onun
+    // yerine (boş durumda) "Yüklü DÖF Paketleri" kartı görünür.
+    await expect(page.locator('#dof-paket-listesi-kart')).toBeVisible();
     await expect(page.locator('#setup-kurum')).toBeEnabled();
   });
 });

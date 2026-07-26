@@ -247,6 +247,13 @@
 
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
+        <!-- ANA EKRAN (4R-PKG-3F) -- yalnız #home rotasında görünür; DÖF
+             paket/çalışma rotalarına geçilince TAMAMEN gizlenir (bkz.
+             _dofRotaGuncelle/_dofRotaUygula). Yeni Denetim/DÖF Paketi Al/
+             Yedekle gibi ana ekrana özgü elemanlar DÖF ekranlarında ASLA
+             görünmemeli -- gerçek Android canlı testte bulunan karışıklık
+             buydu. -->
+        <div id="home-mod-blok">
         <div class="header">
             <h3>İSG Saha Asistanı <span class="version-badge">v0.11.2</span></h3>
             <button class="btn btn-outline" style="width: auto; padding: 8px;" onclick="backupRestore()">
@@ -323,22 +330,42 @@
             </div>
         </div>
 
-        <!-- DÖF LİSTE MODU (4R-PKG-3E-FINAL) -- yalnız #dof-list rotasında
-             görünür; #dof-work/<uuid> rotasına geçilince TAMAMEN gizlenir
-             (bkz. _dofRotaGuncelle). Paket özeti/sorunlu kayıtlar/chip
-             filtresi/kompakt liste -- hiçbiri çalışma modunda görünmez. -->
-        <div id="dof-list-mod-blok">
+        <!-- DÖF PAKET/KURUM KARTLARI (4R-PKG-3F) -- ana ekranda düz liste
+             YERİNE önce kompakt paket kartları görünür; "Aç" tıklanınca
+             ilgili #dof-package/<paketUuid> rotasına geçilir. Kurum/birim
+             adı kaynak veride yoksa İCAT EDİLMEZ, kısa paketUuid gösterilir
+             (bkz. _dofPaketKartlariCiz). -->
+        <div class="card" id="dof-paket-listesi-kart" style="display:none;">
+            <h2>Yüklü DÖF Paketleri</h2>
+            <div id="dof-paket-listesi"></div>
+        </div>
+
+        <!-- DÖF SORUNLU/YARIM YEREL KAYITLAR (PWA 4R-PKG-3B) -- paket
+             bazlı DEĞİL (kanonik olmayan kayıtlar genelde geçerli bir
+             paketUuid'e bile sahip olmayabilir), bu yüzden ana ekranda
+             kalır. -->
+        <div class="card" id="dof-sorunlu-kart" style="display:none;">
+            <h2>Tamamlanmamış Kayıtlar</h2>
+            <div id="dof-sorunlu-liste"></div>
+        </div>
+        </div>
+        <!-- /home-mod-blok -->
+
+        <!-- DÖF PAKET MODU (4R-PKG-3F) -- yalnız #dof-package/<paketUuid>
+             rotasında görünür. Paket özeti/chip filtresi/kompakt liste
+             yalnız BU paketUuid'e ait kayıtlarla SINIRLIDIR (bkz.
+             _dofAktifPaketUuid). "Ana Sayfaya Dön" tüm alt bölümlerin
+             ÜSTÜNDE, ilk eleman. -->
+        <div id="dof-package-mod-blok" style="display:none;">
+            <button class="btn btn-outline" style="margin-bottom:12px;" onclick="_dofAnaSayfayaDon()">
+                <i class="fas fa-arrow-left"></i> Ana Sayfaya Dön
+            </button>
+
             <!-- DÖF PAKET ÖZETİ (PWA 4R-PKG-3A) -->
             <div class="card" id="dof-paket-ozet-kart" style="display:none;">
                 <h2>DÖF Paketi</h2>
                 <div id="dof-paket-ozet-metin" style="font-size:0.9rem; color:#666; line-height:1.6;"></div>
                 <button class="btn btn-outline" style="margin-top:10px; color:#c0392b; border-color:#c0392b;" onclick="_dofPaketSilTikla()">Paketi Sil / Kaldır</button>
-            </div>
-
-            <!-- DÖF SORUNLU/YARIM YEREL KAYITLAR (PWA 4R-PKG-3B) -->
-            <div class="card" id="dof-sorunlu-kart" style="display:none;">
-                <h2>Tamamlanmamış Kayıtlar</h2>
-                <div id="dof-sorunlu-liste"></div>
             </div>
 
             <!-- DÖF GRUP / CHIP FİLTRESİ (PWA 4R-PKG-3A) -->
@@ -358,7 +385,7 @@
              rotasında görünür; liste rotasında TAMAMEN gizlenir. "Listeye
              Dön" tüm alt bölümlerin ÜSTÜNDE, ilk eleman. -->
         <div id="dof-work-mod-blok" style="display:none;">
-            <button class="btn btn-outline" style="margin-bottom:12px;" onclick="_dofListeyeDon()">
+            <button class="btn btn-outline" style="margin-bottom:12px;" onclick="_dofPaketeDon()">
                 <i class="fas fa-arrow-left"></i> Listeye Dön
             </button>
 

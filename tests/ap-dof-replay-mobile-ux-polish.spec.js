@@ -19,16 +19,38 @@ const PAKET_YOLU = path.join(__dirname, 'fixtures', 'DOF_Kutuphane_2026-07-03.js
 const PAKET_METNI = fs.readFileSync(PAKET_YOLU, 'utf-8');
 const DOF_A_UUID = '83f68019-f0ed-46ac-a5ed-0101a7117975';
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu iki yardımcı
+ * (başarılı) importtan hemen sonra o paketi otomatik açar. Reddedilen/
+ * çakışan importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
+async function _paketiAcDene(page, paketUuid) {
+  if (!paketUuid) return;
+  try {
+    // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+    // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+    // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+    await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+    const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+    if (durumMetni === 'İçe aktarma tamamlandı') {
+      await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+      await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+    }
+  } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+}
+
 async function gercekPaketiSec(page) {
   await page.setInputFiles('#dof-import-input', {
     name: 'DOF_Kutuphane_2026-07-03.json', mimeType: 'application/json', buffer: Buffer.from(PAKET_METNI, 'utf-8'),
   });
+  await _paketiAcDene(page, JSON.parse(PAKET_METNI).paketUuid);
 }
 
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi, mimeType: 'application/json', buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  await _paketiAcDene(page, paketUuid);
 }
 
 async function dofSec(page, dofUuid) {

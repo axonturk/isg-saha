@@ -91,6 +91,9 @@ test.describe('W. Service Worker registration', () => {
       name: 'w_paketi.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(paket), 'utf-8'),
     });
     await expect(page.locator('#dof-import-durum')).toHaveText('İçe aktarma tamamlandı');
+    // 4R-PKG-3F: DÖF listesi artık #dof-package/<paketUuid> rotasının
+    // arkasında -- önce paket ekranını aç.
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paket.paketUuid);
     await page.locator('.dof-liste-karti').first().click();
     await expect(page.locator('#dof-detay-kart')).toBeVisible();
 
@@ -100,7 +103,10 @@ test.describe('W. Service Worker registration', () => {
   test('E. DÖF UI regresyon smoke -- import/liste görünür, takip/replay DÖF seçilmeden gizli', async ({ page }) => {
     await page.goto('/index.html');
     await expect(page.locator('#dof-import-btn')).toBeVisible();
-    await expect(page.locator('h2', { hasText: "İçe Aktarılan DÖF'ler" })).toBeVisible();
+    // 4R-PKG-3F: "İçe Aktarılan DÖF'ler" listesi artık yalnız
+    // #dof-package/<paketUuid> rotasında görünür -- ana ekranda onun
+    // yerine (boş durumda) "Yüklü DÖF Paketleri" kartı görünür.
+    await expect(page.locator('#dof-paket-listesi-kart')).toBeVisible();
     await expect(page.locator('#dof-detay-kart')).toBeHidden();
     await expect(page.locator('#dof-takip-form-kart')).toBeHidden();
     await expect(page.locator('#dof-replay-kart')).toBeHidden();
@@ -110,6 +116,8 @@ test.describe('W. Service Worker registration', () => {
     await page.setInputFiles('#dof-import-input', {
       name: 'w_paketi2.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(paket), 'utf-8'),
     });
+    await expect(page.locator('#dof-import-durum')).toHaveText('İçe aktarma tamamlandı');
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paket.paketUuid);
     await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
     await page.locator('.dof-liste-karti').first().click();
     await expect(page.locator('#dof-detay-kart')).toBeVisible();

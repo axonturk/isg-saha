@@ -34,12 +34,23 @@ const dofBKaynak = PAKET.tehlikeler.find((t) => t.dofUuid === DOF_B_UUID);
 
 const PNG_1X1_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu yardımcı importtan
+ * hemen sonra o paketi otomatik açar. */
 async function dosyaSec(page) {
   await page.setInputFiles('#dof-import-input', {
     name: 'DOF_Kutuphane_2026-07-03.json',
     mimeType: 'application/json',
     buffer: Buffer.from(PAKET_METNI, 'utf-8'),
   });
+  // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi halde
+  // duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ) mevcut
+  // work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+  await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+  const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+  if (durumMetni === 'İçe aktarma tamamlandı') {
+    await page.locator(`[data-paket-uuid="${PAKET.paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, PAKET.paketUuid);
+  }
 }
 
 async function dofSec(page, dofUuid) {

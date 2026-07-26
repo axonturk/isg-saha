@@ -5,9 +5,9 @@ const path = require('node:path');
 const swMetni = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
 
 test.describe('Z. Service Worker cache upgrade', () => {
-  test('app-shell cache surumu v24 olarak yenilenmistir', () => {
-    expect(swMetni).toContain("const CACHE = 'isg-saha-v24';");
-    expect(swMetni).not.toContain("const CACHE = 'isg-saha-v23';");
+  test('app-shell cache surumu v25 olarak yenilenmistir', () => {
+    expect(swMetni).toContain("const CACHE = 'isg-saha-v25';");
+    expect(swMetni).not.toContain("const CACHE = 'isg-saha-v24';");
   });
 
   test('yeni cache temel app-shell dosyalarini install asamasinda doldurur', () => {

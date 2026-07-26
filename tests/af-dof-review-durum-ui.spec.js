@@ -7,12 +7,30 @@ const AdmZip = require('adm-zip');
 const { test, expect } = require('@playwright/test');
 const { gecerliDofKaydi, gecerliDofPaketi } = require('./dof-import-fixtures');
 
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu yardımcı (başarılı)
+ * importtan hemen sonra o paketi otomatik açar. Reddedilen/çakışan
+ * importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi,
     mimeType: 'application/json',
     buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  if (paketUuid) {
+    try {
+      // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+      // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+      // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+      await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+      const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+      if (durumMetni === 'İçe aktarma tamamlandı') {
+        await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+        await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+      }
+    } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+  }
 }
 
 async function dofKaydiGetir(page, dofUuid) {

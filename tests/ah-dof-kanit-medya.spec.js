@@ -63,10 +63,28 @@ async function medyaSilDene(page, dofUuid, localMediaUuid) {
  * (salt-servis köprüsü) DEĞİL, çünkü bu dosyadaki testlerin çoğu
  * `.dof-liste-karti` UI etkileşimi gerektiriyor ve yalnız gerçek
  * `_dofPaketDosyaSecildi` yolu listeyi (`_dofListesiYukle`) yeniler. */
+/** 4R-PKG-3F: import sonrası ana ekranda kalınır -- bu yardımcı (başarılı)
+ * importtan hemen sonra o paketi otomatik açar. Reddedilen/çakışan
+ * importlarda paket kartı hiç oluşmaz, sessizce atlanır. */
 async function dosyaSec(page, jsonMetni, dosyaAdi = 'dof_paketi.json') {
   await page.setInputFiles('#dof-import-input', {
     name: dosyaAdi, mimeType: 'application/json', buffer: Buffer.from(jsonMetni, 'utf-8'),
   });
+  let paketUuid;
+  try { paketUuid = JSON.parse(jsonMetni).paketUuid; } catch (e) { paketUuid = null; }
+  if (paketUuid) {
+    try {
+      // Yalnız GERÇEKTEN yeni/başarılı bir import'ta otomatik aç -- aksi
+      // halde duplicate/çakışma reddi (ki zaten hiçbir şeyi DEĞİŞTİRMEZ)
+      // mevcut work/paket ekranından yanlışlıkla UZAKLAŞTIRIRDI.
+      await page.waitForFunction(() => (document.getElementById('dof-import-durum') || {}).textContent, { timeout: 3000 });
+      const durumMetni = (await page.locator('#dof-import-durum').innerText()).trim();
+      if (durumMetni === 'İçe aktarma tamamlandı') {
+        await page.locator(`[data-paket-uuid="${paketUuid}"]`).first().waitFor({ state: 'attached', timeout: 3000 });
+        await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paketUuid);
+      }
+    } catch (e) { /* import reddedildi/çakıştı -- paket kartı hiç oluşmadı, atla */ }
+  }
 }
 
 async function tekDofKur(page, dofId = 1, bulguKodu = 'B-1') {
@@ -270,6 +288,8 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     await expect(page.locator('#dof-kanit-medya-liste img')).toHaveCount(2);
 
     // Sonra NORMAL saha akışında bir fotoğraf çek -- yalnız KENDİ fotoğrafı sayılmalı.
+    // 4R-PKG-3F: "Yeni Denetim" artık yalnız ana ekranda görünür -- önce home'a dön.
+    await page.evaluate(() => { location.hash = '#home'; });
     await _denetimBaslat(page);
     await page.click('button[onclick="openOCR(\'kanit\')"]');
     await page.waitForFunction(() => { const v = document.getElementById('video'); return v && v.videoWidth > 0; });
@@ -300,6 +320,8 @@ test.describe('AH. DÖF Kanıt Medyaları (foto/ses local capture)', () => {
     await dofSesBtn.click();
     await expect(page.locator('#dof-kanit-medya-liste audio')).toHaveCount(1);
 
+    // 4R-PKG-3F: "Yeni Denetim" artık yalnız ana ekranda görünür -- önce home'a dön.
+    await page.evaluate(() => { location.hash = '#home'; });
     await _denetimBaslat(page);
     const sesBtn = page.locator('#btn-ses-kaydi');
     await sesBtn.click();

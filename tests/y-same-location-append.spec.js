@@ -269,6 +269,10 @@ test.describe('Y. Aynı konuma geri dönüş / mevcut denetime ekleme', () => {
     await page.setInputFiles('#dof-import-input', {
       name: 'y_paketi.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(paket), 'utf-8'),
     });
+    await expect(page.locator('#dof-import-durum')).toHaveText('İçe aktarma tamamlandı');
+    // 4R-PKG-3F: DÖF listesi artık #dof-package/<paketUuid> rotasının
+    // arkasında -- önce paket ekranını aç.
+    await page.evaluate((u) => { location.hash = `#dof-package/${u}`; }, paket.paketUuid);
     await expect(page.locator('.dof-liste-karti')).toHaveCount(1);
     await page.locator('.dof-liste-karti').first().click();
     await page.locator('#dof-takip-etkinlik-kontrol-tarihi').fill('2026-09-05');
