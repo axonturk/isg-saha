@@ -217,6 +217,15 @@
         }
         #screen-setup.dof-replay-bar-aktif { padding-bottom: 150px; }
 
+        /* DÖF Kanıt Medyaları buton satırı (4R-PKG-3D) -- 3 buton mobilde
+           tek satırda taşıyordu ("Ses Notu" sağdan kesiliyordu). 2+1
+           responsive grid: üstte Fotoğraf Çek/Dosya Seç yan yana, altta
+           Ses Notu tek başına tam genişlik -- hiçbir metin kesilmez. */
+        .dof-kanit-buton-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;
+        }
+        .dof-kanit-buton-grid .dof-kanit-ses-btn-grid { grid-column: 1 / -1; }
+
         /* Kanıt ekle -- Kamera/Galeri/Ses notu 3'lü kart satırı (Bulgu Ekle redesign) */
         .kanit-ekle-satiri { display: flex; gap: 8px; margin-bottom: 10px; }
         .kanit-karti {
@@ -340,13 +349,9 @@
         </div>
         <!-- AKTİF DÖF BAŞLIĞI (4R-PKG-3C) -- saha denetimindeki aktif konum
              başlığına benzer, kompakt+salt-okunur; DÖF çalışma alanının
-             (detay/inceleme/takip/kanıt) üstünde durur. -->
+             (inceleme/takip/kanıt/detay) üstünde durur. -->
         <div class="card" id="dof-aktif-baslik-kart" style="display:none; background:#eaf4fc; border:2px solid var(--accent); margin-bottom:0; border-radius:12px 12px 0 0;">
             <div id="dof-aktif-baslik-metin"></div>
-        </div>
-        <div class="card" id="dof-detay-kart" style="display:none; margin-top:0; margin-bottom:0; border-radius:0; box-shadow:none; border-bottom:1px solid #eee;">
-            <h2>DÖF Detayı</h2>
-            <div id="dof-detay"></div>
         </div>
 
         <!-- DÖF İNCELEME DURUMU (PWA Commit 4N) — takipTaslagi'ndan AYRI, -->
@@ -368,7 +373,9 @@
             <div id="dof-review-durum-hata" style="font-size:0.85rem; color:#c0392b; margin-top:6px;"></div>
         </div>
 
-        <!-- DÖF TAKİP DÜZENLEME (PWA Commit 4H) — yalnız izinli 8 alan -->
+        <!-- DÖF TAKİP DÜZENLEME (PWA Commit 4H) — yalnız izinli 8 alan.
+             4R-PKG-3D: saha çalışma akışında Kaynak DÖF Detayı'ndan ÖNCE
+             taşındı (kullanıcı önce takip girsin, teknik detay ikincil). -->
         <div class="card" id="dof-takip-form-kart" style="display:none; margin-top:0; margin-bottom:0; border-radius:0; box-shadow:none; border-bottom:1px solid #eee;">
             <h2>Takip Bilgileri</h2>
             <div class="input-group">
@@ -418,6 +425,7 @@
                 </select>
             </div>
             <div id="dof-takip-durum" style="margin-top:10px; font-weight:600;"></div>
+            <div id="dof-takip-ipucu" style="font-size:0.78rem; color:#888; margin-top:2px;"></div>
             <div style="display:flex; gap:10px; margin-top:15px;">
                 <button id="dof-takip-kaydet-btn" class="btn btn-success" onclick="_dofTakipKaydet()" disabled title="Kaydetmek için önce bir alanı değiştirin">Kaydet</button>
                 <button id="dof-takip-temizle-btn" class="btn btn-outline" onclick="_dofTakipTemizleTikla()">Temizle</button>
@@ -426,54 +434,75 @@
 
         <!-- DÖF KANIT MEDYALARI (PWA Commit 4P) — normal saha bulgu -->
         <!-- medyasından TAMAMEN AYRI, yerel dofKanitlari store'u; -->
-        <!-- export/ZIP'e HİÇ girmez (medya export 4Q'nun kapsamı) -->
-        <div class="card" id="dof-kanit-medya-kart" style="display:none; margin-top:0; border-radius:0 0 12px 12px;">
+        <!-- export/ZIP'e HİÇ girmez (medya export 4Q'nun kapsamı).
+             4R-PKG-3D: buton satırı mobilde taşmayan responsive grid'e
+             (2+1) çevrildi -- .dof-kanit-buton-grid, index.html CSS'inde. -->
+        <div class="card" id="dof-kanit-medya-kart" style="display:none; margin-top:0; margin-bottom:0; border-radius:0; box-shadow:none; border-bottom:1px solid #eee;">
             <h2>Kanıt Medyaları</h2>
-            <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <div class="dof-kanit-buton-grid">
                 <button class="btn btn-outline" onclick="openOCR('dof-kanit')">
                     <i class="fas fa-camera"></i> Fotoğraf Çek
                 </button>
                 <button class="btn btn-outline" onclick="document.getElementById('dof-kanit-galeri-input').click()">
                     <i class="fas fa-image"></i> Dosya Seç
                 </button>
-                <button id="dof-kanit-ses-btn" class="btn btn-outline" onclick="toggleDofSesKaydi()">
+                <button id="dof-kanit-ses-btn" class="btn btn-outline dof-kanit-ses-btn-grid" onclick="toggleDofSesKaydi()">
                     <i class="fas fa-microphone"></i> <span id="dof-kanit-ses-etiket">Ses Notu</span>
                 </button>
             </div>
             <input type="file" id="dof-kanit-galeri-input" accept="image/*" style="display:none" onchange="_dofKanitGaleriDosyaSecildi(this)">
-            <div id="dof-kanit-medya-durum" style="font-size:0.85rem; color:#666; margin-bottom:8px;"></div>
+            <div id="dof-kanit-medya-durum" style="font-size:0.85rem; color:#666; margin-bottom:4px;"></div>
+            <!-- 4R-PKG-3D: tek-kaynak özet -- her zaman `medyalar` dizisinden
+                 hesaplanır (bkz. _dofKanitMedyaListesiRenderEt), transient
+                 aksiyon mesajından (#dof-kanit-medya-durum) BAĞIMSIZ, ZIP
+                 alt barındaki foto/ses sayaçlarıyla aynı ölçütü kullanır. -->
+            <div id="dof-kanit-medya-ozet" style="font-size:0.8rem; color:#888; margin-bottom:8px;"></div>
             <div id="dof-kanit-medya-liste"></div>
         </div>
 
-        <!-- DÖF REPLAY -- TEK FIXED ALT BAR (4R-PKG-3C). "Hazırlık Oluştur"
-             artık ana aksiyon DEĞİL -- ZIP İndir/Paylaş zaten OTOMATİK
-             hazırlık yapıyor (bkz. _dofReplayZipHazirlaVeUret). Buton TAM
-             gizlenmedi (mevcut ~15 test çağrısı kırılırdı) -- küçük,
-             ikincil bir metin-link stiline indirgendi; teknik servis
-             (`dofReplayHazirlikHazirla`) DEĞİŞMEDİ. -->
+        <!-- KAYNAK DÖF DETAYI -- 4R-PKG-3D: teknik/salt-okunur detay artık
+             İKİNCİL -- <details> ile varsayılan KAPALI. `#dof-detay` içeriği
+             (_dofDetayGoster) ve mevcut test sözleşmesi (toContainText/
+             toHaveCount -- hiçbiri #dof-detay'ın VISIBLE olmasını şart
+             koşmuyor, yalnız içerik/DOM varlığını kontrol ediyor) DEĞİŞMEDİ. -->
+        <details class="card" id="dof-detay-kart" style="display:none; margin-top:0; border-radius:0 0 12px 12px;">
+            <summary style="cursor:pointer; font-weight:700; color:var(--primary); list-style:none;">
+                <i class="fas fa-chevron-right" style="font-size:0.8rem; margin-right:6px;"></i>Kaynak DÖF Detayı (göster/gizle)
+            </summary>
+            <div id="dof-detay" style="margin-top:12px;"></div>
+        </details>
+
+        <!-- DÖF REPLAY -- TEK FIXED ALT BAR, KOMPAKT (4R-PKG-3D). "Hazırlık
+             Oluştur" UI'da yok (3C Closure'dan beri). Teknik "Hazırlık yok/
+             hazır" metni kaldırıldı -- kullanıcı yalnız DÖF/foto/ses
+             sayacını ve iki aksiyonu görür. -->
         <div class="card dof-replay-sticky" id="dof-replay-kart" style="display:none;">
-            <div id="dof-replay-paket-ozet" style="font-size:0.85rem; color:#333; font-weight:600; margin-bottom:4px;"></div>
-            <div id="dof-replay-durum" style="font-size:0.8rem; color:#666; margin-bottom:6px;">Hazırlık yok</div>
-            <div id="dof-replay-inceleme-notu" style="font-size:0.75rem; color:#999; margin-bottom:4px;"></div>
-            <div id="dof-replay-medya-ozet" style="font-size:0.75rem; color:#999; margin-bottom:6px;"></div>
+            <div id="dof-replay-paket-ozet" style="font-size:0.85rem; color:#333; font-weight:600; margin-bottom:6px;"></div>
+            <div id="dof-replay-durum" style="font-size:0.8rem; color:#666; margin-bottom:6px;"></div>
             <div style="display:flex; gap:10px;">
                 <button id="dof-replay-zip-btn" class="btn btn-success" style="flex:1; width:auto;" onclick="_dofReplayZipIndirTikla()">ZIP İndir</button>
-                <button id="dof-replay-paylas-btn" class="btn btn-outline" style="flex:1; width:auto;" onclick="_dofReplayPaylasTikla()">Paylaş / Gönder</button>
+                <button id="dof-replay-paylas-btn" class="btn btn-outline" style="flex:1; width:auto;" onclick="_dofReplayPaylasTikla()">Paylaşmayı Dene</button>
             </div>
-            <!-- 4R-PKG-3C Closure: kullanıcı kararı KESİN -- "Hazırlık Oluştur"
-                 UI'da TAMAMEN gizli. ZIP İndir/Paylaş zaten otomatik hazırlık
-                 yapıyor (_dofReplayZipHazirlaVeUret). Teknik servis
-                 (dofReplayHazirlikHazirla) ve bu buton/onclick DOM'da hâlâ
-                 var (geriye dönük iç erişim için) ama style="display:none"
-                 ile hiçbir görünür alanda YOK -- ne buton, ne link, ne metin. -->
+            <!-- 4R-PKG-3C Closure: "Hazırlık Oluştur" UI'da TAMAMEN gizli.
+                 ZIP İndir/Paylaş zaten otomatik hazırlık yapıyor. Teknik
+                 servis (dofReplayHazirlikHazirla) ve bu buton/onclick
+                 DOM'da hâlâ var (geriye dönük iç erişim için) ama
+                 style="display:none" ile hiçbir görünür alanda YOK. -->
             <button id="dof-replay-hazirlik-btn" onclick="_dofReplayHazirlikTikla()" style="display:none;">Hazırlık Oluştur</button>
+            <!-- 4R-PKG-3D: "yalnız inceleme durumu"/medya özeti notları artık
+                 #dof-replay-durum'a BİRLEŞTİRİLDİ (aşağıdaki JS bkz.
+                 _dofReplayBolumYukle) -- ayrı, teknik alt satırlar kaldırıldı. -->
         </div>
 
         <div id="active-inspections">
             <h3 style="margin-top:30px">Geçmiş Kayıtlar</h3>
             <div id="inspections-list"></div>
 
-            <button class="btn btn-danger" style="margin-top:20px;" onclick="askDeleteAll()">
+            <!-- 4R-PKG-3D: "Tüm Veriyi Sıfırla" bilerek fixed/sticky DEĞİL --
+                 sayfanın en altında, ayrı başlıklı bir bölümde, yanlışlıkla
+                 basılması ZOR olacak şekilde normal akışta durur. -->
+            <h3 style="margin-top:30px; color:#c0392b;">Veri Yönetimi / Tehlikeli İşlemler</h3>
+            <button class="btn btn-danger" style="margin-top:10px;" onclick="askDeleteAll()">
                 <i class="fas fa-trash-alt"></i> Tüm Veriyi Sıfırla
             </button>
         </div>

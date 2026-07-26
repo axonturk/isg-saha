@@ -2646,13 +2646,20 @@ function _dofListeKartHtml(k) {
   if (d.sesSayisi > 0) rozetler.push(`<span style="background:#eaf2fd; color:var(--accent); padding:1px 6px; border-radius:10px;">ses ${d.sesSayisi}</span>`);
   if (d.degisti) rozetler.push('<span style="background:#fdf0e3; color:#b9770e; padding:1px 6px; border-radius:10px;">replay\'e dahil</span>');
 
+  // 4R-PKG-3D: seçili kart daha belirgin -- ince mavi çerçeve/arka plana ek
+  // olarak gölge + açık "✓ Seçili" rozeti, kullanıcı hangi DÖF üzerinde
+  // çalıştığını listede de tereddütsüz görsün.
   return `
     <div class="dof-liste-satir" style="margin-bottom:8px;">
       <button type="button" class="dof-liste-karti" data-dof-id="${_escAttr(k.id)}"
         onclick="_dofDetaySec('${_escAttr(k.id)}')"
         style="display:block; width:100%; text-align:left; padding:10px 12px; border-radius:8px; cursor:pointer;
-               border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};">
-        <div style="font-weight:700;">${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span></div>
+               border:2px solid ${secili ? 'var(--accent)' : '#eee'}; background:${secili ? '#eaf4fc' : 'white'};
+               ${secili ? 'box-shadow:0 0 0 3px rgba(52,152,219,0.18);' : ''}">
+        <div style="font-weight:700; display:flex; align-items:center; gap:6px;">
+          ${_esc(_dofDeger(k.bulguKodu))} <span style="font-weight:400; color:#666;">(Tehlike No: ${_esc(_dofDeger(k.tehlikeNo))})</span>
+          ${secili ? '<span style="margin-left:auto; font-size:0.7rem; font-weight:700; color:var(--accent);">✓ Seçili</span>' : ''}
+        </div>
         <div style="font-size:0.85rem; color:#666; margin-top:4px;">${_esc(risk)} · ${_esc(konum)}</div>
         <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; font-size:0.72rem;">${rozetler.join('')}</div>
       </button>
@@ -2907,7 +2914,13 @@ function _dofTakipFormDegerOku(alan) {
  * asıl güvence `_dofTakipKaydet` içindeki boş-küme kontrolüdür). */
 function _dofTakipButonDurumGuncelle() {
   const btn = document.getElementById('dof-takip-kaydet-btn');
-  if (btn) btn.disabled = _dofTakipDokunulanAlanlar.size === 0;
+  const dolu = _dofTakipDokunulanAlanlar.size > 0;
+  if (btn) btn.disabled = !dolu;
+  // 4R-PKG-3D: mobilde ince opaklık geçişi tek başına yeterince belirgin
+  // değil (kullanıcı raporu) -- açık metin ipucu ekler, buton kendi
+  // enable/disable mantığını DEĞİŞTİRMEZ.
+  const ipucu = document.getElementById('dof-takip-ipucu');
+  if (ipucu) ipucu.textContent = dolu ? 'Değişiklik var -- Kaydet aktif.' : 'Takip bilgisi girince aktif olur.';
 }
 
 /** Bir form alanı kullanıcı tarafından değiştirildiğinde çağrılır
@@ -3078,41 +3091,22 @@ async function _dofReplayBolumYukle(dofUuid) {
     return;
   }
   const durum = document.getElementById('dof-replay-durum');
-  const incelemeNotuEl = document.getElementById('dof-replay-inceleme-notu');
-  const medyaOzetEl = document.getElementById('dof-replay-medya-ozet');
   try {
-    const sonuc = await dofReplayHazirlikGetir(dofUuid);
+    // 4R-PKG-3D: teknik "Hazırlık hazır/yok" ilk-yükleme metni kaldırıldı --
+    // `durum` yalnız aksiyon SONUCU mesajları için kullanılır (bkz.
+    // _dofReplayHazirlikTikla/_dofReplayZipIndirTikla/_dofReplayPaylasTikla,
+    // DEĞİŞMEDİ). Kanonik durumu servis hâlâ döndürüyor (`dofReplayHazirlikGetir`)
+    // -- yalnız kullanıcıya HAM teknik metin olarak gösterilmiyor.
+    await dofReplayHazirlikGetir(dofUuid);
     kart.style.display = 'block';
     _dofReplayBarPaddingAyarla(true);
-    durum.textContent = sonuc.replayHazirlik ? 'Hazırlık hazır' : 'Hazırlık yok';
+    durum.textContent = '';
 
-    // PWA Commit 4O: pasif, ENGELLEMEYEN not -- yalnız takip alanı hiç
-    // girilmemişken (tüm 8 alan null) VE reviewStatus incelenmişken görünür.
-    // ZIP/Hazırlık butonlarını devre dışı bırakmaz.
-    if (incelemeNotuEl) {
-      const [takipSonuc, reviewSonuc] = await Promise.all([
-        dofTakipTaslagiGetir(dofUuid), dofReviewStatusGetir(dofUuid),
-      ]);
-      const takipBos = Object.values(takipSonuc.takipTaslagi).every((v) => v === null);
-      const incelenmis = reviewSonuc.reviewStatus !== _DOF_REVIEW_STATUS_VARSAYILAN;
-      incelemeNotuEl.textContent = (takipBos && incelenmis)
-        ? 'Yalnız inceleme durumu seçilmiş, takip bilgisi girilmemiş.' : '';
-    }
-
-    // PWA Commit 4Q: pasif, ENGELLEMEYEN medya özeti -- yalnız bilgi
-    // amaçlı, hiçbir butonu devre dışı bırakmaz/etkilemez.
-    if (medyaOzetEl) {
-      const medyalar = await dofKanitMedyalariGetir(dofUuid);
-      const fotoSayisi = medyalar.filter((m) => m.mediaType === 'photo').length;
-      const sesSayisi = medyalar.filter((m) => m.mediaType === 'audio').length;
-      medyaOzetEl.textContent = (fotoSayisi > 0 || sesSayisi > 0)
-        ? `Bu pakete ${fotoSayisi} fotoğraf, ${sesSayisi} ses notu dahil edilecek.` : '';
-    }
-
-    // PWA 4R-PKG-3A: sticky ZIP alanının üst kısmında PAKET GENELİ özet --
-    // yalnız bilgi amaçlı, hiçbir butonu etkilemez. "Değişen DÖF" =
+    // PWA 4R-PKG-3D: sticky ZIP alanının üst kısmında PAKET GENELİ, kompakt
+    // özet -- "1 DÖF · 2 Foto · 1 Ses" biçiminde. "DÖF" sayısı =
     // `dofPaketiDegismisDofUuidleri` ile ZIP'e GERÇEKTEN dahil edilecek
-    // sayı (aynı ölçüt, tekrar yazılmadı).
+    // sayı (aynı ölçüt, tekrar yazılmadı); yalnız bilgi amaçlı, hiçbir
+    // butonu etkilemez.
     const paketOzetEl = document.getElementById('dof-replay-paket-ozet');
     if (paketOzetEl) {
       const kayit = await dbGetir('dofler', dofUuid);
@@ -3126,7 +3120,7 @@ async function _dofReplayBolumYukle(dofUuid) {
           paketFoto += m.filter((x) => x.mediaType === 'photo').length;
           paketSes += m.filter((x) => x.mediaType === 'audio').length;
         }
-        paketOzetEl.textContent = `Değişen DÖF: ${degisenler.length} · Foto: ${paketFoto} · Ses: ${paketSes}`;
+        paketOzetEl.textContent = `${degisenler.length} DÖF · ${paketFoto} Foto · ${paketSes} Ses`;
       } else {
         paketOzetEl.textContent = '';
       }
@@ -3310,8 +3304,24 @@ function _dofKanitObjectUrlleriTemizle() {
   _dofKanitAktifObjectUrller = [];
 }
 
+/** Kanıt medyaları özet metnini TEK bir yerden, aynı `medyalar` dizisinden
+ * hesaplar -- ZIP alt barındaki foto/ses sayaçlarıyla (bkz.
+ * `_dofReplayBolumYukle`) aynı ölçütü (`mediaType`) kullanır. Transient
+ * aksiyon mesajından (`#dof-kanit-medya-durum`, "Fotoğraf eklendi."/"Ses
+ * notu eklendi.") TAMAMEN AYRI -- o mesajlar DEĞİŞMEDİ. */
+function _dofKanitMedyaOzetMetni(medyalar) {
+  const fotoSayisi = medyalar.filter((m) => m.mediaType === 'photo').length;
+  const sesSayisi = medyalar.filter((m) => m.mediaType === 'audio').length;
+  if (fotoSayisi === 0 && sesSayisi === 0) return 'Henüz kanıt eklenmedi.';
+  if (fotoSayisi === 0) return `Fotoğraf eklenmedi. · ${sesSayisi} ses notu eklendi.`;
+  if (sesSayisi === 0) return `${fotoSayisi} fotoğraf eklendi. · Ses notu eklenmedi.`;
+  return `${fotoSayisi} fotoğraf · ${sesSayisi} ses notu`;
+}
+
 function _dofKanitMedyaListesiRenderEt(medyalar) {
   _dofKanitObjectUrlleriTemizle();   // önceki render'ın URL'lerini serbest bırak
+  const ozetEl = document.getElementById('dof-kanit-medya-ozet');
+  if (ozetEl) ozetEl.textContent = _dofKanitMedyaOzetMetni(medyalar);
   const liste = document.getElementById('dof-kanit-medya-liste');
   if (!liste) return;
   if (medyalar.length === 0) {

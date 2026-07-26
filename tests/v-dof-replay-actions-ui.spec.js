@@ -71,7 +71,9 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await expect(page.locator('#dof-replay-hazirlik-btn')).toBeHidden();
     await expect(page.locator('#dof-replay-zip-btn')).toBeVisible();
     await expect(page.locator('#dof-replay-paylas-btn')).toBeVisible();
-    await expect(page.locator('#dof-replay-durum')).toHaveText('Hazırlık yok');
+    // 4R-PKG-3D: teknik "Hazırlık yok" ilk-yükleme metni kaldırıldı --
+    // durum yalnız aksiyon SONUCU mesajları için kullanılır (bkz. testler C-J).
+    await expect(page.locator('#dof-replay-durum')).toHaveText('');
   });
 
   test('C. Takip yokken hazırlık reddi -- hata gösterilir, DB\'de replayHazirlik oluşmaz', async ({ page }) => {
