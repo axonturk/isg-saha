@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3F';
-const APP_CACHE = 'isg-saha-v25';
+const APP_BUILD = '4R-PKG-3G';
+const APP_CACHE = 'isg-saha-v26';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -2456,11 +2456,37 @@ function _dofGrupSecTikla(anahtar) {
 }
 if (typeof window !== 'undefined') window._dofGrupSecTikla = _dofGrupSecTikla;
 
-/** 4R-PKG-3F: Paket özet kartını (paket ekranında, `#dof-package-mod-blok`
+/** 4R-PKG-3G: Paket kayıtlarından güvenilir bir GÖRÜNEN AD çözmeye çalışır --
+ * aday alan adlarını sırayla dener (Desktop export şeması bugün (bkz.
+ * `tests/dof-import-fixtures.js`) yalnız OPAK `pwaKurumId`/`pwaBirimId`
+ * içerir, isim alanı YOK -- bu fonksiyon Desktop'un ileride bu alanlardan
+ * birini eklemesi ihtimaline karşı yazılır, ama ASLA UYDURMAZ). Bir aday
+ * alan paketteki (o alanı dolu olan) kayıtların HEPSİNDE AYNIYSA güvenilir
+ * sayılır ve döner; alan hiç yoksa veya ÇELİŞKİLİYSE (aynı pakette farklı
+ * değerler) bir sonraki adaya geçilir. Hiçbiri güvenilir değilse `null`
+ * döner -- çağıran taraf "Kurum adı belirlenmedi" fallback'ini gösterir. */
+const _DOF_PAKET_AD_ALAN_ADAYLARI = [
+  'kurumAdi', 'kurum', 'isyeriAdi', 'isyeri',
+  'birimAdi', 'birim', 'denetimAdi', 'denetimBasligi', 'paketAdi',
+];
+function _dofPaketGorunenAdCoz(paketKayitlari) {
+  for (const alan of _DOF_PAKET_AD_ALAN_ADAYLARI) {
+    const degerler = paketKayitlari
+      .map((k) => (typeof k[alan] === 'string' ? k[alan].trim() : ''))
+      .filter((v) => v !== '');
+    if (degerler.length === 0) continue;
+    const ilk = degerler[0];
+    if (degerler.every((v) => v === ilk)) return ilk;
+  }
+  return null;
+}
+
+/** 4R-PKG-3F/3G: Paket özet kartını (paket ekranında, `#dof-package-mod-blok`
  * içinde) çizer -- ARTIK yalnız TEK, açıkça belirtilen `paketUuid`'e ait
  * `kayitlar` (paket-scoped alt küme, bkz. `_dofListesiYukle`) kullanılır.
- * Kaynak veride kurum/işyeri adı alanı YOK (yalnız paketUuid/dofId/
- * bulguKodu vb.) -- başlık İCAT EDİLMEZ, kısa paketUuid ile gösterilir. */
+ * Başlık `_dofPaketGorunenAdCoz` ile güvenilir bulunursa gösterilir, yoksa
+ * İCAT EDİLMEZ -- "Kurum adı belirlenmedi" + teknik alt bilgi olarak kısa
+ * paketUuid gösterilir. */
 function _dofPaketOzetiCiz(kayitlar, paketUuid, durumHaritasi) {
   const kart = document.getElementById('dof-paket-ozet-kart');
   const metinEl = document.getElementById('dof-paket-ozet-metin');
@@ -2470,8 +2496,10 @@ function _dofPaketOzetiCiz(kayitlar, paketUuid, durumHaritasi) {
 
   const { islenen, foto, ses } = _dofPaketSayaclariHesapla(kayitlar, durumHaritasi);
   const bekleyen = kayitlar.length - islenen;
+  const gorunenAd = _dofPaketGorunenAdCoz(kayitlar);
   metinEl.innerHTML = `
-    <div>DÖF Paketi: <strong>${_esc(_dofKisaUuid(paketUuid))}</strong> / ${kayitlar.length} DÖF</div>
+    <div style="font-weight:700;">${_esc(gorunenAd || 'Kurum adı belirlenmedi')}</div>
+    <div style="font-size:0.8rem; color:#999;">Paket: ${_esc(_dofKisaUuid(paketUuid))} · ${kayitlar.length} DÖF</div>
     <div>İşlenen: ${islenen} · Bekleyen: ${bekleyen} · Foto: ${foto} · Ses: ${ses}</div>`;
   kart.dataset.paketUuid = paketUuid;
 }
@@ -2500,12 +2528,14 @@ function _dofPaketSayaclariHesapla(kayitlar, durumHaritasi) {
   return { islenen, foto, ses };
 }
 
-/** 4R-PKG-3F: Ana ekrandaki (`#home-mod-blok`) paket/kurum kartları --
+/** 4R-PKG-3F/3G: Ana ekrandaki (`#home-mod-blok`) paket/kurum kartları --
  * içe aktarılmış HER FARKLI paketUuid için ayrı bir kompakt kart (toplam/
- * işlenen/bekleyen/foto/ses özeti + Aç/Sil). Kurum/birim adı kaynak
- * veride YOK -- İCAT EDİLMEZ (ör. yanlış "Kütüphane" gibi varsayılan
- * üretilmez), kısa paketUuid gösterilir. "Aç" -- `#dof-package/<paketUuid>`
- * rotasına geçer. */
+ * işlenen/bekleyen/foto/ses özeti + Aç/Sil). Başlık `_dofPaketGorunenAdCoz`
+ * ile güvenilir bulunursa gösterilir; kurum/birim adı kaynak veride YOKSA
+ * (veya kayıtlar arasında çelişkiliyse) İCAT EDİLMEZ (ör. yanlış "Kütüphane"
+ * gibi varsayılan üretilmez) -- "Kurum adı belirlenmedi" ana başlık, kısa
+ * paketUuid teknik alt bilgi olarak gösterilir. "Aç" -- `#dof-package/
+ * <paketUuid>` rotasına geçer. */
 function _dofPaketKartlariCiz(kayitlar, durumHaritasi) {
   const kart = document.getElementById('dof-paket-listesi-kart');
   const el = document.getElementById('dof-paket-listesi');
@@ -2522,9 +2552,11 @@ function _dofPaketKartlariCiz(kayitlar, durumHaritasi) {
     const paketKayitlari = kayitlar.filter((k) => k.paketUuid === paketUuid);
     const { islenen, foto, ses } = _dofPaketSayaclariHesapla(paketKayitlari, durumHaritasi);
     const bekleyen = paketKayitlari.length - islenen;
+    const gorunenAd = _dofPaketGorunenAdCoz(paketKayitlari);
     kartlarHtml.push(`
       <div class="finding-item" data-paket-uuid="${_escAttr(paketUuid)}">
-        <div style="font-weight:700;">DÖF Paketi ${_esc(_dofKisaUuid(paketUuid))}</div>
+        <div style="font-weight:700;">${_esc(gorunenAd || 'Kurum adı belirlenmedi')}</div>
+        <div style="font-size:0.75rem; color:#999;">Paket: ${_esc(_dofKisaUuid(paketUuid))}</div>
         <div style="font-size:0.85rem; color:#666; margin-top:4px;">${paketKayitlari.length} DÖF · İşlenen ${islenen} · Bekleyen ${bekleyen}</div>
         <div style="font-size:0.85rem; color:#666;">Foto ${foto} · Ses ${ses}</div>
         <div style="display:flex; gap:8px; margin-top:8px;">
@@ -2557,7 +2589,10 @@ function _dofPaketKartiSilTikla(paketUuid) {
     'btn-danger',
   );
 }
-if (typeof window !== 'undefined') window._dofPaketKartiSilTikla = _dofPaketKartiSilTikla;
+if (typeof window !== 'undefined') {
+  window._dofPaketKartiSilTikla = _dofPaketKartiSilTikla;
+  window._dofPaketGorunenAdCoz = _dofPaketGorunenAdCoz;
+}
 
 /** Paket ekranındaki "Paketi Sil / Kaldır" butonu -- aktif paketi hedefler. */
 function _dofPaketSilTikla() {
@@ -3210,16 +3245,22 @@ const _DOF_TAKIP_HATA_METINLERI = {
 
 /** Formu verilen taslak değerleriyle doldurur (yalnız GÖRÜNÜM -- dirty
  * izleme burada SIFIRLANIR, bu fonksiyon "temiz" bir başlangıç noktası
- * sayılır). */
-function _dofTakipFormaYaz(taslak) {
-  document.getElementById('dof-takip-planlanan-tarih').value = taslak.planlanan_tarih || '';
-  document.getElementById('dof-takip-sorumlu').value = taslak.sorumlu || '';
-  document.getElementById('dof-takip-gerceklesen-faaliyet').value = taslak.gerceklesen_faaliyet || '';
-  document.getElementById('dof-takip-etkinlik-kontrol-tarihi').value = taslak.etkinlik_kontrol_tarihi || '';
-  document.getElementById('dof-takip-gozlem-degerlendirme').value = taslak.gozlem_degerlendirme || '';
-  document.getElementById('dof-takip-yeni-o').value = (taslak.yeni_o ?? '') === '' ? '' : String(taslak.yeni_o);
-  document.getElementById('dof-takip-yeni-f').value = (taslak.yeni_f ?? '') === '' ? '' : String(taslak.yeni_f);
-  document.getElementById('dof-takip-yeni-s').value = (taslak.yeni_s ?? '') === '' ? '' : String(taslak.yeni_s);
+ * sayılır). `korunacakAlanlar` (4R-PKG-3G) verilirse, o alanların DEĞERİ
+ * yazılmaz -- `_dofTakipFormYukle`'nin DB fetch'i sürerken kullanıcının
+ * dokunduğu (henüz kaydedilmemiş) alanları ezmemek için kullanılır. */
+function _dofTakipFormaYaz(taslak, korunacakAlanlar = null) {
+  const yaz = (alan, elId, deger) => {
+    if (korunacakAlanlar && korunacakAlanlar.has(alan)) return;
+    document.getElementById(elId).value = deger;
+  };
+  yaz('planlanan_tarih', 'dof-takip-planlanan-tarih', taslak.planlanan_tarih || '');
+  yaz('sorumlu', 'dof-takip-sorumlu', taslak.sorumlu || '');
+  yaz('gerceklesen_faaliyet', 'dof-takip-gerceklesen-faaliyet', taslak.gerceklesen_faaliyet || '');
+  yaz('etkinlik_kontrol_tarihi', 'dof-takip-etkinlik-kontrol-tarihi', taslak.etkinlik_kontrol_tarihi || '');
+  yaz('gozlem_degerlendirme', 'dof-takip-gozlem-degerlendirme', taslak.gozlem_degerlendirme || '');
+  yaz('yeni_o', 'dof-takip-yeni-o', (taslak.yeni_o ?? '') === '' ? '' : String(taslak.yeni_o));
+  yaz('yeni_f', 'dof-takip-yeni-f', (taslak.yeni_f ?? '') === '' ? '' : String(taslak.yeni_f));
+  yaz('yeni_s', 'dof-takip-yeni-s', (taslak.yeni_s ?? '') === '' ? '' : String(taslak.yeni_s));
 }
 
 /** Bir form alanının GÜNCEL değerini, servisin beklediği tipe (tarih/metin
@@ -3255,24 +3296,47 @@ function _dofTakipAlanDegisti(alan) {
 /** Seçili DÖF değiştiğinde (veya liste yenilendiğinde) çağrılır -- formu
  * `dofTakipTaslagiGetir`'den TAZE değerlerle doldurur, dirty izlemeyi
  * sıfırlar. `dofUuid` yoksa (seçim yok/liste boş) formu gizler. Kanonik
- * olmayan/bulunamayan DÖF için form AÇILMAZ (legacy güvenliği). */
+ * olmayan/bulunamayan DÖF için form AÇILMAZ (legacy güvenliği).
+ *
+ * 4R-PKG-3G yarış-durumu notu: Kaydet sonrası `_dofListesiYukle()` bu
+ * fonksiyonu AYNI dofUuid ile tekrar çağırır (özet/liste tazeleme). Bu
+ * çağrının `await dofTakipTaslagiGetir(...)` süresi (özellikle Android'de
+ * yavaş cihaz/gerçek IndexedDB) kullanıcının YENİ bir alanı değiştirmesine
+ * yetecek kadar uzayabilir. O yüzden: (a) dirty küme yalnız GERÇEK bir DÖF
+ * değişiminde hemen sıfırlanır -- aynı DÖF'ün yeniden yüklenmesinde
+ * sıfırlanmaz; (b) fetch dönünce, bu çağrı BAŞLARKEN zaten dokunulmuş
+ * alanlar "kaydedilmiş" sayılıp temizlenir, ama fetch SÜRERKEN yeni
+ * dokunulan alanlar hem değer hem dirty-iz olarak KORUNUR (DB'den gelen
+ * eski değerle ezilmez, buton pasifleşmez). */
 async function _dofTakipFormYukle(dofUuid) {
   const kart = document.getElementById('dof-takip-form-kart');
   if (!kart) return;
+  const dofDegisti = dofUuid !== _dofTakipSecliDofUuid;
   _dofTakipSecliDofUuid = dofUuid;
-  _dofTakipDokunulanAlanlar = new Set();
 
   if (!dofUuid) {
+    _dofTakipDokunulanAlanlar = new Set();
     kart.style.display = 'none';
     return;
   }
 
+  if (dofDegisti) _dofTakipDokunulanAlanlar = new Set();
+  const cagriBaslangicDokunulanlar = new Set(_dofTakipDokunulanAlanlar);
+
   const durum = document.getElementById('dof-takip-durum');
   try {
     const sonuc = await dofTakipTaslagiGetir(dofUuid);
+    // Bu await sürerken kullanıcı başka bir DÖF'e geçmiş olabilir -- öyleyse
+    // bu (artık eski) sonuç geçerli DÖF'ün formunu GÜNCELLEMEMELİ.
+    if (_dofTakipSecliDofUuid !== dofUuid) return;
     kart.style.display = 'block';
     durum.textContent = '';
-    _dofTakipFormaYaz(sonuc.takipTaslagi);
+    const yeniDokunulanlar = new Set();
+    for (const alan of _dofTakipDokunulanAlanlar) {
+      if (!cagriBaslangicDokunulanlar.has(alan)) yeniDokunulanlar.add(alan);
+    }
+    _dofTakipFormaYaz(sonuc.takipTaslagi, yeniDokunulanlar);
+    _dofTakipDokunulanAlanlar = yeniDokunulanlar;
     _dofTakipButonDurumGuncelle();
   } catch (e) {
     // Legacy/WIP veya bulunamayan kayıt -- form AÇILMAZ (yalnız kanonik

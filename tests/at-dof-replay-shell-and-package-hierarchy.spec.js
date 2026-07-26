@@ -186,10 +186,61 @@ test.describe('AT. DÖF replay shell + paket/kurum hiyerarşisi (4R-PKG-3F)', ()
     }
   });
 
-  test('8. Version badge -- PWA isg-saha-v25 · 4R-PKG-3F görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v26 · 4R-PKG-3G görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v25');
-    await expect(rozet).toContainText('4R-PKG-3F');
+    await expect(rozet).toContainText('isg-saha-v26');
+    await expect(rozet).toContainText('4R-PKG-3G');
+  });
+
+  test('9. Paket başlığı -- kurum/birim adı YOKSA "Kurum adı belirlenmedi" + kısa paketUuid teknik alt bilgi', async ({ page }) => {
+    const { paketUuid } = await tekDofKur(page);
+    const kart = page.locator(`[data-paket-uuid="${paketUuid}"]`);
+    await expect(kart).toContainText('Kurum adı belirlenmedi');
+    await expect(kart).not.toContainText('DÖF Paketi ');
+
+    await paketiAc(page, paketUuid);
+    const ozet = page.locator('#dof-paket-ozet-metin');
+    await expect(ozet).toContainText('Kurum adı belirlenmedi');
+    await expect(ozet).toContainText(paketUuid.slice(0, 8));
+  });
+
+  // 10/11: `_dofYerelKayitOlustur` (app.js) kasıtlı EXPLICIT allowlist ile
+  // eşler -- kaynak nesne asla `{...kayit}` ile yayılmaz, bu yüzden bugünkü
+  // gerçek Desktop export şemasında (bkz. dof-import-fixtures.js) olmayan
+  // `kurumAdi` gibi bir alan import'tan SONRA yerel kayıtta zaten yer
+  // almaz (kasıtlı güvenlik/tutarlılık sınırı, import fonksiyonunun kendi
+  // yorum satırında belgelenmiş). Bu yüzden `_dofPaketGorunenAdCoz`'un
+  // çözümleme mantığı gerçek import akışından BAĞIMSIZ, doğrudan
+  // fonksiyon seviyesinde test edilir -- allowlist'i genişletmek (Desktop
+  // gerçekten böyle bir alan eklerse) ayrı, izole bir karar/commit
+  // gerektirir, bu turun kapsamı DIŞINDA bırakılmıştır (bkz. rapor).
+  test('10. _dofPaketGorunenAdCoz -- tüm kayıtlarda aynı kurumAdi varsa güvenilir sayılır, döner', async ({ page }) => {
+    const sonuc = await page.evaluate(() => window._dofPaketGorunenAdCoz([
+      { kurumAdi: 'ACME Sanayi A.Ş.' },
+      { kurumAdi: 'ACME Sanayi A.Ş.' },
+    ]));
+    expect(sonuc).toBe('ACME Sanayi A.Ş.');
+  });
+
+  test('11. _dofPaketGorunenAdCoz -- kayıtlar arasında ÇELİŞKİLİ değer varsa güvenilir sayılmaz, null döner', async ({ page }) => {
+    const sonuc = await page.evaluate(() => window._dofPaketGorunenAdCoz([
+      { kurumAdi: 'ACME Sanayi A.Ş.' },
+      { kurumAdi: 'Farklı Kurum Ltd.' },
+    ]));
+    expect(sonuc).toBeNull();
+  });
+
+  test('12. _dofPaketGorunenAdCoz -- aday alan boşsa bir sonraki adaya geçer (öncelik sırası), hiçbiri yoksa null', async ({ page }) => {
+    const oncelikli = await page.evaluate(() => window._dofPaketGorunenAdCoz([
+      { kurumAdi: '', birimAdi: 'Üretim Birimi' },
+      { kurumAdi: '', birimAdi: 'Üretim Birimi' },
+    ]));
+    expect(oncelikli).toBe('Üretim Birimi');
+
+    const bosSonuc = await page.evaluate(() => window._dofPaketGorunenAdCoz([
+      { dofId: 1 }, { dofId: 2 },
+    ]));
+    expect(bosSonuc).toBeNull();
   });
 });
