@@ -148,7 +148,7 @@ test.describe('AQ. DÖF replay son UX polish (4R-PKG-3D)', () => {
       await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
 
       await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('1 fotoğraf · 1 ses notu');
-      await expect(page.locator('#dof-replay-paket-ozet')).toHaveText('1 DÖF · 1 Foto · 1 Ses');
+      await expect(page.locator('#dof-replay-paket-ozet')).toHaveText('Paket: 1 DÖF · 1 Foto · 1 Ses');
     });
   });
 
@@ -193,7 +193,7 @@ test.describe('AQ. DÖF replay son UX polish (4R-PKG-3D)', () => {
       await dofSecVeFormBekle(page);
       await page.locator('#dof-takip-sorumlu').fill('Ahmet');
       await page.locator('#dof-takip-kaydet-btn').click();
-      await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^\d+ DÖF · \d+ Foto · \d+ Ses$/);
+      await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^Paket: \d+ DÖF · \d+ Foto · \d+ Ses$/);
     });
 
     test('3. Paylaş butonu "Paylaşmayı Dene" (Android\'de ZIP paylaşımı garanti değil)', async ({ page }) => {

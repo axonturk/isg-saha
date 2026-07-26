@@ -501,7 +501,7 @@ test.describe('AW. Android canlı sözleşme + teşhis (4R-PKG-3I)', () => {
     await page.goto('/index.html');
     await paylasaHazirla(page, 'AW UA');
 
-    await page.click('#dof-debug-toggle');
+    await page.click('#dof-gelistirici-detay summary');
     await page.click('#dof-replay-paylas-btn');
     await expect(page.locator('#dof-replay-durum')).toHaveText('Paylaşıma gönderildi.');
 
@@ -542,7 +542,7 @@ test.describe('AW. Android canlı sözleşme + teşhis (4R-PKG-3I)', () => {
     await paketiAc(page, paketUuid);
     await dofunaGir(page, dofUuid);
 
-    await page.click('#dof-debug-toggle');
+    await page.click('#dof-gelistirici-detay summary');
     const panel = page.locator('#dof-debug-panel');
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('== KAYDET ==');
@@ -556,13 +556,13 @@ test.describe('AW. Android canlı sözleşme + teşhis (4R-PKG-3I)', () => {
     await page.locator('#dof-takip-sorumlu').fill('AW Panel');
     await expect(panel).toContainText('sorumlu');
 
-    await page.click('#dof-debug-toggle');
+    await page.click('#dof-gelistirici-detay summary');
     await expect(panel).toBeHidden();
   });
 
   test('D3. Debug tercihi localStorage.DEBUG_DOF ile saklanır -- sayfa yenilenince korunur', async ({ page }) => {
     await page.goto('/index.html');
-    await page.click('#dof-debug-toggle');
+    await page.click('#dof-gelistirici-detay summary');
     await expect(page.locator('#dof-debug-panel')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('DEBUG_DOF'))).toBe('1');
 

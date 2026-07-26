@@ -204,6 +204,6 @@ test.describe('AU. DÖF takip Kaydet dirty-state (4R-PKG-3G)', () => {
     // alanları için pasif KALIR (ürün kararı: medya Kaydet'i aktifleştirmez).
     await expect(page.locator('#dof-kanit-medya-ozet')).toHaveText('1 fotoğraf eklendi.');
     await expect(kaydetBtn).toBeDisabled();
-    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^1 DÖF · 1 Foto · 0 Ses$/);
+    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^Paket: 1 DÖF · 1 Foto · 0 Ses$/);
   });
 });

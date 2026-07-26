@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3I-SHARE';
-const APP_CACHE = 'isg-saha-v29';
+const APP_BUILD = '4R-PKG-3J';
+const APP_CACHE = 'isg-saha-v30';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -3247,24 +3247,29 @@ function _dofDebugZaman() {
   return new Date().toLocaleTimeString('tr-TR', { hour12: false }) + '.' + String(Date.now() % 1000).padStart(3, '0');
 }
 
-/** Debug panelini açar/kapatır ve tercihi `localStorage.DEBUG_DOF`'ta saklar. */
-function _dofDebugPanelAcKapat(olay) {
-  if (olay && olay.preventDefault) olay.preventDefault();
-  const acik = localStorage.getItem('DEBUG_DOF') === '1';
-  if (acik) localStorage.removeItem('DEBUG_DOF');
-  else localStorage.setItem('DEBUG_DOF', '1');
+/** 4R-PKG-3J: Debug paneli artık ayrı bir link+localStorage çiftiyle değil,
+ * tek bir native `<details id="dof-gelistirici-detay">` ("Geliştirici"
+ * başlığı) ile açılıp kapanıyor -- varsayılan KAPALI (collapsed), açılınca
+ * `#dof-debug-panel` içeriğinin TAMAMI aynen görünür (ayrıca bir tıklama
+ * gerekmez). Açık/kapalı tercihi yine `localStorage.DEBUG_DOF`'ta saklanır
+ * (sayfa yenilenince korunur) -- `<details>`'ın kendi `toggle` olayına
+ * bağlanır. */
+function _dofDebugToggleDegisti(detayEl) {
+  if (detayEl.open) localStorage.setItem('DEBUG_DOF', '1');
+  else localStorage.removeItem('DEBUG_DOF');
   _dofDebugPanelCiz();
 }
-if (typeof window !== 'undefined') window._dofDebugPanelAcKapat = _dofDebugPanelAcKapat;
+if (typeof window !== 'undefined') window._dofDebugToggleDegisti = _dofDebugToggleDegisti;
 
 /** Paneli o anki GERÇEK DOM/state değerleriyle yeniden çizer. Buton
  * durumunu DOM'dan OKUR (kod içi değişkenden değil) -- "görsel pasif ama
- * native disabled false" ayrımını kesin göstermek için. */
+ * native disabled false" ayrımını kesin göstermek için. Görünürlük artık
+ * SALT `<details>` tarafından yönetilir -- bu fonksiyon yalnız İÇERİĞİ
+ * yazar (kapalıyken de yazması zararsızdır, kapalı `<details>` içeriği
+ * zaten render etmez). */
 function _dofDebugPanelCiz() {
   const panel = document.getElementById('dof-debug-panel');
   if (!panel) return;
-  if (localStorage.getItem('DEBUG_DOF') !== '1') { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
 
   const kaydetBtn = document.getElementById('dof-takip-kaydet-btn');
   const paylasBtn = document.getElementById('dof-replay-paylas-btn');
@@ -3383,6 +3388,56 @@ function _dofTakipFormDegerOku(alan) {
   return _DOF_TAKIP_OFS_ALANLARI_UI.includes(alan) ? Number(ham) : ham;
 }
 
+// ─── 4R-PKG-3J: DÖF ÇALIŞMA EKRANI TEK DURUM METNİ ───────────────
+// Canlı kullanıcı bulgusu: foto/ses eklendikten sonra Kaydet gri kaldığı
+// için kullanıcı "kaydedilmedi" sanıyor -- oysa medya zaten IndexedDB'ye
+// yazılmış durumda (bilinçli ürün kararı: medya Kaydet'e bağlı DEĞİL).
+// Sorun buton davranışı değil, hiçbir yerde "kaydedildi" geri bildirimi
+// verilmemesiydi. Bu tek alan (`#dof-durum-metni`, Kaydet/Temizle buton
+// satırının HEMEN ALTINDA) hem Kaydet hem medya olaylarını KAPSAR --
+// `_dofDurumMetniGuncelle` bu alana yazan YEGANE fonksiyondur.
+const _DOF_DURUM_METIN_TEXT = {
+  bos: '',
+  dirty: 'Kaydedilmemiş değişiklik var',
+  kaydedildi: 'Kaydedildi',
+  foto: 'Fotoğraf eklendi',
+  gorsel: 'Görsel eklendi',
+  ses: 'Ses notu eklendi',
+  silindi: 'Silindi',
+  hata: 'Kaydedilemedi — tekrar deneyin',
+};
+// Saat damgası yalnız GERÇEKTEN bir IndexedDB yazması sonrası eklenir.
+const _DOF_DURUM_METIN_SAATLI = new Set(['kaydedildi', 'foto', 'gorsel', 'ses', 'silindi']);
+const _DOF_DURUM_METIN_ONAY = new Set(['kaydedildi', 'foto', 'gorsel', 'ses', 'silindi']);
+const _DOF_DURUM_METIN_RENK = {
+  bos: '#888', dirty: '#b9770e', hata: '#c0392b',
+  kaydedildi: '#1e8449', foto: '#1e8449', gorsel: '#1e8449', ses: '#1e8449', silindi: '#1e8449',
+};
+
+function _dofDurumSaatFormatla(tarih) {
+  const iki = (n) => String(n).padStart(2, '0');
+  return `${iki(tarih.getHours())}:${iki(tarih.getMinutes())}`;
+}
+
+/** `#dof-durum-metni`'ye yazan TEK fonksiyon (4R-PKG-3J sözleşmesi) --
+ * Kaydet/medya-ekleme/medya-silme olaylarının HİÇBİRİ bu alana DOĞRUDAN
+ * yazmaz, hepsi buradan geçer. Çağıran taraf yalnız İLGİLİ IndexedDB
+ * yazması BAŞARIYLA tamamlandıktan SONRA çağırır -- yazma başarısızsa
+ * (catch bloklarında) bu fonksiyon hiç çağrılmaz, başarı metni gösterilmez.
+ * Kaydedilmemiş takip değişikliği (dirty) varsa -- `hata`/`dirty` DIŞINDA
+ * hiçbir mesaj bunu EZEMEZ (kullanıcı önce mevcut değişikliği görmeli). */
+function _dofDurumMetniGuncelle(tip, zaman = new Date()) {
+  const el = document.getElementById('dof-durum-metni');
+  if (!el) return;
+  const dirtyAktif = _dofTakipDokunulanAlanlar.size > 0;
+  if (dirtyAktif && tip !== 'dirty' && tip !== 'hata') return;
+  const saat = _DOF_DURUM_METIN_SAATLI.has(tip) ? ` · ${_dofDurumSaatFormatla(zaman)}` : '';
+  const onay = _DOF_DURUM_METIN_ONAY.has(tip) ? '✓ ' : '';
+  el.textContent = tip === 'bos' ? '' : `${onay}${_DOF_DURUM_METIN_TEXT[tip]}${saat}`;
+  el.style.color = _DOF_DURUM_METIN_RENK[tip] || '#666';
+}
+if (typeof window !== 'undefined') window._dofDurumMetniGuncelle = _dofDurumMetniGuncelle;
+
 /** Kaydet butonunun aktiflik durumunu günceller -- hiçbir alana
  * dokunulmadıysa disabled (gereksiz/no-op kaydı önlemenin ilk katmanı;
  * asıl güvence `_dofTakipKaydet` içindeki boş-küme kontrolüdür). */
@@ -3401,6 +3456,7 @@ function _dofTakipButonDurumGuncelle() {
   // enable/disable mantığını DEĞİŞTİRMEZ.
   const ipucu = document.getElementById('dof-takip-ipucu');
   if (ipucu) ipucu.textContent = dolu ? 'Değişiklik var -- Kaydet aktif.' : 'Takip bilgisi girince aktif olur.';
+  _dofDurumMetniGuncelle(dolu ? 'dirty' : 'bos');
   _dofDebug.sonButonGuncellemeZamani = _dofDebugZaman();
   _dofDebugPanelCiz();
 }
@@ -3518,6 +3574,10 @@ async function _dofTakipKaydet() {
     _dofDebug.sonDbYazmaZamani = _dofDebugZaman();
     await _dofListesiYukle();   // liste + okunur özet + bu form (dirty sıfırlanmış) tazelenir
     document.getElementById('dof-takip-durum').textContent = 'Takip bilgileri kaydedildi';
+    // 4R-PKG-3J: `_dofListesiYukle()` -> `_dofTakipFormYukle` zaten dirty'yi
+    // sıfırlayıp durum metnini 'bos' yaptı (ara adım) -- bu SON yazma
+    // 'kaydedildi' ile onu bilerek EZER (en güncel/doğru mesaj budur).
+    _dofDurumMetniGuncelle('kaydedildi');
   } catch (e) {
     const kod = e && e.kod;
     _dofDebug.sonKaydetSonucu = 'save_error:' + (kod || (e && e.name) || 'bilinmiyor');
@@ -3539,6 +3599,7 @@ async function _dofTakipKaydet() {
     durum.textContent = mesaj;
     kaydetBtn.disabled = false;
     kaydetBtn.setAttribute('aria-disabled', 'false');
+    _dofDurumMetniGuncelle('hata');
   }
   _dofDebugPanelCiz();
 }
@@ -3792,7 +3853,12 @@ async function _dofReplayBolumYukle(dofUuid) {
           paketFoto += sayac.fotoSayisi;
           paketSes += sayac.sesSayisi;
         }
-        paketOzetEl.textContent = `${degisenler.length} DÖF · ${paketFoto} Foto · ${paketSes} Ses`;
+        // 4R-PKG-3J: "Paket:" öneki eklendi -- bu sayaç DÖF içindeki
+        // "N fotoğraf eklendi." kanıt özetiyle yan yana görününce (aynı
+        // ekranda, biri paket geneli biri tek DÖF) etiketsiz hâli
+        // çelişkili algılanıyordu. Sayılar zaten doğruydu, yalnız etiket
+        // eksikti.
+        paketOzetEl.textContent = `Paket: ${degisenler.length} DÖF · ${paketFoto} Foto · ${paketSes} Ses`;
       } else {
         paketOzetEl.textContent = '';
       }
@@ -4193,6 +4259,9 @@ async function _dofKanitFotoKaydet(sonuc, source) {
       width: sonuc.genislik || null, height: sonuc.yukseklik || null,
     });
     if (durum) durum.textContent = 'Fotoğraf eklendi.';
+    // 4R-PKG-3J: IndexedDB yazması BAŞARIYLA bitti -- tek durum metnine
+    // (Kaydet satırının altına) da yansıt. Kamera/galeri ayrımı `source`.
+    _dofDurumMetniGuncelle(source === 'camera' ? 'foto' : 'gorsel');
     await _dofMedyaSonrasiYenile(dofUuid);
   } catch (e) {
     if (durum) durum.textContent = (e && e.message) || 'Fotoğraf eklenemedi.';
@@ -4271,6 +4340,7 @@ async function toggleDofSesKaydi() {
           blob, mimeType: 'audio/webm', size: blob.size, durationMs: sureMs,
         });
         if (durum) durum.textContent = 'Ses notu eklendi.';
+        _dofDurumMetniGuncelle('ses');
         await _dofMedyaSonrasiYenile(kaydedilecekDofUuid);
       } catch (e) {
         if (durum) durum.textContent = (e && e.message) || 'Ses notu eklenemedi.';
@@ -4301,6 +4371,7 @@ async function _dofKanitMedyaSilTikla(localMediaUuid) {
   try {
     await dofKanitMedyasiSil(dofUuid, localMediaUuid);
     if (durum) durum.textContent = '';
+    _dofDurumMetniGuncelle('silindi');
     await _dofMedyaSonrasiYenile(dofUuid);
   } catch (e) {
     if (durum) durum.textContent = (e && e.message) || 'Kanıt silinemedi.';
@@ -4318,8 +4389,11 @@ window.addEventListener('load', () => {
   _dofListesiYukle();
   const buildRozetEl = document.getElementById('build-info');
   if (buildRozetEl) buildRozetEl.textContent = `PWA ${APP_CACHE} · ${APP_BUILD}`;
-  // 4R-PKG-3I: debug paneli önceki oturumda açık bırakıldıysa geri getir
-  // (varsayılan KAPALI -- localStorage'da DEBUG_DOF="1" yoksa hiç görünmez).
+  // 4R-PKG-3J: "Geliştirici" <details>'ı önceki oturumda açık bırakıldıysa
+  // geri getir (varsayılan KAPALI -- localStorage'da DEBUG_DOF="1" yoksa
+  // kapalı kalır, kullanıcı hiç görmez).
+  const gelistiriciDetay = document.getElementById('dof-gelistirici-detay');
+  if (gelistiriciDetay) gelistiriciDetay.open = localStorage.getItem('DEBUG_DOF') === '1';
   _dofDebugPanelCiz();
   if (typeof history !== 'undefined' && history.replaceState) {
     history.replaceState({ ekran: 'kurulum' }, '');

@@ -175,7 +175,7 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
     await expect(kaydetBtn).toBeDisabled();
 
-    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^1 DÖF · \d+ Foto · \d+ Ses$/);
+    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText(/^Paket: 1 DÖF · \d+ Foto · \d+ Ses$/);
   });
 
   test('5. Medya sayaçları -- gerçek UI akışıyla ses/foto ekleyince kanıt özeti, alt bar VE liste kartı rozeti AYNI sayıyı gösterir', async ({ page, context }) => {
@@ -211,7 +211,7 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     await page.locator('#dof-takip-sorumlu').fill('Sayac Testi');
     await page.locator('#dof-takip-kaydet-btn').click();
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
-    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText('1 DÖF · 1 Foto · 1 Ses');
+    await expect(page.locator('#dof-replay-paket-ozet')).toHaveText('Paket: 1 DÖF · 1 Foto · 1 Ses');
 
     await page.locator('button', { hasText: 'Listeye Dön' }).click();
     const kart = page.locator(`.dof-liste-karti[data-dof-id="${dofUuid}"]`);
@@ -282,10 +282,10 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     expect(k.dofUuid).toBe(dofUuid);
   });
 
-  test('8. Version badge -- PWA isg-saha-v29 · 4R-PKG-3I-SHARE görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v30 · 4R-PKG-3J görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v29');
-    await expect(rozet).toContainText('4R-PKG-3I-SHARE');
+    await expect(rozet).toContainText('isg-saha-v30');
+    await expect(rozet).toContainText('4R-PKG-3J');
   });
 });

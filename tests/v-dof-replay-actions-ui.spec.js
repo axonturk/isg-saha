@@ -256,7 +256,13 @@ test.describe('V. DÖF replay hazırlık ve ZIP indirme UI', () => {
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
 
     await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
-    await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
+    // 4R-PKG-3H sonrası: Kaydet sonrası arka planda paylaşım ZIP'i ön-hazırlanırken
+    // `dofReplayHazirlikHazirla` ZATEN (idempotent olarak) çağrılabiliyor -- 400ms
+    // gecikme normalde bu explicit çağrının ÖNCE bitmesini sağlıyor ama ağır
+    // sistem yükü altında (tam suite, iz kaydı) nadiren yarışabiliyor. Testin
+    // asıl amacı (explicit null alanın ZIP'e taşınması) hangi mesajın
+    // göründüğünden BAĞIMSIZ olduğu için burada ikisi de kabul edilir.
+    await expect(page.locator('#dof-replay-durum')).toHaveText(/^Replay hazırlığı (oluşturuldu|zaten güncel)\.$/);
 
     const zipYolu = await zipIndirTikla(page);
     const zip = new AdmZip(zipYolu);

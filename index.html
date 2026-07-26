@@ -480,6 +480,12 @@
                 <button id="dof-takip-kaydet-btn" class="btn btn-success" onclick="_dofTakipKaydet()" disabled aria-disabled="true" title="Kaydetmek için önce bir alanı değiştirin">Kaydet</button>
                 <button id="dof-takip-temizle-btn" class="btn btn-outline" onclick="_dofTakipTemizleTikla()">Temizle</button>
             </div>
+            <!-- 4R-PKG-3J: TEK durum metni -- Kaydet/medya olaylarının HEPSİ
+                 buradan geçer (_dofDurumMetniGuncelle, app.js). Canlı bulgu:
+                 foto/ses eklendikten sonra Kaydet gri kaldığı için kullanıcı
+                 "kaydedilmedi" sanıyordu -- veri aslında yazılmıştı, yalnız
+                 hiçbir yerde "kaydedildi" geri bildirimi yoktu. -->
+            <div id="dof-durum-metni" style="font-size:0.8rem; font-weight:600; margin-top:8px; min-height:1.1em;"></div>
         </div>
 
         <!-- DÖF KANIT MEDYALARI (PWA Commit 4P) — normal saha bulgu -->
@@ -488,7 +494,7 @@
              4R-PKG-3D: buton satırı mobilde taşmayan responsive grid'e
              (2+1) çevrildi -- .dof-kanit-buton-grid, index.html CSS'inde. -->
         <div class="card" id="dof-kanit-medya-kart" style="display:none; margin-top:0; margin-bottom:0; border-radius:0; box-shadow:none; border-bottom:1px solid #eee;">
-            <h2>Kanıt Medyaları</h2>
+            <h2>Kanıt Medyaları <span style="font-size:0.62em; font-weight:400; color:#888;">(otomatik kaydedilir)</span></h2>
             <div class="dof-kanit-buton-grid">
                 <button class="btn btn-outline" onclick="openOCR('dof-kanit')">
                     <i class="fas fa-camera"></i> Fotoğraf Çek
@@ -564,21 +570,23 @@
                  önlemek için (bkz. app.js APP_BUILD/APP_CACHE). -->
             <div id="build-info" style="margin-top:16px; font-size:0.72rem; color:#999; text-align:center;"></div>
 
-            <!-- 4R-PKG-3I: GERÇEK ANDROID CİHAZ teşhis paneli. Playwright
+            <!-- 4R-PKG-3I/3J: GERÇEK ANDROID CİHAZ teşhis paneli. Playwright
                  testleri yeşil olmasına rağmen canlı cihazda Kaydet/Paylaş
                  sorunları sürdüğü için eklendi -- amaç, tek bir ekran
                  görüntüsüyle "hangi dal çalıştı" sorusunu KESİN yanıtlamak.
-                 VARSAYILAN OLARAK GİZLİ: yalnız localStorage.DEBUG_DOF="1"
-                 iken görünür (aşağıdaki bağlantı bunu açıp/kapatır).
+                 3J: "Geliştirici" başlığı altına taşındı, native <details>
+                 ile varsayılan KAPALI (collapsed) -- yalnız açıkça
+                 açıldığında görünür, tercih localStorage.DEBUG_DOF'ta kalır.
                  Hiçbir iş mantığına dokunmaz, yalnız okur. -->
-            <div style="text-align:center; margin-top:6px;">
-                <a href="#" id="dof-debug-toggle" onclick="_dofDebugPanelAcKapat(event)"
-                   style="font-size:0.68rem; color:#bbb; text-decoration:underline;">Debug</a>
-            </div>
-            <pre id="dof-debug-panel" style="display:none; margin-top:8px; padding:10px;
-                 background:#f7f8f9; border:1px solid #e1e4e8; border-radius:8px;
-                 font-size:0.66rem; line-height:1.45; color:#333; text-align:left;
-                 white-space:pre-wrap; word-break:break-word; overflow-x:auto;"></pre>
+            <details id="dof-gelistirici-detay" style="margin-top:16px; text-align:center;" ontoggle="_dofDebugToggleDegisti(this)">
+                <summary style="cursor:pointer; font-size:0.68rem; color:#bbb; list-style:none; display:inline-block;">
+                    <i class="fas fa-chevron-right" style="font-size:0.6rem; margin-right:4px;"></i>Geliştirici
+                </summary>
+                <pre id="dof-debug-panel" style="text-align:left; margin-top:8px; padding:10px;
+                     background:#f7f8f9; border:1px solid #e1e4e8; border-radius:8px;
+                     font-size:0.66rem; line-height:1.45; color:#333;
+                     white-space:pre-wrap; word-break:break-word; overflow-x:auto;"></pre>
+            </details>
         </div>
     </div>
 
