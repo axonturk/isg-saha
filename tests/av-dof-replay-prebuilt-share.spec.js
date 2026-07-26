@@ -227,9 +227,10 @@ test.describe('AV. DÖF replay ön-üretilmiş paylaşım ZIP cache (4R-PKG-3H)'
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
     await page.click('#dof-replay-paylas-btn');
-    await expect(page.locator('#dof-replay-durum')).toHaveText(
-      'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.'
+    await expect(page.locator('#dof-replay-durum')).toContainText(
+      'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
     );
+    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP İndir düğmesini kullanın');
     await page.waitForTimeout(300);
     expect(indirmeOldu).toBe(false);
     const cagrilar = await page.evaluate(() => window.__paylasimCagrilari);
@@ -267,9 +268,8 @@ test.describe('AV. DÖF replay ön-üretilmiş paylaşım ZIP cache (4R-PKG-3H)'
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
     await page.click('#dof-replay-paylas-btn');
-    await expect(page.locator('#dof-replay-durum')).toHaveText(
-      'Paylaşım başarısız oldu. ZIP indirmek için ZIP İndir düğmesini kullanın.'
-    );
+    await expect(page.locator('#dof-replay-durum')).toContainText('Paylaşım başarısız oldu');
+    await expect(page.locator('#dof-replay-durum')).toContainText('NotAllowedError');
     await page.waitForTimeout(300);
     expect(indirmeOldu).toBe(false);
 

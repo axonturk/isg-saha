@@ -134,9 +134,13 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
     await page.click('#dof-replay-paylas-btn');
-    await expect(page.locator('#dof-replay-durum')).toHaveText(
-      'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.'
+    // 4R-PKG-3I: mesaja hangi MIME'ların reddedildiği eklendi (gerçek
+    // cihazda 'destek yok' ile 'share istisna attı' dallarını ayırt etmek
+    // için) -- kararlı ön ek ile doğrulanır.
+    await expect(page.locator('#dof-replay-durum')).toContainText(
+      'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
     );
+    await expect(page.locator('#dof-replay-durum')).toContainText('ZIP İndir düğmesini kullanın');
     await page.waitForTimeout(300);
     expect(indirmeOldu).toBe(false);
 
@@ -153,7 +157,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
 
   test('B2. Paylaşım desteklenmiyor -- mesaj literal metni kodda birebir yazılı (otomatik indirme kaldırıldı)', async ({ page }) => {
     const appJs = await page.evaluate(() => fetch('/app.js').then((r) => r.text()));
-    expect(appJs).toContain('Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.');
+    expect(appJs).toContain('Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor');
     expect(appJs).not.toContain('ZIP dosyası paylaşımını desteklemiyor. ZIP indiriliyor.');
   });
 
@@ -192,9 +196,9 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
     await page.click('#dof-replay-paylas-btn');
-    await expect(page.locator('#dof-replay-durum')).toHaveText(
-      'Paylaşım başarısız oldu. ZIP indirmek için ZIP İndir düğmesini kullanın.'
-    );
+    // 4R-PKG-3I: mesaj artık hata ADINI da içerir (NotAllowedError vb.).
+    await expect(page.locator('#dof-replay-durum')).toContainText('Paylaşım başarısız oldu');
+    await expect(page.locator('#dof-replay-durum')).toContainText('NotAllowedError');
     await page.waitForTimeout(300);
     expect(indirmeOldu).toBe(false);
 

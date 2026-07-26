@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3H';
-const APP_CACHE = 'isg-saha-v27';
+const APP_BUILD = '4R-PKG-3I';
+const APP_CACHE = 'isg-saha-v28';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -3206,6 +3206,104 @@ if (typeof window !== 'undefined') {
   window._dofReviewDurumDegisti = _dofReviewDurumDegisti;
 }
 
+// ─── 4R-PKG-3I: GERÇEK ANDROID CİHAZ TEŞHİS DURUMU ───────────────
+// Neden var: 3G (Kaydet) ve 3H (Paylaş) düzeltmelerinden sonra Playwright
+// suite'i 424/424 yeşil geçtiği HÂLDE gerçek Android cihazda iki sorun da
+// sürdü. Bu, testlerin gerçek cihaz koşullarını (dokunma olay sırası,
+// Chrome'un Web Share dosya-tipi allowlist'i, transient user activation
+// penceresi, güneş altında görsel algı) YAKALAYAMADIĞINI gösterir.
+//
+// Bu modül HİÇBİR iş kuralını değiştirmez -- yalnız "hangi dal çalıştı"
+// sorusunu tek ekran görüntüsüyle yanıtlanabilir kılmak için salt-okunur
+// gözlem kaydeder. Panel varsayılan olarak GİZLİDİR.
+const _dofDebug = {
+  // Kaydet tarafı
+  sonEventTuru: null,
+  sonEventAlani: null,
+  sonKaydetSonucu: null,        // blocked_disabled_true | blocked_dirty_false | saved_ok | save_error:<kod>
+  sonDbYazmaZamani: null,
+  sonButonGuncellemeZamani: null,
+  // Paylaş tarafı
+  canShareZip: null,
+  canShareOctet: null,
+  kullanilanMime: null,
+  shareVarMi: null,
+  canShareVarMi: null,
+  shareHataAdi: null,
+  shareHataMesaji: null,
+  tiklamaZamani: null,
+  shareCagriGecikmesiMs: null,  // tıklama -> navigator.share çağrısı arası
+  userActivationIsActive: null,
+  userActivationHasBeenActive: null,
+};
+
+function _dofDebugZaman() {
+  return new Date().toLocaleTimeString('tr-TR', { hour12: false }) + '.' + String(Date.now() % 1000).padStart(3, '0');
+}
+
+/** Debug panelini açar/kapatır ve tercihi `localStorage.DEBUG_DOF`'ta saklar. */
+function _dofDebugPanelAcKapat(olay) {
+  if (olay && olay.preventDefault) olay.preventDefault();
+  const acik = localStorage.getItem('DEBUG_DOF') === '1';
+  if (acik) localStorage.removeItem('DEBUG_DOF');
+  else localStorage.setItem('DEBUG_DOF', '1');
+  _dofDebugPanelCiz();
+}
+if (typeof window !== 'undefined') window._dofDebugPanelAcKapat = _dofDebugPanelAcKapat;
+
+/** Paneli o anki GERÇEK DOM/state değerleriyle yeniden çizer. Buton
+ * durumunu DOM'dan OKUR (kod içi değişkenden değil) -- "görsel pasif ama
+ * native disabled false" ayrımını kesin göstermek için. */
+function _dofDebugPanelCiz() {
+  const panel = document.getElementById('dof-debug-panel');
+  if (!panel) return;
+  if (localStorage.getItem('DEBUG_DOF') !== '1') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  const kaydetBtn = document.getElementById('dof-takip-kaydet-btn');
+  const paylasBtn = document.getElementById('dof-replay-paylas-btn');
+  const c = _dofPaylasimZipCache;
+  const ua = (typeof navigator !== 'undefined' && navigator.userActivation) || null;
+  const s = (deger) => (deger === null || deger === undefined ? '-' : String(deger));
+
+  panel.textContent = [
+    `== KAYDET ==`,
+    `aktif DÖF        : ${s(_dofTakipSecliDofUuid && _dofKisaUuid(_dofTakipSecliDofUuid))}`,
+    `btn.disabled     : ${kaydetBtn ? kaydetBtn.disabled : '-'}   (DOM'dan okundu)`,
+    `btn aria-disabled: ${kaydetBtn ? s(kaydetBtn.getAttribute('aria-disabled')) : '-'}`,
+    `dirty alan sayısı: ${_dofTakipDokunulanAlanlar.size}`,
+    `dirty alanlar    : ${[..._dofTakipDokunulanAlanlar].join(', ') || '-'}`,
+    `son event        : ${s(_dofDebug.sonEventTuru)} / ${s(_dofDebug.sonEventAlani)}`,
+    `son Kaydet sonucu: ${s(_dofDebug.sonKaydetSonucu)}`,
+    `son DB yazma     : ${s(_dofDebug.sonDbYazmaZamani)}`,
+    `son btn güncelle : ${s(_dofDebug.sonButonGuncellemeZamani)}`,
+    ``,
+    `== PAYLAŞ ==`,
+    `aktif paket      : ${s(_dofReplayAktifPaketUuid && _dofKisaUuid(_dofReplayAktifPaketUuid))}`,
+    `paylaş btn.disabl: ${paylasBtn ? paylasBtn.disabled : '-'}`,
+    `cache.hazir      : ${c.hazir}`,
+    `cache.hazirlaniyor: ${c.hazirlaniyor}`,
+    `cache.hata       : ${c.hata ? ((c.hata.kod || c.hata.name || '') + ' ' + (c.hata.message || '')) : '-'}`,
+    `cache.imza(kısa) : ${c.imza ? String(c.imza).slice(0, 40) + '…' : '-'}`,
+    `cache.zipBlob    : ${c.zipBlob ? c.zipBlob.size + ' bayt' : '-'}`,
+    `cache.dosyaAdi   : ${s(c.dosyaAdi)}`,
+    `navigator.share  : ${s(_dofDebug.shareVarMi)}`,
+    `navigator.canShare: ${s(_dofDebug.canShareVarMi)}`,
+    `canShare(zip)    : ${s(_dofDebug.canShareZip)}`,
+    `canShare(octet)  : ${s(_dofDebug.canShareOctet)}`,
+    `kullanılan MIME  : ${s(_dofDebug.kullanilanMime)}`,
+    `share hata adı   : ${s(_dofDebug.shareHataAdi)}`,
+    `share hata mesajı: ${s(_dofDebug.shareHataMesaji)}`,
+    `tıklama zamanı   : ${s(_dofDebug.tiklamaZamani)}`,
+    `tıklama->share ms: ${s(_dofDebug.shareCagriGecikmesiMs)}`,
+    `userActivation   : isActive=${ua ? ua.isActive : '-'} hasBeenActive=${ua ? ua.hasBeenActive : '-'}`,
+  ].join('\n');
+}
+if (typeof window !== 'undefined') {
+  window._dofDebugDurumOku = () => ({ ..._dofDebug });
+  window._dofDebugPanelCiz = _dofDebugPanelCiz;
+}
+
 // ─── DÖF TAKİP DÜZENLEME (PWA Commit 4H) ─────────────────────────
 // Yalnız izinli sekiz takip alanını düzenler -- gerçek servisleri
 // (`dofTakipTaslagiGetir`/`Guncelle`/`Temizle`, Commit 4A/4A-1/4A-2)
@@ -3283,19 +3381,32 @@ function _dofTakipFormDegerOku(alan) {
 function _dofTakipButonDurumGuncelle() {
   const btn = document.getElementById('dof-takip-kaydet-btn');
   const dolu = _dofTakipDokunulanAlanlar.size > 0;
-  if (btn) btn.disabled = !dolu;
+  if (btn) {
+    btn.disabled = !dolu;
+    // 4R-PKG-3I: native `disabled` ile aria-disabled HER ZAMAN birlikte
+    // güncellenir -- ekran okuyucu/erişilebilirlik katmanının "pasif
+    // görünüyor ama aslında aktif" gibi bir ara duruma düşmesi imkansız.
+    btn.setAttribute('aria-disabled', dolu ? 'false' : 'true');
+  }
   // 4R-PKG-3D: mobilde ince opaklık geçişi tek başına yeterince belirgin
   // değil (kullanıcı raporu) -- açık metin ipucu ekler, buton kendi
   // enable/disable mantığını DEĞİŞTİRMEZ.
   const ipucu = document.getElementById('dof-takip-ipucu');
   if (ipucu) ipucu.textContent = dolu ? 'Değişiklik var -- Kaydet aktif.' : 'Takip bilgisi girince aktif olur.';
+  _dofDebug.sonButonGuncellemeZamani = _dofDebugZaman();
+  _dofDebugPanelCiz();
 }
 
 /** Bir form alanı kullanıcı tarafından değiştirildiğinde çağrılır
  * (oninput/onchange). Yalnız BU alanı dokunulmuş işaretler -- diğer
  * alanların absent/value durumunu ETKİLEMEZ. */
-function _dofTakipAlanDegisti(alan) {
+function _dofTakipAlanDegisti(alan, olay) {
   _dofTakipDokunulanAlanlar.add(alan);
+  // 4R-PKG-3I: gerçek cihazda hangi olay türünün (input/change) tetiklendiğini
+  // ekran görüntüsünden görebilmek için -- Android tarih/select alanlarının
+  // olay davranışı masaüstü Chromium'dan farklı olabiliyor.
+  _dofDebug.sonEventTuru = (olay && olay.type) || 'bilinmiyor';
+  _dofDebug.sonEventAlani = alan;
   _dofTakipButonDurumGuncelle();
 }
 
@@ -3367,8 +3478,16 @@ async function _dofTakipKaydet() {
   // türetir), ama guard programatik çağrılara (ör. `window._dofTakipKaydet()`
   // ile disabled buton üzerinden doğrudan tetikleme) karşı da korur.
   const kaydetBtnOn = document.getElementById('dof-takip-kaydet-btn');
-  if ((kaydetBtnOn && kaydetBtnOn.disabled) || _dofTakipDokunulanAlanlar.size === 0) {
+  if (kaydetBtnOn && kaydetBtnOn.disabled) {
+    _dofDebug.sonKaydetSonucu = 'blocked_disabled_true';
     durum.textContent = 'Değişiklik yok.';
+    _dofDebugPanelCiz();
+    return;
+  }
+  if (_dofTakipDokunulanAlanlar.size === 0) {
+    _dofDebug.sonKaydetSonucu = 'blocked_dirty_false';
+    durum.textContent = 'Değişiklik yok.';
+    _dofDebugPanelCiz();
     return;
   }
 
@@ -3383,16 +3502,37 @@ async function _dofTakipKaydet() {
 
   const kaydetBtn = document.getElementById('dof-takip-kaydet-btn');
   kaydetBtn.disabled = true;
+  kaydetBtn.setAttribute('aria-disabled', 'true');
   durum.textContent = 'Kaydediliyor...';
   try {
     await dofTakipTaslagiGuncelle(_dofTakipSecliDofUuid, payload);
+    _dofDebug.sonKaydetSonucu = 'saved_ok';
+    _dofDebug.sonDbYazmaZamani = _dofDebugZaman();
     await _dofListesiYukle();   // liste + okunur özet + bu form (dirty sıfırlanmış) tazelenir
     document.getElementById('dof-takip-durum').textContent = 'Takip bilgileri kaydedildi';
   } catch (e) {
     const kod = e && e.kod;
-    durum.textContent = (kod && _DOF_TAKIP_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+    _dofDebug.sonKaydetSonucu = 'save_error:' + (kod || (e && e.name) || 'bilinmiyor');
+    let mesaj = (kod && _DOF_TAKIP_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
+    // 4R-PKG-3I: gerçek sahada EN SIK karşılaşılan reddedilme nedeni, O/F/S
+    // üçlüsünden yalnız birini/ikisini doldurmaktır (servis kuralı: ya üçü
+    // de dolu ya da üçü de boş -- Desktop `_artik_risk_dogrula` ile aynı).
+    // Kural BURADA TEKRARLANMAZ (tek kaynak hâlâ servis); yalnız servis
+    // zaten reddettiyse kullanıcıya sebep AÇIKÇA söylenir -- öncesinde
+    // "Takip alanlarında geçersiz değer var." denip bırakılıyordu ve saha
+    // kullanıcısı bunu "Kaydet güvenilmez" olarak deneyimliyordu.
+    if (kod === 'GECERSIZ_TAKIP_DEGERI' || kod === 'GECERSIZ_DEGISIKLIK') {
+      const ofsDegerleri = _DOF_TAKIP_OFS_ALANLARI_UI.map((a) => _dofTakipFormDegerOku(a));
+      const doluSayisi = ofsDegerleri.filter((v) => v !== null).length;
+      if (doluSayisi > 0 && doluSayisi < 3) {
+        mesaj = 'Yeni O, Yeni F ve Yeni S birlikte doldurulmalı (ya üçü de dolu ya üçü de boş).';
+      }
+    }
+    durum.textContent = mesaj;
     kaydetBtn.disabled = false;
+    kaydetBtn.setAttribute('aria-disabled', 'false');
   }
+  _dofDebugPanelCiz();
 }
 
 /** "Temizle" -- yalnız yerel `takipTaslagi`yi kaldırır (`dofTakipTaslagiTemizle`,
@@ -3764,10 +3904,16 @@ async function _dofReplayZipIndirTikla() {
 async function _dofReplayPaylasTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
   const durum = document.getElementById('dof-replay-durum');
+  const tiklamaBaslangic = Date.now();
+  _dofDebug.tiklamaZamani = _dofDebugZaman();
+  const uaTiklama = (typeof navigator !== 'undefined' && navigator.userActivation) || null;
+  _dofDebug.userActivationIsActive = uaTiklama ? uaTiklama.isActive : null;
+  _dofDebug.userActivationHasBeenActive = uaTiklama ? uaTiklama.hasBeenActive : null;
 
   // Kaydedilmemiş takip değişikliği -- cache taze olsa BİLE paylaşılmaz.
   if (_dofTakipSecliDofUuid === _dofReplaySecliDofUuid && _dofTakipDokunulanAlanlar.size > 0) {
     durum.textContent = 'Önce takip değişikliklerini kaydedin.';
+    _dofDebugPanelCiz();
     return;
   }
 
@@ -3776,6 +3922,7 @@ async function _dofReplayPaylasTikla() {
   if (!paketUuid || cache.paketUuid !== paketUuid || !cache.hazir) {
     durum.textContent = 'Paylaşım hazırlanıyor, lütfen birkaç saniye sonra tekrar deneyin.';
     _dofPaylasimZipOnHazirla(_dofReplaySecliDofUuid);   // henüz başlamadıysa/bittiyse yeniden dene
+    _dofDebugPanelCiz();
     return;
   }
 
@@ -3788,33 +3935,70 @@ async function _dofReplayPaylasTikla() {
   if (paylasBtn) paylasBtn.disabled = true;
   try {
     // Tıklama anında yalnız BU kalır -- ağır üretim yok (bkz. fonksiyon yorumu).
-    const dosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/zip' });
-    const paylasimDestekli = typeof navigator !== 'undefined'
-      && typeof navigator.canShare === 'function' && navigator.canShare({ files: [dosya] })
-      && typeof navigator.share === 'function';
+    //
+    // 4R-PKG-3I MIME geri düşüşü: Chrome (Android) Web Share Level 2 için
+    // İZİN VERİLEN dosya tipi listesi tutar; liste dışı bir tip verilirse
+    // `canShare({files})` FALSE döner ve paylaşım hiç denenmez. Gerçek
+    // cihazda "paylaşım açılmıyor" şikayetinin en güçlü adaylarından biri
+    // `application/zip`in bu listede olmamasıdır. Bu yüzden önce `zip`
+    // denenir, tarayıcı kabul etmezse AYNI baytlar ve AYNI `.zip` dosya
+    // adıyla `application/octet-stream` denenir -- ZIP SÖZLEŞMESİ
+    // DEĞİŞMEZ (içerik/ad birebir aynı, yalnız paylaşım katmanına verilen
+    // MIME etiketi farklı). İkisi de kabul edilmezse otomatik indirme YOK,
+    // yalnız açık mesaj (3E-FINAL ürün kararı korunur).
+    const canShareVar = typeof navigator !== 'undefined' && typeof navigator.canShare === 'function';
+    const shareVar = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+    _dofDebug.canShareVarMi = canShareVar;
+    _dofDebug.shareVarMi = shareVar;
+
+    const zipDosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/zip' });
+    const octetDosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/octet-stream' });
+    _dofDebug.canShareZip = canShareVar ? navigator.canShare({ files: [zipDosya] }) : null;
+    _dofDebug.canShareOctet = canShareVar ? navigator.canShare({ files: [octetDosya] }) : null;
+
+    const dosya = _dofDebug.canShareZip ? zipDosya : octetDosya;
+    _dofDebug.kullanilanMime = _dofDebug.canShareZip ? 'application/zip'
+      : (_dofDebug.canShareOctet ? 'application/octet-stream' : null);
+
+    const paylasimDestekli = canShareVar && shareVar
+      && (_dofDebug.canShareZip || _dofDebug.canShareOctet);
 
     if (paylasimDestekli) {
       try {
+        _dofDebug.shareCagriGecikmesiMs = Date.now() - tiklamaBaslangic;
+        _dofDebug.shareHataAdi = null;
+        _dofDebug.shareHataMesaji = null;
         await navigator.share({ files: [dosya], title: cache.dosyaAdi });
         durum.textContent = 'Paylaşıma gönderildi.';
         return;
       } catch (paylasHatasi) {
+        _dofDebug.shareHataAdi = (paylasHatasi && paylasHatasi.name) || 'bilinmiyor';
+        _dofDebug.shareHataMesaji = (paylasHatasi && paylasHatasi.message) || '';
         if (paylasHatasi && paylasHatasi.name === 'AbortError') {
           durum.textContent = 'Paylaşım iptal edildi.';
           return;
         }
         // Gerçek paylaşım hatası (iptal DEĞİL) -- otomatik indirme YOK, yalnız mesaj.
-        durum.textContent = 'Paylaşım başarısız oldu. ZIP indirmek için ZIP İndir düğmesini kullanın.';
+        // 4R-PKG-3I: hata ADI mesaja eklenir -- gerçek cihazda kullanıcı
+        // ekran görüntüsü gönderdiğinde "destek yok" dalı ile "share
+        // istisna attı" dalı ARTIK karıştırılamaz (canlı raporda ikisi
+        // aynı cümleyle özetlendiği için kök neden ayırt edilemiyordu).
+        durum.textContent = `Paylaşım başarısız oldu (${_dofDebug.shareHataAdi}). ZIP indirmek için ZIP İndir düğmesini kullanın.`;
         return;
       }
     }
     // Gerçek destek YOK -- otomatik indirme YOK, yalnız açık mesaj.
-    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.';
+    // 4R-PKG-3I: hangi MIME'ların reddedildiği mesaja eklenir (aynı ayırt
+    // edilebilirlik gerekçesi).
+    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
+      + ` (zip:${_dofDebug.canShareZip} octet:${_dofDebug.canShareOctet}).`
+      + ' ZIP indirmek için ZIP İndir düğmesini kullanın.';
   } finally {
     _dofReplayIslemDevamEdiyor = false;
     hazirlikBtn.disabled = false;
     zipBtn.disabled = false;
     if (paylasBtn) paylasBtn.disabled = false;
+    _dofDebugPanelCiz();
   }
 }
 
@@ -4085,6 +4269,9 @@ window.addEventListener('load', () => {
   _dofListesiYukle();
   const buildRozetEl = document.getElementById('build-info');
   if (buildRozetEl) buildRozetEl.textContent = `PWA ${APP_CACHE} · ${APP_BUILD}`;
+  // 4R-PKG-3I: debug paneli önceki oturumda açık bırakıldıysa geri getir
+  // (varsayılan KAPALI -- localStorage'da DEBUG_DOF="1" yoksa hiç görünmez).
+  _dofDebugPanelCiz();
   if (typeof history !== 'undefined' && history.replaceState) {
     history.replaceState({ ekran: 'kurulum' }, '');
   }

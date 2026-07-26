@@ -57,12 +57,20 @@
             transition: transform 0.1s, opacity 0.2s; width: 100%; gap: 10px;
         }
         .btn:active { transform: scale(0.98); }
-        /* 4R-PKG-3B kontrast düzeltmesi: önceden hiçbir :disabled kuralı
-           YOKTU -- aktif/pasif butonlar görsel olarak ayırt edilemiyordu
-           (aktif buton "soluk" görünmüyordu ama pasif de belirgin
-           değildi). Şimdi pasif buton görülebilir şekilde soluk (0.55,
-           okunamaz hale gelmeyecek kadar yüksek) + not-allowed imleç. */
-        .btn:disabled, .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+        /* 4R-PKG-3I kontrast düzeltmesi: 3B'de eklenen tek başına
+           `opacity: 0.55` GERÇEK ANDROID CİHAZDA yetersiz kaldı -- güneş
+           altında/parlak ekranda %55 opaklıktaki yeşil "Kaydet" ile %100
+           opaklıktaki yeşil "Kaydet" ayırt edilemiyor. Kullanıcı canlı
+           testte "Kaydet pasif görünüyor ama bazen kayıt yapıyor" dedi:
+           state makinesi doğruydu (bkz. au testleri), AKTİF buton pasif
+           SANILIYORDU. Artık pasif buton yalnız soluk değil -- rengini de
+           TAMAMEN kaybeder (gri zemin + gri metin), böylece renk körlüğü
+           ve parlak ekran koşullarında bile fark tereddütsüz görülür. */
+        .btn:disabled, .btn[disabled] {
+            opacity: 1; cursor: not-allowed;
+            background-color: #d6d9dc !important; color: #7a8288 !important;
+            border-color: #c2c7cc !important; box-shadow: none !important;
+        }
         .btn-primary { background-color: var(--accent); color: white; }
         .btn-danger { background-color: var(--danger); color: white; }
         .btn-success { background-color: var(--success); color: white; }
@@ -422,28 +430,28 @@
             <h2>Takip Bilgileri</h2>
             <div class="input-group">
                 <label for="dof-takip-planlanan-tarih">Planlanan Tarih</label>
-                <input type="date" id="dof-takip-planlanan-tarih" oninput="_dofTakipAlanDegisti('planlanan_tarih')" onchange="_dofTakipAlanDegisti('planlanan_tarih')">
+                <input type="date" id="dof-takip-planlanan-tarih" oninput="_dofTakipAlanDegisti('planlanan_tarih', event)" onchange="_dofTakipAlanDegisti('planlanan_tarih', event)">
             </div>
             <div class="input-group">
                 <label for="dof-takip-sorumlu">Sorumlu</label>
-                <input type="text" id="dof-takip-sorumlu" oninput="_dofTakipAlanDegisti('sorumlu')" onchange="_dofTakipAlanDegisti('sorumlu')">
+                <input type="text" id="dof-takip-sorumlu" oninput="_dofTakipAlanDegisti('sorumlu', event)" onchange="_dofTakipAlanDegisti('sorumlu', event)">
             </div>
             <div class="input-group">
                 <label for="dof-takip-gerceklesen-faaliyet">Gerçekleşen Faaliyet</label>
-                <textarea id="dof-takip-gerceklesen-faaliyet" rows="2" oninput="_dofTakipAlanDegisti('gerceklesen_faaliyet')" onchange="_dofTakipAlanDegisti('gerceklesen_faaliyet')"></textarea>
+                <textarea id="dof-takip-gerceklesen-faaliyet" rows="2" oninput="_dofTakipAlanDegisti('gerceklesen_faaliyet', event)" onchange="_dofTakipAlanDegisti('gerceklesen_faaliyet', event)"></textarea>
             </div>
             <div class="input-group">
                 <label for="dof-takip-etkinlik-kontrol-tarihi">Etkinlik Kontrol Tarihi</label>
-                <input type="date" id="dof-takip-etkinlik-kontrol-tarihi" oninput="_dofTakipAlanDegisti('etkinlik_kontrol_tarihi')" onchange="_dofTakipAlanDegisti('etkinlik_kontrol_tarihi')">
+                <input type="date" id="dof-takip-etkinlik-kontrol-tarihi" oninput="_dofTakipAlanDegisti('etkinlik_kontrol_tarihi', event)" onchange="_dofTakipAlanDegisti('etkinlik_kontrol_tarihi', event)">
             </div>
             <div class="input-group">
                 <label for="dof-takip-gozlem-degerlendirme">Gözlem/Değerlendirme</label>
-                <textarea id="dof-takip-gozlem-degerlendirme" rows="2" oninput="_dofTakipAlanDegisti('gozlem_degerlendirme')" onchange="_dofTakipAlanDegisti('gozlem_degerlendirme')"></textarea>
+                <textarea id="dof-takip-gozlem-degerlendirme" rows="2" oninput="_dofTakipAlanDegisti('gozlem_degerlendirme', event)" onchange="_dofTakipAlanDegisti('gozlem_degerlendirme', event)"></textarea>
             </div>
             <div class="location-grid">
                 <div class="input-group">
                     <label for="dof-takip-yeni-o">Yeni O</label>
-                    <select id="dof-takip-yeni-o" onchange="_dofTakipAlanDegisti('yeni_o')" oninput="_dofTakipAlanDegisti('yeni_o')">
+                    <select id="dof-takip-yeni-o" onchange="_dofTakipAlanDegisti('yeni_o', event)" oninput="_dofTakipAlanDegisti('yeni_o', event)">
                         <option value="">—</option>
                         <option value="10">10</option><option value="6">6</option><option value="3">3</option>
                         <option value="1">1</option><option value="0.5">0.5</option><option value="0.2">0.2</option>
@@ -451,7 +459,7 @@
                 </div>
                 <div class="input-group">
                     <label for="dof-takip-yeni-f">Yeni F</label>
-                    <select id="dof-takip-yeni-f" onchange="_dofTakipAlanDegisti('yeni_f')" oninput="_dofTakipAlanDegisti('yeni_f')">
+                    <select id="dof-takip-yeni-f" onchange="_dofTakipAlanDegisti('yeni_f', event)" oninput="_dofTakipAlanDegisti('yeni_f', event)">
                         <option value="">—</option>
                         <option value="10">10</option><option value="6">6</option><option value="3">3</option>
                         <option value="2">2</option><option value="1">1</option><option value="0.5">0.5</option>
@@ -460,7 +468,7 @@
             </div>
             <div class="input-group">
                 <label for="dof-takip-yeni-s">Yeni S</label>
-                <select id="dof-takip-yeni-s" onchange="_dofTakipAlanDegisti('yeni_s')" oninput="_dofTakipAlanDegisti('yeni_s')">
+                <select id="dof-takip-yeni-s" onchange="_dofTakipAlanDegisti('yeni_s', event)" oninput="_dofTakipAlanDegisti('yeni_s', event)">
                     <option value="">—</option>
                     <option value="100">100</option><option value="40">40</option><option value="15">15</option>
                     <option value="7">7</option><option value="3">3</option><option value="1">1</option>
@@ -469,7 +477,7 @@
             <div id="dof-takip-durum" style="margin-top:10px; font-weight:600;"></div>
             <div id="dof-takip-ipucu" style="font-size:0.78rem; color:#888; margin-top:2px;"></div>
             <div style="display:flex; gap:10px; margin-top:15px;">
-                <button id="dof-takip-kaydet-btn" class="btn btn-success" onclick="_dofTakipKaydet()" disabled title="Kaydetmek için önce bir alanı değiştirin">Kaydet</button>
+                <button id="dof-takip-kaydet-btn" class="btn btn-success" onclick="_dofTakipKaydet()" disabled aria-disabled="true" title="Kaydetmek için önce bir alanı değiştirin">Kaydet</button>
                 <button id="dof-takip-temizle-btn" class="btn btn-outline" onclick="_dofTakipTemizleTikla()">Temizle</button>
             </div>
         </div>
@@ -555,6 +563,22 @@
                  cache'ten kaynaklanan "çözülmüş bug hâlâ var" yanılgısını
                  önlemek için (bkz. app.js APP_BUILD/APP_CACHE). -->
             <div id="build-info" style="margin-top:16px; font-size:0.72rem; color:#999; text-align:center;"></div>
+
+            <!-- 4R-PKG-3I: GERÇEK ANDROID CİHAZ teşhis paneli. Playwright
+                 testleri yeşil olmasına rağmen canlı cihazda Kaydet/Paylaş
+                 sorunları sürdüğü için eklendi -- amaç, tek bir ekran
+                 görüntüsüyle "hangi dal çalıştı" sorusunu KESİN yanıtlamak.
+                 VARSAYILAN OLARAK GİZLİ: yalnız localStorage.DEBUG_DOF="1"
+                 iken görünür (aşağıdaki bağlantı bunu açıp/kapatır).
+                 Hiçbir iş mantığına dokunmaz, yalnız okur. -->
+            <div style="text-align:center; margin-top:6px;">
+                <a href="#" id="dof-debug-toggle" onclick="_dofDebugPanelAcKapat(event)"
+                   style="font-size:0.68rem; color:#bbb; text-decoration:underline;">Debug</a>
+            </div>
+            <pre id="dof-debug-panel" style="display:none; margin-top:8px; padding:10px;
+                 background:#f7f8f9; border:1px solid #e1e4e8; border-radius:8px;
+                 font-size:0.66rem; line-height:1.45; color:#333; text-align:left;
+                 white-space:pre-wrap; word-break:break-word; overflow-x:auto;"></pre>
         </div>
     </div>
 

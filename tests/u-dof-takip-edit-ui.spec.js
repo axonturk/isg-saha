@@ -150,7 +150,13 @@ test.describe('U. DÖF takip alanları düzenleme UI', () => {
 
     await page.locator('#dof-takip-yeni-o').selectOption('0.2');
     await page.locator('#dof-takip-kaydet-btn').click();
-    await expect(page.locator('#dof-takip-durum')).toHaveText('Takip alanlarında geçersiz değer var.');
+    // 4R-PKG-3I: reddin SEBEBİ artık açıkça yazılıyor. Önceden yalnız genel
+    // "Takip alanlarında geçersiz değer var." deniyordu ve saha kullanıcısı
+    // bunu "Kaydet güvenilmez" olarak deneyimliyordu (gerçek Android geri
+    // bildirimi). Servis kuralı ve reddin KENDİSİ DEĞİŞMEDİ -- yalnız mesaj.
+    await expect(page.locator('#dof-takip-durum')).toHaveText(
+      'Yeni O, Yeni F ve Yeni S birlikte doldurulmalı (ya üçü de dolu ya üçü de boş).'
+    );
 
     const sonrakiKayit = await dofKaydiGetir(page, dofUuid);
     expect(sonrakiKayit).toEqual(oncekiKayit);   // DB DEĞİŞMEDİ
