@@ -505,6 +505,12 @@
             <button class="btn btn-danger" style="margin-top:10px;" onclick="askDeleteAll()">
                 <i class="fas fa-trash-alt"></i> Tüm Veriyi Sıfırla
             </button>
+
+            <!-- 4R-PKG-3E-0: canlıda hangi build/cache'in çalıştığını
+                 görünür kılan minimum rozet -- Android testinde eski
+                 cache'ten kaynaklanan "çözülmüş bug hâlâ var" yanılgısını
+                 önlemek için (bkz. app.js APP_BUILD/APP_CACHE). -->
+            <div id="build-info" style="margin-top:16px; font-size:0.72rem; color:#999; text-align:center;"></div>
         </div>
     </div>
 

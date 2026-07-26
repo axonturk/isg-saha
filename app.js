@@ -26,6 +26,18 @@ window.addEventListener('error', (e) => {
 });
 
 const APP_VERSION = 'v0.11.2';
+// 4R-PKG-3E-0: Android canlıda hangi build/cache'in çalıştığını görünür
+// kılmak için minimum, düşük riskli build rozeti -- kod içinde commit
+// hash'i otomatik OKUNAMIYOR (build adımı yok, statik dosyalar doğrudan
+// GitHub Pages'ten sunuluyor), bu yüzden her gerçek release'te elle
+// güncellenen sabitler. `APP_BUILD` kasıtlı olarak commit hash'i DEĞİL --
+// bir commit hash'i, o commit'ten SONRA yapılan bu değişiklikle birlikte
+// zaten yanlış/eski olurdu; bunun yerine değişmeyen bir FAZ etiketi
+// kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
+// TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
+// aksi halde rozet yanlış/eski sürüm gösterir.
+const APP_BUILD = '4R-PKG-3E0';
+const APP_CACHE = 'isg-saha-v23';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -3507,6 +3519,8 @@ window.addEventListener('load', () => {
   loadInspectionsList();
   _turListesiYukle();
   _dofListesiYukle();
+  const buildRozetEl = document.getElementById('build-info');
+  if (buildRozetEl) buildRozetEl.textContent = `PWA ${APP_CACHE} · ${APP_BUILD}`;
   if (typeof history !== 'undefined' && history.replaceState) {
     history.replaceState({ ekran: 'kurulum' }, '');
   }
