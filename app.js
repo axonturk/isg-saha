@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3I';
-const APP_CACHE = 'isg-saha-v28';
+const APP_BUILD = '4R-PKG-3I-SHARE';
+const APP_CACHE = 'isg-saha-v29';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -3233,8 +3233,14 @@ const _dofDebug = {
   shareHataMesaji: null,
   tiklamaZamani: null,
   shareCagriGecikmesiMs: null,  // tıklama -> navigator.share çağrısı arası
-  userActivationIsActive: null,
-  userActivationHasBeenActive: null,
+  // 4R-PKG-3I-SHARE: aktivasyon share'in HEMEN ÖNCESİ ve HEMEN SONRASI
+  // olarak AYRI ölçülür -- "gesture zincirinden çıkıldı mı" sorusunu tek
+  // ekran görüntüsünden yanıtlamak için (canlı cihazda önce=false
+  // görülmüştü; düzeltmeden sonra önce=true beklenir).
+  uaOnceIsActive: null,
+  uaOnceHasBeenActive: null,
+  uaSonraIsActive: null,
+  uaSonraHasBeenActive: null,
 };
 
 function _dofDebugZaman() {
@@ -3296,7 +3302,9 @@ function _dofDebugPanelCiz() {
     `share hata mesajı: ${s(_dofDebug.shareHataMesaji)}`,
     `tıklama zamanı   : ${s(_dofDebug.tiklamaZamani)}`,
     `tıklama->share ms: ${s(_dofDebug.shareCagriGecikmesiMs)}`,
-    `userActivation   : isActive=${ua ? ua.isActive : '-'} hasBeenActive=${ua ? ua.hasBeenActive : '-'}`,
+    `userActivation ÖNCE : isActive=${s(_dofDebug.uaOnceIsActive)} hasBeenActive=${s(_dofDebug.uaOnceHasBeenActive)}`,
+    `userActivation SONRA: isActive=${s(_dofDebug.uaSonraIsActive)} hasBeenActive=${s(_dofDebug.uaSonraHasBeenActive)}`,
+    `userActivation ŞİMDİ: isActive=${ua ? ua.isActive : '-'} hasBeenActive=${ua ? ua.hasBeenActive : '-'}`,
   ].join('\n');
 }
 if (typeof window !== 'undefined') {
@@ -3901,14 +3909,14 @@ async function _dofReplayZipIndirTikla() {
  * HİÇBİR DURUMDA otomatik ZIP indirmesi YAPMAZ (3E-FINAL kararı korunur):
  * destek yok/AbortError/gerçek hata/hazır değil -- HİÇBİRİNDE otomatik
  * `_dofBlobIndir` çağrılmaz, yalnız açık mesaj gösterilir. */
-async function _dofReplayPaylasTikla() {
+function _dofReplayPaylasTikla() {
+  // ── BÖLÜM 1: yalnız SALT-OKUNUR guard'lar ───────────────────────
+  // Buradaki erken dönüşler `navigator.share`'e HİÇ ulaşmaz, o yüzden
+  // DOM'a yazmaları serbesttir (aktivasyon tüketilecek bir çağrı yok).
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  // Yalnız bir sayı okuma -- DOM'a dokunmaz, aktivasyonu etkilemez.
+  const tTiklama = Date.now();
   const durum = document.getElementById('dof-replay-durum');
-  const tiklamaBaslangic = Date.now();
-  _dofDebug.tiklamaZamani = _dofDebugZaman();
-  const uaTiklama = (typeof navigator !== 'undefined' && navigator.userActivation) || null;
-  _dofDebug.userActivationIsActive = uaTiklama ? uaTiklama.isActive : null;
-  _dofDebug.userActivationHasBeenActive = uaTiklama ? uaTiklama.hasBeenActive : null;
 
   // Kaydedilmemiş takip değişikliği -- cache taze olsa BİLE paylaşılmaz.
   if (_dofTakipSecliDofUuid === _dofReplaySecliDofUuid && _dofTakipDokunulanAlanlar.size > 0) {
@@ -3919,87 +3927,128 @@ async function _dofReplayPaylasTikla() {
 
   const paketUuid = _dofReplayAktifPaketUuid;
   const cache = _dofPaylasimZipCache;
-  if (!paketUuid || cache.paketUuid !== paketUuid || !cache.hazir) {
+  if (!paketUuid || cache.paketUuid !== paketUuid || !cache.hazir || !cache.zipBlob) {
     durum.textContent = 'Paylaşım hazırlanıyor, lütfen birkaç saniye sonra tekrar deneyin.';
     _dofPaylasimZipOnHazirla(_dofReplaySecliDofUuid);   // henüz başlamadıysa/bittiyse yeniden dene
     _dofDebugPanelCiz();
     return;
   }
 
-  _dofReplayIslemDevamEdiyor = true;
+  const canShareVar = typeof navigator !== 'undefined' && typeof navigator.canShare === 'function';
+  const shareVar = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  if (!canShareVar || !shareVar) {
+    _dofDebug.canShareVarMi = canShareVar;
+    _dofDebug.shareVarMi = shareVar;
+    _dofDebug.canShareZip = null;
+    _dofDebug.canShareOctet = null;
+    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
+      + ' (Web Share API yok). ZIP indirmek için ZIP İndir düğmesini kullanın.';
+    _dofDebugPanelCiz();
+    return;
+  }
+
+  // ── BÖLÜM 2: share'e kadar SADECE bellek işlemleri ──────────────
+  // DOM'a YAZMA YOK, `await` YOK, render YOK, panel çizimi YOK.
+  // Yalnız cache'ten yerel okuma + File kurma + canShare sorgusu.
+  const zipBlob = cache.zipBlob;
+  const dosyaAdi = cache.dosyaAdi;
+  const zipDosya = new File([zipBlob], dosyaAdi, { type: 'application/zip' });
+  const zipOlur = navigator.canShare({ files: [zipDosya] });
+  let dosya = zipDosya;
+  let kullanilanMime = 'application/zip';
+  let octetOlur = null;
+  if (!zipOlur) {
+    // MIME geri düşüşü: AYNI baytlar, AYNI `.zip` dosya adı -- yalnız
+    // paylaşım katmanına verilen etiket farklı (ZIP sözleşmesi DEĞİŞMEZ).
+    const octetDosya = new File([zipBlob], dosyaAdi, { type: 'application/octet-stream' });
+    octetOlur = navigator.canShare({ files: [octetDosya] });
+    if (!octetOlur) {
+      _dofDebug.canShareVarMi = true; _dofDebug.shareVarMi = true;
+      _dofDebug.canShareZip = false; _dofDebug.canShareOctet = false;
+      _dofDebug.kullanilanMime = null;
+      durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
+        + ' (zip:false octet:false). ZIP indirmek için ZIP İndir düğmesini kullanın.';
+      _dofDebugPanelCiz();
+      return;
+    }
+    dosya = octetDosya;
+    kullanilanMime = 'application/octet-stream';
+  }
+
+  const uaOnce = navigator.userActivation || null;
+  const uaOnceAktif = uaOnce ? uaOnce.isActive : null;
+  const uaOnceOlmus = uaOnce ? uaOnce.hasBeenActive : null;
+  const tShareOncesi = Date.now();
+
+  // ── BÖLÜM 3: SHARE -- handler'ın EN ERKEN senkron noktası ───────
+  // Buraya kadar hiçbir DOM düğümü değiştirilmedi; özellikle TIKLANAN
+  // BUTON devre dışı bırakılmadı (eski sürümde `paylasBtn.disabled = true`
+  // tam burada, share'den ÖNCE çalışıyordu -- gerçek Android cihazda
+  // `userActivation.isActive` share anında false'a düşüyor ve çağrı
+  // `NotAllowedError: Permission denied` ile reddediliyordu; tıklamadan
+  // share'e yalnız 7ms geçmesine rağmen. Aktivasyon SÜREYE değil,
+  // tıklanan elemanın dispatch sırasında bozulmamasına bağlı.)
+  let sharePromise = null;
+  let senkronHata = null;
+  try {
+    sharePromise = navigator.share({ files: [dosya], title: dosyaAdi });
+  } catch (e) {
+    senkronHata = e;   // TypeError vb. -- share senkron da fırlatabilir
+  }
+
+  // ── BÖLÜM 4: BUNDAN SONRASI serbest (share çağrısı çoktan yapıldı) ──
+  const uaSonra = navigator.userActivation || null;
+  _dofDebug.canShareVarMi = true;
+  _dofDebug.shareVarMi = true;
+  _dofDebug.canShareZip = zipOlur;
+  _dofDebug.canShareOctet = octetOlur;
+  _dofDebug.kullanilanMime = kullanilanMime;
+  _dofDebug.tiklamaZamani = _dofDebugZaman();
+  _dofDebug.shareCagriGecikmesiMs = tShareOncesi - tTiklama;
+  _dofDebug.uaOnceIsActive = uaOnceAktif;
+  _dofDebug.uaOnceHasBeenActive = uaOnceOlmus;
+  _dofDebug.uaSonraIsActive = uaSonra ? uaSonra.isActive : null;
+  _dofDebug.uaSonraHasBeenActive = uaSonra ? uaSonra.hasBeenActive : null;
+  _dofDebug.shareHataAdi = null;
+  _dofDebug.shareHataMesaji = null;
+
   const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
   const zipBtn = document.getElementById('dof-replay-zip-btn');
   const paylasBtn = document.getElementById('dof-replay-paylas-btn');
-  hazirlikBtn.disabled = true;
-  zipBtn.disabled = true;
-  if (paylasBtn) paylasBtn.disabled = true;
-  try {
-    // Tıklama anında yalnız BU kalır -- ağır üretim yok (bkz. fonksiyon yorumu).
-    //
-    // 4R-PKG-3I MIME geri düşüşü: Chrome (Android) Web Share Level 2 için
-    // İZİN VERİLEN dosya tipi listesi tutar; liste dışı bir tip verilirse
-    // `canShare({files})` FALSE döner ve paylaşım hiç denenmez. Gerçek
-    // cihazda "paylaşım açılmıyor" şikayetinin en güçlü adaylarından biri
-    // `application/zip`in bu listede olmamasıdır. Bu yüzden önce `zip`
-    // denenir, tarayıcı kabul etmezse AYNI baytlar ve AYNI `.zip` dosya
-    // adıyla `application/octet-stream` denenir -- ZIP SÖZLEŞMESİ
-    // DEĞİŞMEZ (içerik/ad birebir aynı, yalnız paylaşım katmanına verilen
-    // MIME etiketi farklı). İkisi de kabul edilmezse otomatik indirme YOK,
-    // yalnız açık mesaj (3E-FINAL ürün kararı korunur).
-    const canShareVar = typeof navigator !== 'undefined' && typeof navigator.canShare === 'function';
-    const shareVar = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-    _dofDebug.canShareVarMi = canShareVar;
-    _dofDebug.shareVarMi = shareVar;
-
-    const zipDosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/zip' });
-    const octetDosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/octet-stream' });
-    _dofDebug.canShareZip = canShareVar ? navigator.canShare({ files: [zipDosya] }) : null;
-    _dofDebug.canShareOctet = canShareVar ? navigator.canShare({ files: [octetDosya] }) : null;
-
-    const dosya = _dofDebug.canShareZip ? zipDosya : octetDosya;
-    _dofDebug.kullanilanMime = _dofDebug.canShareZip ? 'application/zip'
-      : (_dofDebug.canShareOctet ? 'application/octet-stream' : null);
-
-    const paylasimDestekli = canShareVar && shareVar
-      && (_dofDebug.canShareZip || _dofDebug.canShareOctet);
-
-    if (paylasimDestekli) {
-      try {
-        _dofDebug.shareCagriGecikmesiMs = Date.now() - tiklamaBaslangic;
-        _dofDebug.shareHataAdi = null;
-        _dofDebug.shareHataMesaji = null;
-        await navigator.share({ files: [dosya], title: cache.dosyaAdi });
-        durum.textContent = 'Paylaşıma gönderildi.';
-        return;
-      } catch (paylasHatasi) {
-        _dofDebug.shareHataAdi = (paylasHatasi && paylasHatasi.name) || 'bilinmiyor';
-        _dofDebug.shareHataMesaji = (paylasHatasi && paylasHatasi.message) || '';
-        if (paylasHatasi && paylasHatasi.name === 'AbortError') {
-          durum.textContent = 'Paylaşım iptal edildi.';
-          return;
-        }
-        // Gerçek paylaşım hatası (iptal DEĞİL) -- otomatik indirme YOK, yalnız mesaj.
-        // 4R-PKG-3I: hata ADI mesaja eklenir -- gerçek cihazda kullanıcı
-        // ekran görüntüsü gönderdiğinde "destek yok" dalı ile "share
-        // istisna attı" dalı ARTIK karıştırılamaz (canlı raporda ikisi
-        // aynı cümleyle özetlendiği için kök neden ayırt edilemiyordu).
-        durum.textContent = `Paylaşım başarısız oldu (${_dofDebug.shareHataAdi}). ZIP indirmek için ZIP İndir düğmesini kullanın.`;
-        return;
-      }
-    }
-    // Gerçek destek YOK -- otomatik indirme YOK, yalnız açık mesaj.
-    // 4R-PKG-3I: hangi MIME'ların reddedildiği mesaja eklenir (aynı ayırt
-    // edilebilirlik gerekçesi).
-    durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor'
-      + ` (zip:${_dofDebug.canShareZip} octet:${_dofDebug.canShareOctet}).`
-      + ' ZIP indirmek için ZIP İndir düğmesini kullanın.';
-  } finally {
+  const butonlariCoz = () => {
     _dofReplayIslemDevamEdiyor = false;
-    hazirlikBtn.disabled = false;
-    zipBtn.disabled = false;
+    if (hazirlikBtn) hazirlikBtn.disabled = false;
+    if (zipBtn) zipBtn.disabled = false;
     if (paylasBtn) paylasBtn.disabled = false;
     _dofDebugPanelCiz();
+  };
+  const hataYaz = (hata) => {
+    _dofDebug.shareHataAdi = (hata && hata.name) || 'bilinmiyor';
+    _dofDebug.shareHataMesaji = (hata && hata.message) || '';
+    if (hata && hata.name === 'AbortError') {
+      durum.textContent = 'Paylaşım iptal edildi.';
+      return;
+    }
+    // Gerçek paylaşım hatası (iptal DEĞİL) -- otomatik indirme YOK, yalnız mesaj.
+    durum.textContent = `Paylaşım başarısız oldu (${_dofDebug.shareHataAdi}). ZIP indirmek için ZIP İndir düğmesini kullanın.`;
+  };
+
+  if (senkronHata) {
+    hataYaz(senkronHata);
+    butonlariCoz();
+    return;
   }
+
+  _dofReplayIslemDevamEdiyor = true;
+  if (hazirlikBtn) hazirlikBtn.disabled = true;
+  if (zipBtn) zipBtn.disabled = true;
+  if (paylasBtn) paylasBtn.disabled = true;
+  durum.textContent = 'Paylaşım penceresi açılıyor...';
+
+  Promise.resolve(sharePromise)
+    .then(() => { durum.textContent = 'Paylaşıma gönderildi.'; })
+    .catch(hataYaz)
+    .then(butonlariCoz);
 }
 
 if (typeof window !== 'undefined') {

@@ -399,6 +399,136 @@ test.describe('AW. Android canlı sözleşme + teşhis (4R-PKG-3I)', () => {
     expect(indirmeOldu).toBe(false);
   });
 
+  // ─── 4R-PKG-3I-SHARE: USER GESTURE ZİNCİRİ ─────────────────────
+  // Gerçek Android debug çıktısı kök nedeni kesinleştirdi:
+  //   canShare(zip)=true, canShare(octet)=true  -> MIME sorunu DEĞİL
+  //   share hata: NotAllowedError / Permission denied
+  //   userActivation: isActive=FALSE  (tıklama->share yalnız 7ms olmasına rağmen)
+  // Yani çağrı, kullanıcı gesture'ı SÜRE nedeniyle değil, tıklanan elemanın
+  // dispatch sırasında değiştirilmesi nedeniyle aktivasyonu kaybediyordu
+  // (eski kod share'den ÖNCE `paylasBtn.disabled = true` yapıyordu).
+  // Aşağıdaki testler "share, tıklama handler'ının en erken senkron
+  // noktasında çağrılıyor" sözleşmesini KİLİTLER.
+
+  async function paylasaHazirla(page, etiket) {
+    const { dofUuid, paketUuid } = await tekDofKur(page);
+    await paketiAc(page, paketUuid);
+    await dofunaGir(page, dofUuid);
+    await page.locator('#dof-takip-sorumlu').fill(etiket);
+    await page.locator('#dof-takip-kaydet-btn').click();
+    await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
+    await paylasCacheHazirBekle(page);
+  }
+
+  test('G1. navigator.share, tıklamanın AYNI görev (task) turunda ve DOM değiştirilmeden çağrılır', async ({ page }) => {
+    // Teknik notu: bayrağı bir MICROTASK ile kapatmak yanıltıcıdır --
+    // olay gönderimi sırasında her dinleyici çağrısından sonra microtask
+    // kontrol noktası çalışır, yani capture dinleyicisinin microtask'ı
+    // butonun kendi onclick'inden ÖNCE koşar. Bu yüzden bayrak MAKROTASK
+    // (setTimeout) ile kapatılır: bu, "share tıklamanın aynı görevinde mi
+    // çağrıldı, yoksa sonraki bir göreve mi ertelendi" sorusunu doğru
+    // ölçer. "Araya await girmedi" güvencesi ise G4 ile sağlanır --
+    // `async` OLMAYAN bir fonksiyon zaten `await` EDEMEZ.
+    await page.addInitScript(() => {
+      window.__senkronPencere = false;
+      window.__shareSenkronMuydu = null;
+      window.__shareAnindaButonDisabled = null;
+      window.__shareAnindaDurumMetni = null;
+      document.addEventListener('click', () => {
+        window.__senkronPencere = true;
+        setTimeout(() => { window.__senkronPencere = false; }, 0);
+      }, true);
+      navigator.canShare = (veri) => !!(veri && veri.files);
+      navigator.share = async (veri) => {
+        window.__shareSenkronMuydu = window.__senkronPencere;
+        const btn = document.getElementById('dof-replay-paylas-btn');
+        window.__shareAnindaButonDisabled = btn ? btn.disabled : null;
+        window.__shareAnindaDurumMetni = (document.getElementById('dof-replay-durum') || {}).textContent;
+        return undefined;
+      };
+    });
+    await page.goto('/index.html');
+    await paylasaHazirla(page, 'AW Gesture');
+
+    await page.click('#dof-replay-paylas-btn');
+    await expect(page.locator('#dof-replay-durum')).toHaveText('Paylaşıma gönderildi.');
+
+    const olcum = await page.evaluate(() => ({
+      senkron: window.__shareSenkronMuydu,
+      butonDisabled: window.__shareAnindaButonDisabled,
+      durumMetni: window.__shareAnindaDurumMetni,
+    }));
+    // ANA KABUL KRİTERİ: share, tıklamanın AYNI görev turunda çağrıldı
+    // (sonraki bir task'a ertelenmedi).
+    expect(olcum.senkron).toBe(true);
+    // Tıklanan buton share çağrısı ANINDA hâlâ etkin olmalı -- gerçek
+    // Android'de aktivasyonu bozan tam olarak buydu.
+    expect(olcum.butonDisabled).toBe(false);
+    // share'den ÖNCE durum metnine yazılmamış olmalı (DOM yazımı yok).
+    expect(olcum.durumMetni).toBe('');
+  });
+
+  test('G2. share\'den ÖNCE ağır üretim fonksiyonları çağrılmaz (yalnız cache okuma + File + canShare)', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__agirCagriSayaci = 0;
+      window.__shareOncesiAgirCagri = null;
+      navigator.canShare = (veri) => !!(veri && veri.files);
+      navigator.share = async () => { window.__shareOncesiAgirCagri = window.__agirCagriSayaci; };
+    });
+    await page.goto('/index.html');
+    await paylasaHazirla(page, 'AW Agir');
+
+    // ZIP üretim zincirini sayaçla sar -- tıklamadan SONRA hiç artmamalı.
+    await page.evaluate(() => {
+      const orij = window._dofImport.dofReplayZipOlustur;
+      window._dofImport.dofReplayZipOlustur = function (...a) {
+        window.__agirCagriSayaci += 1;
+        return orij.apply(this, a);
+      };
+      window.__agirCagriSayaci = 0;
+    });
+
+    await page.click('#dof-replay-paylas-btn');
+    await expect(page.locator('#dof-replay-durum')).toHaveText('Paylaşıma gönderildi.');
+    expect(await page.evaluate(() => window.__shareOncesiAgirCagri)).toBe(0);
+  });
+
+  test('G3. userActivation share ÖNCESİ ve SONRASI ayrı ölçülür ve panelde ayrı gösterilir', async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.canShare = (veri) => !!(veri && veri.files);
+      navigator.share = async () => undefined;
+    });
+    await page.goto('/index.html');
+    await paylasaHazirla(page, 'AW UA');
+
+    await page.click('#dof-debug-toggle');
+    await page.click('#dof-replay-paylas-btn');
+    await expect(page.locator('#dof-replay-durum')).toHaveText('Paylaşıma gönderildi.');
+
+    const d = await debugOku(page);
+    // Alanlar AYRI kaydediliyor (değerler tarayıcıya göre değişebilir;
+    // burada ölçümün YAPILDIĞI garanti altına alınır).
+    expect(Object.prototype.hasOwnProperty.call(d, 'uaOnceIsActive')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(d, 'uaSonraIsActive')).toBe(true);
+
+    const panel = page.locator('#dof-debug-panel');
+    await expect(panel).toContainText('userActivation ÖNCE');
+    await expect(panel).toContainText('userActivation SONRA');
+  });
+
+  test('G4. Paylaş handler\'ı async DEĞİL -- inline onclick doğrudan senkron fonksiyona bağlı', async ({ page }) => {
+    await page.goto('/index.html');
+    const bilgi = await page.evaluate(() => ({
+      tip: typeof window._dofReplayPaylasTikla,
+      // async fonksiyonların constructor adı 'AsyncFunction' olur.
+      ctor: window._dofReplayPaylasTikla.constructor.name,
+      onclick: document.getElementById('dof-replay-paylas-btn').getAttribute('onclick'),
+    }));
+    expect(bilgi.tip).toBe('function');
+    expect(bilgi.ctor).toBe('Function');          // AsyncFunction DEĞİL
+    expect(bilgi.onclick).toBe('_dofReplayPaylasTikla()');
+  });
+
   // ─── DEBUG PANELİ ──────────────────────────────────────────────
 
   test('D1. Debug paneli VARSAYILAN OLARAK GİZLİ -- production kullanıcısını rahatsız etmez', async ({ page }) => {

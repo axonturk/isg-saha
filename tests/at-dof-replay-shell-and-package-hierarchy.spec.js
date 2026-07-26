@@ -186,11 +186,11 @@ test.describe('AT. DÖF replay shell + paket/kurum hiyerarşisi (4R-PKG-3F)', ()
     }
   });
 
-  test('8. Version badge -- PWA isg-saha-v28 · 4R-PKG-3I görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v29 · 4R-PKG-3I-SHARE görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v28');
-    await expect(rozet).toContainText('4R-PKG-3I');
+    await expect(rozet).toContainText('isg-saha-v29');
+    await expect(rozet).toContainText('4R-PKG-3I-SHARE');
   });
 
   test('9. Paket başlığı -- kurum/birim adı YOKSA "Kurum adı belirlenmedi" + kısa paketUuid teknik alt bilgi', async ({ page }) => {
