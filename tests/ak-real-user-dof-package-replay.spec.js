@@ -226,9 +226,19 @@ test.describe('AK. Gerçek kullanıcı DÖF paketi (2026-07-21 Desktop export) i
     await dofSec(page, DOF_A_UUID);
     await takipKaydet(page, { sorumlu: 'Test Sorumlusu' });
 
-    await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
-    await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı oluşturuldu.');
+    // 4R-PKG-3H: Kaydet sonrası arka planda paylaşım ZIP'i ön-hazırlanırken
+    // `dofReplayHazirlikHazirla` ZATEN (idempotent olarak) çağrılıyor --
+    // bu yüzden aşağıdaki İLK explicit çağrı artık "oluşturuldu" değil
+    // "zaten güncel" görebilir. Testin asıl amacı (tekrar çağrının
+    // `replayHazirlik`'i DEĞİŞTİRMEDİĞİni doğrulamak) korunuyor: arka plan
+    // hazırlığının bitmesini bekle, ardından İKİ explicit çağrı arasında
+    // `replayHazirlik`'in DEĞİŞMEDİĞİNİ doğrula.
+    await page.waitForFunction(() => {
+      const c = window._dofPaylasimZipCacheOku && window._dofPaylasimZipCacheOku();
+      return !!(c && c.hazir);
+    }, { timeout: 5000 });
     const ilkKayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), DOF_A_UUID);
+    expect(ilkKayit.replayHazirlik).toBeTruthy();
 
     await page.evaluate(() => window._dofReplayHazirlikTikla());   // 4R-PKG-3C Closure: buton UI'da gizli, aynı fonksiyon doğrudan çağrılıyor
     await expect(page.locator('#dof-replay-durum')).toHaveText('Replay hazırlığı zaten güncel.');

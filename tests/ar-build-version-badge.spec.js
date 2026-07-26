@@ -23,7 +23,7 @@ test.describe('AR. Build/version rozeti (4R-PKG-3E-0)', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v26');
-    await expect(rozet).toContainText('4R-PKG-3G');
+    await expect(rozet).toContainText('isg-saha-v27');
+    await expect(rozet).toContainText('4R-PKG-3H');
   });
 });

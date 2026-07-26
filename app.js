@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3G';
-const APP_CACHE = 'isg-saha-v26';
+const APP_BUILD = '4R-PKG-3H';
+const APP_CACHE = 'isg-saha-v27';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -2581,6 +2581,8 @@ function _dofPaketKartiSilTikla(paketUuid) {
     'Bu yerel DÖF paketini ve buna bağlı taslak/medya kayıtlarını kaldırmak istiyor musunuz?',
     async () => {
       const silinenAktifMi = paketUuid === _dofAktifPaketUuid;
+      // 4R-PKG-3H: silinen paketin paylaşım cache'i artık GEÇERSİZ.
+      if (_dofPaylasimZipCache.paketUuid === paketUuid) _dofPaylasimCacheSifirla();
       await dofPaketiSil(paketUuid);
       if (silinenAktifMi) location.hash = '#home';   // açık olduğun paket silindiyse ana sayfaya dön
       await _dofListesiYukle();
@@ -2854,6 +2856,10 @@ function _dofDetaySec(dofId) {
  * desen, yalnız paket seviyesinde. Hiçbir DÖF seçili değildir (work
  * render'ları null ile temizlenir). */
 async function _dofPaketSec(paketUuid) {
+  // 4R-PKG-3H: farklı bir pakete geçiliyorsa önceki paketin paylaşım
+  // cache'i artık İLGİSİZ -- hemen boşalt (yalnız UX netliği için, güvenlik
+  // zaten `_dofReplayPaylasTikla`'nın `paketUuid` eşleşme kontrolüyle sağlanır).
+  if (_dofPaylasimZipCache.paketUuid !== paketUuid) _dofPaylasimCacheSifirla();
   _dofAktifPaketUuid = paketUuid;
   _dofListeSeciliId = null;
   const paketKayitlari = _dofListeKayitlari.filter((k) => k.paketUuid === paketUuid);
@@ -3429,6 +3435,126 @@ if (typeof window !== 'undefined') {
 
 let _dofReplaySecliDofUuid = null;
 let _dofReplayIslemDevamEdiyor = false;
+// 4R-PKG-3H: `_dofReplayBolumYukle` içinde çözülen, o an açık DÖF'ün ait
+// olduğu paketUuid -- `_dofReplayPaylasTikla`'nın tıklama ANINDA DB'ye
+// gitmeden hangi cache girdisinin geçerli olduğunu bilmesi için.
+let _dofReplayAktifPaketUuid = null;
+
+// ─── 4R-PKG-3H: PAYLAŞIM İÇİN ÖN-ÜRETİLMİŞ ZIP CACHE'İ ───────────
+// Kök neden (bkz. BilDesk Saha referans analizi): "Paylaşmayı Dene" AYNI
+// ağır zinciri (hazırlık+SHA-256 doğrulama+medya DB okumaları+zip yazımı)
+// tıklama ANINDA `await` ediyordu -- büyük/çok-DÖF'lü paketlerde bu süre
+// Android Chrome'un `navigator.share()` için gerektirdiği transient user
+// activation penceresini aşabiliyor, `share()` gerçek bir hata olarak
+// reddediyordu ("Paylaşım başarısız oldu"). Çözüm: aynı üretim işini
+// kullanıcı DÖF ekranını AÇARKEN (tıklamadan ÖNCE) arka planda yap ve
+// cache'le -- tıklama anında yalnız `new File(...)` + `navigator.share(...)`
+// kalsın (senkron/hafif). ZIP İndir DEĞİŞMEDİ, kendi taze üretimini yapmaya
+// devam eder (bu cache yalnız paylaşım için kullanılır).
+const _DOF_PAYLASIM_ON_HAZIRLIK_GECIKME_MS = 400;
+let _dofPaylasimZipCache = {
+  paketUuid: null,
+  imza: null,
+  zipBlob: null,
+  dosyaAdi: null,
+  hazir: false,
+  hazirlaniyor: false,
+  hata: null,
+};
+
+function _dofPaylasimCacheSifirla() {
+  _dofPaylasimZipCache = {
+    paketUuid: null, imza: null, zipBlob: null, dosyaAdi: null,
+    hazir: false, hazirlaniyor: false, hata: null,
+  };
+}
+if (typeof window !== 'undefined') {
+  window._dofPaylasimZipCacheOku = () => ({ ..._dofPaylasimZipCache });
+}
+
+/** Bir paketin GEÇERLİ (henüz kaydedilmemiş DEĞİL) içeriğinden UCUZ bir
+ * imza üretir -- SHA-256 YENİDEN hesaplamaz (bu zaten ağır iş, prebuild'in
+ * kendisi `dofReplayHazirlikHazirla` ile ayrıca yapıyor); yalnız bellekte
+ * zaten duran (`_dofListeKayitlari`/`_dofDurumHaritasi`) state'i JSON'a
+ * çevirir -- "cache hâlâ geçerli mi" sorusunu DB/hash'e gitmeden hızlıca
+ * yanıtlamak için. Takip taslağı/reviewStatus/foto-ses sayısı DEĞİŞİRSE
+ * imza değişir -- mevcut `REPLAY_HAZIRLIK_ESKI` parmak izi kontrolü
+ * (asıl ZIP üretiminde, DEĞİŞTİRİLMEDEN) hâlâ SON güvence olarak durur. */
+function _dofPaylasimImzaHesapla(dofUuidListesi) {
+  const parcalar = [...dofUuidListesi].sort().map((u) => {
+    const k = _dofListeKayitlari.find((x) => x.id === u);
+    const d = _dofDurumHaritasi.get(u);
+    return {
+      u,
+      taslak: (k && k.takipTaslagi) || null,
+      review: (k && k.reviewStatus) || null,
+      foto: (d && d.fotoSayisi) || 0,
+      ses: (d && d.sesSayisi) || 0,
+    };
+  });
+  return JSON.stringify(parcalar);
+}
+
+/** Paylaşım ZIP'ini ARKA PLANDA üretip cache'ler -- `_dofReplayBolumYukle`
+ * (DÖF ekranı açılışı/route giriş/medya-sonrası tazeleme) tarafından
+ * `await` EDİLMEDEN çağrılır, ekranı yavaşlatmaz. Kaydedilmemiş takip
+ * değişikliği varsa (dirty) ÇALIŞMAZ -- öyle bir taslaktan üretilen ZIP
+ * güncel taslağı YANSITMAZ, bu yüzden hiç üretilmez (cache boşaltılır,
+ * paylaş tıklaması kullanıcıya "önce kaydedin" der). Eşzamanlı/yarışan
+ * çağrılar `paketUuid`+`imza` karşılaştırmasıyla (tıpkı `_dofTakipFormYukle`
+ * DÖF-değişimi guard'ı gibi) birbirini EZMEZ -- await sürerken daha yeni
+ * bir çağrı başladıysa veya taze bir dirty durumu oluştuysa, bu (artık
+ * eski) sonuç cache'e yazılmaz.
+ *
+ * `gecikmeMs`: ekran açılışı/Kaydet sonrası otomatik tetiklemede küçük bir
+ * gecikme uygulanır -- kullanıcı ekrandan HEMEN ayrılırsa (ör. başka bir
+ * DÖF'e geçerse) gereksiz üretimi engeller, gerçek kullanıcı için tamamen
+ * algılanamaz (paylaş tuşuna basmak saniyeler alır). "Paylaşmayı Dene"
+ * tıklamasında cache hazır DEĞİLSE yeniden tetiklenen çağrı bu gecikmeyi
+ * KULLANMAZ (kullanıcı zaten bekliyor, hemen başlamalı). */
+async function _dofPaylasimZipOnHazirla(dofUuid, { gecikmeMs = 0 } = {}) {
+  if (!dofUuid) return;
+  if (gecikmeMs > 0) await new Promise((r) => setTimeout(r, gecikmeMs));
+  if (_dofReplaySecliDofUuid !== dofUuid) return;   // gecikme sürerken kullanıcı başka DÖF'e geçti
+  const kayit = await dbGetir('dofler', dofUuid);
+  if (!kayit) return;
+  const paketUuid = kayit.paketUuid;
+
+  if (_dofTakipSecliDofUuid && _dofTakipDokunulanAlanlar.size > 0) {
+    if (_dofPaylasimZipCache.paketUuid === paketUuid) _dofPaylasimCacheSifirla();
+    return;
+  }
+
+  const dofUuidListesi = await dofPaketiDegismisDofUuidleri(paketUuid);
+  if (dofUuidListesi.length === 0) {
+    if (_dofPaylasimZipCache.paketUuid === paketUuid) _dofPaylasimCacheSifirla();
+    return;
+  }
+
+  const imza = _dofPaylasimImzaHesapla(dofUuidListesi);
+  if (_dofPaylasimZipCache.paketUuid === paketUuid && _dofPaylasimZipCache.imza === imza
+      && (_dofPaylasimZipCache.hazir || _dofPaylasimZipCache.hazirlaniyor)) {
+    return;   // zaten hazır veya hazırlanıyor -- tekrar üretme
+  }
+
+  _dofPaylasimZipCache = { paketUuid, imza, zipBlob: null, dosyaAdi: null, hazir: false, hazirlaniyor: true, hata: null };
+  try {
+    const sonuc = await _dofReplayZipHazirlaVeUret();
+    // Üretim SÜRERKEN kullanıcı başka bir pakete geçmiş VEYA taze bir dirty
+    // değişikliği/medya güncellemesi başlatmış olabilir -- öyleyse bu
+    // (artık eski) sonuç cache'e YAZILMAZ.
+    if (_dofPaylasimZipCache.paketUuid !== paketUuid || _dofPaylasimZipCache.imza !== imza) return;
+    if (!sonuc) {
+      _dofPaylasimCacheSifirla();
+      return;
+    }
+    _dofPaylasimZipCache = { paketUuid, imza, zipBlob: sonuc.zipBlob, dosyaAdi: sonuc.dosyaAdi, hazir: true, hazirlaniyor: false, hata: null };
+  } catch (e) {
+    if (_dofPaylasimZipCache.paketUuid === paketUuid && _dofPaylasimZipCache.imza === imza) {
+      _dofPaylasimZipCache = { paketUuid, imza, zipBlob: null, dosyaAdi: null, hazir: false, hazirlaniyor: false, hata: e };
+    }
+  }
+}
 
 const _DOF_REPLAY_HATA_METINLERI = {
   BOS_TAKIP_TASLAGI: 'Takip bilgisi yok. Önce takip bilgisi girin.',
@@ -3479,6 +3605,7 @@ async function _dofReplayBolumYukle(dofUuid) {
   if (!dofUuid) {
     kart.style.display = 'none';
     _dofReplayBarPaddingAyarla(false);
+    _dofReplayAktifPaketUuid = null;
     return;
   }
   const durum = document.getElementById('dof-replay-durum');
@@ -3493,6 +3620,13 @@ async function _dofReplayBolumYukle(dofUuid) {
     _dofReplayBarPaddingAyarla(true);
     durum.textContent = '';
 
+    // 4R-PKG-3H: `_dofReplayPaylasTikla`'nın tıklama anında DB'ye gitmeden
+    // hangi paketi paylaşacağını bilebilmesi için burada bir kez çözülür
+    // (paket özeti zaten aynı sorguyu yapıyordu, tekrar yazılmadı).
+    const kayit = await dbGetir('dofler', dofUuid);
+    const paketUuid = kayit && kayit.paketUuid;
+    _dofReplayAktifPaketUuid = paketUuid || null;
+
     // PWA 4R-PKG-3D: sticky ZIP alanının üst kısmında PAKET GENELİ, kompakt
     // özet -- "1 DÖF · 2 Foto · 1 Ses" biçiminde. "DÖF" sayısı =
     // `dofPaketiDegismisDofUuidleri` ile ZIP'e GERÇEKTEN dahil edilecek
@@ -3500,8 +3634,6 @@ async function _dofReplayBolumYukle(dofUuid) {
     // butonu etkilemez.
     const paketOzetEl = document.getElementById('dof-replay-paket-ozet');
     if (paketOzetEl) {
-      const kayit = await dbGetir('dofler', dofUuid);
-      const paketUuid = kayit && kayit.paketUuid;
       if (paketUuid) {
         const degisenler = await dofPaketiDegismisDofUuidleri(paketUuid);
         let paketFoto = 0;
@@ -3517,9 +3649,17 @@ async function _dofReplayBolumYukle(dofUuid) {
         paketOzetEl.textContent = '';
       }
     }
+
+    // 4R-PKG-3H: paylaşım ZIP'ini ARKA PLANDA (kullanıcı "Paylaşmayı Dene"ye
+    // basmadan ÖNCE) üretip cache'ler -- kasıtlı olarak `await` EDİLMEZ,
+    // ekranın açılışını yavaşlatmaz (bkz. `_dofPaylasimZipOnHazirla`). Küçük
+    // bir gecikmeyle (`_DOF_PAYLASIM_ON_HAZIRLIK_GECIKME_MS`) başlar --
+    // kullanıcı ekrandan hemen ayrılırsa gereksiz üretimi engeller.
+    _dofPaylasimZipOnHazirla(dofUuid, { gecikmeMs: _DOF_PAYLASIM_ON_HAZIRLIK_GECIKME_MS });
   } catch (e) {
     kart.style.display = 'none';   // legacy/bulunamayan -- normal akışta oluşmaz, savunma amaçlı
     _dofReplayBarPaddingAyarla(false);
+    _dofReplayAktifPaketUuid = null;
   }
 }
 
@@ -3603,43 +3743,59 @@ async function _dofReplayZipIndirTikla() {
   }
 }
 
-/** "Paylaşmayı Dene" (4R-PKG-3E-FINAL kesin ürün kararı) -- `_dofReplayZipHazirlaVeUret`
- * ile AYNI ZIP'i üretir (içerik BİREBİR aynı -- `dof_donus.json`/`fotolar/`/
- * `sesler/` kökte kalır, hiçbir şey değiştirilmez). Yalnız TESLİM yöntemi
- * farklı: `navigator.canShare({files})` destekliyorsa Web Share API ile
- * Android'in kendi paylaşım ekranına (WhatsApp/Drive/e-posta/Telegram
- * vb.) verilir. Bu buton ARTIK HİÇBİR DURUMDA otomatik ZIP indirmesi
- * YAPMAZ (önceki 3B/3D davranışı kasıtlı olarak KALDIRILDI -- canlı
- * Android testinde kullanıcı "Paylaşmayı Dene her zaman indiriyor" diye
- * şikayet etti). Destek yok/AbortError/gerçek hata -- ÜÇÜNDE de yalnız
- * açık bir mesaj gösterilir, kullanıcı isterse AYRI "ZIP İndir" butonunu
- * kullanır (`_dofReplayZipIndirTikla`, DEĞİŞMEDİ). */
+/** "Paylaşmayı Dene" (4R-PKG-3H) -- artık kendi ZIP'ini tıklama ANINDA
+ * ÜRETMEZ; `_dofReplayBolumYukle` tarafından ARKA PLANDA önceden üretilmiş
+ * `_dofPaylasimZipCache`'i kullanır (içerik `_dofReplayZipHazirlaVeUret` ile
+ * BİREBİR aynı yoldan geldiği için `dof_donus.json`/`fotolar/`/`sesler/`
+ * kökte kalır, hiçbir şey değişmez). Kök neden (BilDesk Saha referans
+ * analizi): tıklama anında `await`lenen ağır hazırlık+hash+medya-DB+zip
+ * zinciri, Android Chrome'un `navigator.share()` için gerektirdiği
+ * transient user activation penceresini aşabiliyordu -- bu sürüm tıklama
+ * anında yalnız `new File(...)` + `navigator.share(...)` çağırır.
+ *
+ * Kaydedilmemiş takip değişikliği varsa (dirty) -- cache TAZE olsa bile
+ * PAYLAŞILMAZ, kullanıcıya önce Kaydet'e basması söylenir (stale-ZIP
+ * paylaşma riskine karşı SON güvence, cache invalidation'dan bağımsız).
+ * Cache henüz hazır değilse (ilk açılış/üretim sürüyor/geçersiz) kullanıcı
+ * bilgilendirilir ve arka plan üretimi (yoksa) yeniden tetiklenir. Bu buton
+ * HİÇBİR DURUMDA otomatik ZIP indirmesi YAPMAZ (3E-FINAL kararı korunur):
+ * destek yok/AbortError/gerçek hata/hazır değil -- HİÇBİRİNDE otomatik
+ * `_dofBlobIndir` çağrılmaz, yalnız açık mesaj gösterilir. */
 async function _dofReplayPaylasTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  const durum = document.getElementById('dof-replay-durum');
+
+  // Kaydedilmemiş takip değişikliği -- cache taze olsa BİLE paylaşılmaz.
+  if (_dofTakipSecliDofUuid === _dofReplaySecliDofUuid && _dofTakipDokunulanAlanlar.size > 0) {
+    durum.textContent = 'Önce takip değişikliklerini kaydedin.';
+    return;
+  }
+
+  const paketUuid = _dofReplayAktifPaketUuid;
+  const cache = _dofPaylasimZipCache;
+  if (!paketUuid || cache.paketUuid !== paketUuid || !cache.hazir) {
+    durum.textContent = 'Paylaşım hazırlanıyor, lütfen birkaç saniye sonra tekrar deneyin.';
+    _dofPaylasimZipOnHazirla(_dofReplaySecliDofUuid);   // henüz başlamadıysa/bittiyse yeniden dene
+    return;
+  }
+
   _dofReplayIslemDevamEdiyor = true;
   const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
   const zipBtn = document.getElementById('dof-replay-zip-btn');
   const paylasBtn = document.getElementById('dof-replay-paylas-btn');
-  const durum = document.getElementById('dof-replay-durum');
   hazirlikBtn.disabled = true;
   zipBtn.disabled = true;
   if (paylasBtn) paylasBtn.disabled = true;
-  durum.textContent = 'Paylaşım hazırlanıyor...';
   try {
-    const sonuc = await _dofReplayZipHazirlaVeUret();
-    if (!sonuc) {
-      durum.textContent = 'Önce en az bir DÖF için takip bilgisi veya kanıt medyası ekleyin.';
-      return;
-    }
-
-    const dosya = new File([sonuc.zipBlob], sonuc.dosyaAdi, { type: 'application/zip' });
+    // Tıklama anında yalnız BU kalır -- ağır üretim yok (bkz. fonksiyon yorumu).
+    const dosya = new File([cache.zipBlob], cache.dosyaAdi, { type: 'application/zip' });
     const paylasimDestekli = typeof navigator !== 'undefined'
       && typeof navigator.canShare === 'function' && navigator.canShare({ files: [dosya] })
       && typeof navigator.share === 'function';
 
     if (paylasimDestekli) {
       try {
-        await navigator.share({ files: [dosya], title: sonuc.dosyaAdi });
+        await navigator.share({ files: [dosya], title: cache.dosyaAdi });
         durum.textContent = 'Paylaşıma gönderildi.';
         return;
       } catch (paylasHatasi) {
@@ -3654,9 +3810,6 @@ async function _dofReplayPaylasTikla() {
     }
     // Gerçek destek YOK -- otomatik indirme YOK, yalnız açık mesaj.
     durum.textContent = 'Bu cihaz/tarayıcı ZIP dosyası paylaşımını desteklemiyor. ZIP indirmek için ZIP İndir düğmesini kullanın.';
-  } catch (e) {
-    const kod = e && e.kod;
-    durum.textContent = (kod && _DOF_REPLAY_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
   } finally {
     _dofReplayIslemDevamEdiyor = false;
     hazirlikBtn.disabled = false;

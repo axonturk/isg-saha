@@ -229,6 +229,12 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     await page.locator('#dof-takip-sorumlu').fill('Paylas Testi');
     await page.locator('#dof-takip-kaydet-btn').click();
     await expect(page.locator('#dof-takip-durum')).toHaveText('Takip bilgileri kaydedildi');
+    // 4R-PKG-3H: "Paylaşmayı Dene" artık tıklama anında ZIP üretmiyor --
+    // arka planda önceden hazırlanmış cache'in hazır olmasını bekle.
+    await page.waitForFunction(() => {
+      const c = window._dofPaylasimZipCacheOku && window._dofPaylasimZipCacheOku();
+      return !!(c && c.hazir);
+    }, { timeout: 5000 });
 
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
@@ -276,10 +282,10 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     expect(k.dofUuid).toBe(dofUuid);
   });
 
-  test('8. Version badge -- PWA isg-saha-v26 · 4R-PKG-3G görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v27 · 4R-PKG-3H görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v26');
-    await expect(rozet).toContainText('4R-PKG-3G');
+    await expect(rozet).toContainText('isg-saha-v27');
+    await expect(rozet).toContainText('4R-PKG-3H');
   });
 });

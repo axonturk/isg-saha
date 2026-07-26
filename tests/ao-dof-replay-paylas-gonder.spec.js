@@ -68,6 +68,18 @@ async function paylasimMockKur(page, { destekli, hataAt = null }) {
   }, { destekli, hataAt });
 }
 
+/** 4R-PKG-3H: "Paylaşmayı Dene" artık tıklama anında ZIP ÜRETMEZ -- arka
+ * planda önceden üretilmiş `_dofPaylasimZipCache`'in hazır olmasını bekler.
+ * Gerçek Android'de bu hazırlama DÖF ekranı açılır açılmaz/Kaydet sonrası
+ * arka planda başlar; testte kullanıcı tepki süresi olmadığından tıklamadan
+ * ÖNCE bu bekleme adımı gerekir (aksi halde "hazırlanıyor" mesajına düşer). */
+async function paylasCacheHazirBekle(page) {
+  await page.waitForFunction(() => {
+    const c = window._dofPaylasimZipCacheOku && window._dofPaylasimZipCacheOku();
+    return !!(c && c.hazir);
+  }, { timeout: 5000 });
+}
+
 test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/tests/fixtures/blank.html');
@@ -89,6 +101,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'Paylaşım Testi' });
+    await paylasCacheHazirBekle(page);
 
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
@@ -112,6 +125,11 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'Fallback Testi' });
+    // 4R-PKG-3H not: cache üretimi `navigator.canShare`/`share` mock'undan
+    // BAĞIMSIZ çalışır (destek kontrolü yalnız tıklama anında yapılır) --
+    // cache yine `hazir` olur, "destek yok" dalına asıl ulaşan şey tıklama
+    // anındaki `canShare` sonucudur.
+    await paylasCacheHazirBekle(page);
 
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
@@ -149,6 +167,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'İptal Testi' });
+    await paylasCacheHazirBekle(page);
 
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
@@ -168,6 +187,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'Hata Testi' });
+    await paylasCacheHazirBekle(page);
 
     let indirmeOldu = false;
     page.once('download', () => { indirmeOldu = true; });
@@ -207,6 +227,7 @@ test.describe('AO. DÖF replay Paylaş/Gönder (4R-PKG-3B)', () => {
     const dofUuid = paket.tehlikeler[0].dofUuid;
     await dofSec(page, dofUuid);
     await takipKaydet(page, { sorumlu: 'ZIP İçerik Testi' });
+    await paylasCacheHazirBekle(page);
 
     await page.click('#dof-replay-paylas-btn');
     await expect(page.locator('#dof-replay-durum')).toHaveText('Paylaşıma gönderildi.');
