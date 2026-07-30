@@ -36,8 +36,8 @@ const APP_VERSION = 'v0.11.2';
 // kullanılıyor. `APP_CACHE`, `sw.js`'teki `CACHE` sabitiyle AYNI
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
-const APP_BUILD = '4R-PKG-3J';
-const APP_CACHE = 'isg-saha-v30';
+const APP_BUILD = '4R-PKG-3K';
+const APP_CACHE = 'isg-saha-v31';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -3643,7 +3643,18 @@ if (typeof window !== 'undefined') {
 // hiçbir iş kuralını tekrar YAZMAZ, yalnız sonucu/hatayı gösterir.
 
 let _dofReplaySecliDofUuid = null;
+// "Hazırlık Oluştur" ve "ZIP İndir" AYNI alttaki kaynağı (hazırlık kaydı)
+// yazdığı için bu bayrağı PAYLAŞIR (bkz. tests/v-dof-replay-actions-ui.spec.js
+// Test K -- hazırlık sürerken ZIP butonu da kilitli olmalı, bu KASITLI).
+// "Paylaşmayı Dene" KENDİ ayrı bayrağını kullanır (`_dofReplayPaylasIslemDevamEdiyor`,
+// aşağıda) -- yalnız önceden üretilmiş cache'i okur, bu ikisiyle DB
+// yazması paylaşmaz, bu yüzden buton loading/disabled durumu da ayrı
+// kalmalı (4R-PKG-3K kök neden: "ZIP İndir"e basınca "Paylaşmayı Dene"
+// butonunun görsel olarak da tetikleniyor GİBİ görünmesi -- aslında
+// `navigator.share` hiç çağrılmıyordu, yalnız iki butonun disabled
+// durumu yanlışlıkla BİRBİRİNE bağlıydı).
 let _dofReplayIslemDevamEdiyor = false;
+let _dofReplayPaylasIslemDevamEdiyor = false;
 // 4R-PKG-3H: `_dofReplayBolumYukle` içinde çözülen, o an açık DÖF'ün ait
 // olduğu paketUuid -- `_dofReplayPaylasTikla`'nın tıklama ANINDA DB'ye
 // gitmeden hangi cache girdisinin geçerli olduğunu bilmesi için.
@@ -3658,8 +3669,17 @@ let _dofReplayAktifPaketUuid = null;
 // reddediyordu ("Paylaşım başarısız oldu"). Çözüm: aynı üretim işini
 // kullanıcı DÖF ekranını AÇARKEN (tıklamadan ÖNCE) arka planda yap ve
 // cache'le -- tıklama anında yalnız `new File(...)` + `navigator.share(...)`
-// kalsın (senkron/hafif). ZIP İndir DEĞİŞMEDİ, kendi taze üretimini yapmaya
-// devam eder (bu cache yalnız paylaşım için kullanılır).
+// kalsın (senkron/hafif).
+//
+// 4R-PKG-3K: "ZIP İndir" AYRI bir aksiyon olarak kalmakla birlikte, artık
+// bu cache'i (imza GÜNCELse) OKUYABİLİR (bkz. `_dofReplayZipIcinHazirVeyaTazeUret`).
+// Kök neden aynı sınıftan: tıklama ile gerçek dosya indirmesi arasında
+// `await` edilen ağır üretim zinciri uzadıkça bazı Android/Chrome
+// sürümlerinde indirme güvenilirliği düşüyordu (saha bulgusu: "3-5 kez
+// tıklandı, ZIP güvenilir gelmedi"). Cache eşleşmiyorsa/hazır değilse ZIP
+// İndir MEVCUT davranışıyla (taze üretim) aynen devam eder -- bu yalnız
+// bir HIZ optimizasyonudur, çıktı baytları/JSON alanları/dosya adı
+// DEĞİŞMEZ (aynı `_dofReplayZipHazirlaVeUret` yolundan gelir).
 const _DOF_PAYLASIM_ON_HAZIRLIK_GECIKME_MS = 400;
 let _dofPaylasimZipCache = {
   paketUuid: null,
@@ -3927,19 +3947,51 @@ async function _dofReplayZipHazirlaVeUret() {
   return dofReplayZipOlustur(dofUuidListesi);
 }
 
+/** 4R-PKG-3K: "ZIP İndir" için -- paylaşım cache'i (`_dofPaylasimZipCache`)
+ * GEÇERLİ imzayla eşleşiyorsa (yani arka planda üretileni bu an itibariyle
+ * GÜNCEL) o hazır Blob'u tıklama anında YENİDEN üretmeden döner -- tıklama
+ * ile gerçek dosya indirmesi arasındaki süreyi kısaltmak için (Android'de
+ * bazı sürümlerde görülen indirme güvenilirlik sorununu azaltır, bkz. dosya
+ * başındaki 4R-PKG-3H yorum bloğu). İmza eşleşmiyorsa/cache hazır değilse
+ * -- ör. Kaydet'ten hemen sonra arka plan üretimi henüz YETİŞEMEDİYSE (bkz.
+ * tests/v-dof-replay-actions-ui.spec.js Test H) -- sessizce MEVCUT davranışa
+ * (`_dofReplayZipHazirlaVeUret`, taze üretim) düşer; asla eski/yanlış bir
+ * ZIP döndürmez. Çıktı biçimi (zipBlob/dosyaAdi) ikisinde de AYNIDIR. */
+async function _dofReplayZipIcinHazirVeyaTazeUret() {
+  const secliKayit = await dbGetir('dofler', _dofReplaySecliDofUuid);
+  const paketUuid = secliKayit && secliKayit.paketUuid;
+  if (paketUuid) {
+    const dofUuidListesi = await dofPaketiDegismisDofUuidleri(paketUuid);
+    if (dofUuidListesi.length > 0) {
+      const imza = _dofPaylasimImzaHesapla(dofUuidListesi);
+      const cache = _dofPaylasimZipCache;
+      if (cache.paketUuid === paketUuid && cache.imza === imza && cache.hazir && cache.zipBlob) {
+        return { zipBlob: cache.zipBlob, dosyaAdi: cache.dosyaAdi };
+      }
+    }
+  }
+  return _dofReplayZipHazirlaVeUret();
+}
+
+/** "ZIP İndir" -- Paylaşmayı Dene'den TAMAMEN BAĞIMSIZ bir aksiyondur:
+ * yalnız ZIP Blob'u üretir/indirir, `navigator.share` HİÇ ÇAĞIRMAZ ve
+ * "Paylaşmayı Dene" butonuna DOKUNMAZ (4R-PKG-3K -- önceki sürümde bu
+ * buton burada `disabled=true/false` ile GEREKSİZ YERE görsel olarak
+ * "tetikleniyor gibi" görünüyordu, saha bulgusu). Yalnız KENDİ ile "Hazırlık
+ * Oluştur"un paylaştığı ortak kaynağı (hazırlık kaydı) temsil eden
+ * `hazirlikBtn`/`zipBtn` kilitlenir -- bu ikisi ARASINDAKİ kilitlenme
+ * KASITLI ve DEĞİŞMEDİ (bkz. Test K). */
 async function _dofReplayZipIndirTikla() {
   if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
   _dofReplayIslemDevamEdiyor = true;
   const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
   const zipBtn = document.getElementById('dof-replay-zip-btn');
-  const paylasBtn = document.getElementById('dof-replay-paylas-btn');
   const durum = document.getElementById('dof-replay-durum');
   hazirlikBtn.disabled = true;
   zipBtn.disabled = true;
-  if (paylasBtn) paylasBtn.disabled = true;
   durum.textContent = 'ZIP hazırlanıyor...';
   try {
-    const sonuc = await _dofReplayZipHazirlaVeUret();
+    const sonuc = await _dofReplayZipIcinHazirVeyaTazeUret();
     if (!sonuc) {
       durum.textContent = 'Önce en az bir DÖF için takip bilgisi veya kanıt medyası ekleyin.';
       return;
@@ -3953,7 +4005,6 @@ async function _dofReplayZipIndirTikla() {
     _dofReplayIslemDevamEdiyor = false;
     hazirlikBtn.disabled = false;
     zipBtn.disabled = false;
-    if (paylasBtn) paylasBtn.disabled = false;
   }
 }
 
@@ -3979,7 +4030,9 @@ function _dofReplayPaylasTikla() {
   // ── BÖLÜM 1: yalnız SALT-OKUNUR guard'lar ───────────────────────
   // Buradaki erken dönüşler `navigator.share`'e HİÇ ulaşmaz, o yüzden
   // DOM'a yazmaları serbesttir (aktivasyon tüketilecek bir çağrı yok).
-  if (!_dofReplaySecliDofUuid || _dofReplayIslemDevamEdiyor) return;
+  // 4R-PKG-3K: KENDİ bayrağı -- "Hazırlık Oluştur"/"ZIP İndir" ile PAYLAŞMAZ,
+  // bu yüzden o ikisi çalışırken bu buton (ve tersi) etkilenmez.
+  if (!_dofReplaySecliDofUuid || _dofReplayPaylasIslemDevamEdiyor) return;
   // Yalnız bir sayı okuma -- DOM'a dokunmaz, aktivasyonu etkilemez.
   const tTiklama = Date.now();
   const durum = document.getElementById('dof-replay-durum');
@@ -4078,13 +4131,13 @@ function _dofReplayPaylasTikla() {
   _dofDebug.shareHataAdi = null;
   _dofDebug.shareHataMesaji = null;
 
-  const hazirlikBtn = document.getElementById('dof-replay-hazirlik-btn');
-  const zipBtn = document.getElementById('dof-replay-zip-btn');
+  // 4R-PKG-3K: yalnız KENDİ butonu -- "Hazırlık Oluştur"/"ZIP İndir"
+  // butonlarına burada ARTIK dokunulmuyor (önceki sürümde share açılırken
+  // bu ikisi de görsel olarak kilitleniyordu, saha bulgusundaki "diğer
+  // buton da tetikleniyor gibi görünüyor" algısının kaynaklarından biriydi).
   const paylasBtn = document.getElementById('dof-replay-paylas-btn');
   const butonlariCoz = () => {
-    _dofReplayIslemDevamEdiyor = false;
-    if (hazirlikBtn) hazirlikBtn.disabled = false;
-    if (zipBtn) zipBtn.disabled = false;
+    _dofReplayPaylasIslemDevamEdiyor = false;
     if (paylasBtn) paylasBtn.disabled = false;
     _dofDebugPanelCiz();
   };
@@ -4105,9 +4158,7 @@ function _dofReplayPaylasTikla() {
     return;
   }
 
-  _dofReplayIslemDevamEdiyor = true;
-  if (hazirlikBtn) hazirlikBtn.disabled = true;
-  if (zipBtn) zipBtn.disabled = true;
+  _dofReplayPaylasIslemDevamEdiyor = true;
   if (paylasBtn) paylasBtn.disabled = true;
   durum.textContent = 'Paylaşım penceresi açılıyor...';
 
