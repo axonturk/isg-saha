@@ -4439,7 +4439,7 @@ window.addEventListener('load', () => {
   _turListesiYukle();
   _dofListesiYukle();
   const buildRozetEl = document.getElementById('build-info');
-  if (buildRozetEl) buildRozetEl.textContent = `PWA ${APP_CACHE} · ${APP_BUILD}`;
+  if (buildRozetEl) buildRozetEl.textContent = `V1 Pilot · PWA ${APP_CACHE} · ${APP_BUILD}`;
   // 4R-PKG-3J: "Geliştirici" <details>'ı önceki oturumda açık bırakıldıysa
   // geri getir (varsayılan KAPALI -- localStorage'da DEBUG_DOF="1" yoksa
   // kapalı kalır, kullanıcı hiç görmez).
