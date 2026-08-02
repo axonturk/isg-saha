@@ -4653,8 +4653,12 @@ async function kurumlariYukle() {
   const kurumlar = await dbTumu('kurumlar');
   const sel = document.getElementById('setup-kurum');
   const secili = sel.value;
+  // Güvenlik (2026-08-02) -- id de escape edilir: QR aktarımı sayesinde
+  // artık kurum/birim id'si yerel uuid() dışında (taranan bir QR koddan)
+  // da gelebiliyor -- escape edilmeden value="${id}" içine yazmak saklı
+  // XSS'e açık olurdu (bkz. kurumAgaciUpsertEt'teki doğrulama, aynı zincir).
   sel.innerHTML = '<option value="">Seçiniz...</option>' +
-    kurumlar.map(k => `<option value="${k.id}">${_esc(k.ad)}</option>`).join('');
+    kurumlar.map(k => `<option value="${_esc(k.id)}">${_esc(k.ad)}</option>`).join('');
   if (secili && kurumlar.some(k => k.id === secili)) sel.value = secili;
   await birimleriYukle();
 }
@@ -4678,7 +4682,7 @@ async function birimleriYukle() {
 
   sel.innerHTML = '<option value="">Seçiniz...</option>' +
     (birimler.length
-      ? `<optgroup label="Mevcut Birimler">${birimler.map(b => `<option value="${b.id}">${_esc(b.ad)}</option>`).join('')}</optgroup>`
+      ? `<optgroup label="Mevcut Birimler">${birimler.map(b => `<option value="${_esc(b.id)}">${_esc(b.ad)}</option>`).join('')}</optgroup>`
       : '') +
     `<optgroup label="Yeni Birim Ekle">${yeniKisayollari}</optgroup>`;
   if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
@@ -4740,7 +4744,7 @@ async function yeniBirimEkle(onceTip) {
   // placeholder-only davranış (Kütüphane bulgusu regresyonu) korunuyor.
   const mevcutBirimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
   const ustSecenekleri = mevcutBirimler.map(b =>
-    `<option value="${b.id}">${_esc(b.ad)}</option>`).join('');
+    `<option value="${_esc(b.id)}">${_esc(b.ad)}</option>`).join('');
 
   showFormModal('Yeni Birim', `
     <div class="input-group">
@@ -4919,6 +4923,46 @@ function _qrDurumSifirla() {
   _qrToplam = null;
 }
 
+/** Güvenlik (2026-08-02) -- QR taraması GÜVEN SINIRIDIR: payload dışarıdan
+ * (taranan bir görüntüden) geliyor, hiçbir alan tipi/formatı garanti değil.
+ * `id`/`ad` gibi alanlar doğrulanmadan hem IndexedDB'ye hem (kurumlariYukle/
+ * birimleriYukle/ustSecenekleri üzerinden) HTML `value="..."` attribute'una
+ * yazılıyordu -- kötü niyetli bir QR, `id` alanına `"><script>...` gibi bir
+ * değer koyup saklı XSS tetikleyebilirdi (render tarafında _esc() ile de
+ * kapatıldı, ama giriş noktasında da reddetmek savunma-derinliği sağlar).
+ * Ayrıca aşırı derin bir ağaç (kötü niyetli veya bozuk) sonsuz olmayan ama
+ * gereksiz derin bir özyinelemeye yol açmasın diye derinlik sınırı var. */
+function _qrPayloadDogrula(payload) {
+  const gecerliMetin = (v, maxUzunluk) =>
+    typeof v === 'string' && v.length > 0 && v.length <= maxUzunluk;
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('QR verisi geçersiz (payload nesne değil).');
+  }
+  if (!payload.kurum || !gecerliMetin(payload.kurum.id, 200) || !gecerliMetin(payload.kurum.ad, 300)) {
+    throw new Error('QR verisinde kurum bilgisi geçersiz (id/ad).');
+  }
+  if (payload.kurum.tur != null && typeof payload.kurum.tur !== 'string') {
+    throw new Error('QR verisinde kurum türü geçersiz.');
+  }
+
+  function dugumuDogrula(dugum, derinlik) {
+    if (derinlik > 20) throw new Error('QR verisinde birim ağacı çok derin.');
+    if (!dugum || !gecerliMetin(dugum.id, 200) || !gecerliMetin(dugum.ad, 300)) {
+      throw new Error('QR verisinde birim bilgisi geçersiz (id/ad).');
+    }
+    if (dugum.children !== undefined && !Array.isArray(dugum.children)) {
+      throw new Error('QR verisinde birim alt-ağacı geçersiz.');
+    }
+    for (const cocuk of (dugum.children || [])) dugumuDogrula(cocuk, derinlik + 1);
+  }
+  if (payload.birimler !== undefined && !Array.isArray(payload.birimler)) {
+    throw new Error('QR verisinde birimler listesi geçersiz.');
+  }
+  for (const dugum of (payload.birimler || [])) dugumuDogrula(dugum, 0);
+}
+if (typeof window !== 'undefined') window._qrPayloadDogrula = _qrPayloadDogrula;
+
 /** QR'dan gelen kurum/birim ağacını yerel IndexedDB'ye upsert eder --
  * "gerçek veri şablonun önüne geçer" ilkesi: mevcut bir birimin sahada
  * gerçekten doldurulmuş tip/katlar/odalar/ozelAlanlar alanları KORUNUR,
@@ -4927,6 +4971,7 @@ function _qrDurumSifirla() {
  * oluşturulur -- Desktop'ta birim.tip kavramı yok, PWA'nın kendi checklist
  * ekseni, kurum.tur'dan bağımsız. */
 async function kurumAgaciUpsertEt(payload) {
+  _qrPayloadDogrula(payload);
   const mevcutKurum = await dbGetir('kurumlar', payload.kurum.id);
   const kurum = {
     id: payload.kurum.id,

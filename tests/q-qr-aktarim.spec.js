@@ -161,6 +161,87 @@ test.describe('Q. Kurum/Birim QR Aktarımı', () => {
     expect(birim.ozelAlanlar).toEqual(['Özel Alan X']);
   });
 
+  // --- Güvenlik (2026-08-02) -- QR payload doğrulama + id escape ---
+
+  test('gecersiz kurum id/ad ile kurumAgaciUpsertEt reddedilir, IndexedDBye yazilmaz', async ({ page }) => {
+    await page.goto('/index.html');
+    const oncekiKurumSayisi = (await storeTumu(page, 'kurumlar')).length;
+
+    const hataMesaji = await page.evaluate(async () => {
+      try {
+        await window.kurumAgaciUpsertEt({ kurum: { id: '', ad: 'X' }, birimler: [] });
+        return null;
+      } catch (e) { return e.message; }
+    });
+    expect(hataMesaji).toContain('kurum bilgisi geçersiz');
+
+    const sonrakiKurumSayisi = (await storeTumu(page, 'kurumlar')).length;
+    expect(sonrakiKurumSayisi).toBe(oncekiKurumSayisi);
+  });
+
+  test('kotu niyetli/uzun bir id degeri reddedilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const cokUzunId = 'x'.repeat(500);
+    const hataMesaji = await page.evaluate(async (id) => {
+      try {
+        await window.kurumAgaciUpsertEt({ kurum: { id, ad: 'X' }, birimler: [] });
+        return null;
+      } catch (e) { return e.message; }
+    }, cokUzunId);
+    expect(hataMesaji).toContain('kurum bilgisi geçersiz');
+  });
+
+  test('cok derin birim agaci reddedilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const derinAgac = await page.evaluate(() => {
+      let dugum = { id: 'derin-uc', ad: 'Uç', children: [] };
+      for (let i = 0; i < 25; i++) dugum = { id: `derin-${i}`, ad: `Seviye ${i}`, children: [dugum] };
+      return dugum;
+    });
+    const hataMesaji = await page.evaluate(async (agac) => {
+      try {
+        await window.kurumAgaciUpsertEt({ kurum: { id: 'k', ad: 'K' }, birimler: [agac] });
+        return null;
+      } catch (e) { return e.message; }
+    }, derinAgac);
+    expect(hataMesaji).toContain('çok derin');
+  });
+
+  test('gecersiz birim id/ad reddedilir, hicbir birim yazilmaz', async ({ page }) => {
+    await page.goto('/index.html');
+    const hataMesaji = await page.evaluate(async () => {
+      try {
+        await window.kurumAgaciUpsertEt({
+          kurum: { id: 'gk', ad: 'Geçerli Kurum' },
+          birimler: [{ id: 'b1', ad: 123 }]  // ad string değil
+        });
+        return null;
+      } catch (e) { return e.message; }
+    });
+    expect(hataMesaji).toContain('birim bilgisi geçersiz');
+  });
+
+  test('kurum/birim secim listesinde id HTML meta-karakterleri escape edilir', async ({ page }) => {
+    await page.goto('/index.html');
+    // _qrPayloadDogrula'yı atlayıp doğrudan dbEkle ile (herhangi bir yoldan
+    // -- ör. eski/bozuk veri -- bu değere ULAŞILMIŞ olsa bile) render
+    // katmanının kendi başına güvenli olduğunu doğrular (savunma-derinliği).
+    const kotuId = `"><img src=x onerror=alert(1)>`;
+    await page.evaluate(async (id) => {
+      await window._idb.dbEkle('kurumlar', { id, ad: 'Escape Test Kurumu', tur: null, olusturma: new Date().toISOString() });
+    }, kotuId);
+
+    await page.evaluate(() => window.kurumlariYukle());
+
+    const enjeksiyonVarMi = await page.evaluate(() => {
+      return document.querySelectorAll('#setup-kurum img[src="x"]').length > 0;
+    });
+    expect(enjeksiyonVarMi).toBe(false);
+
+    const secimVarMi = await page.locator('#setup-kurum option', { hasText: 'Escape Test Kurumu' }).count();
+    expect(secimVarMi).toBe(1);
+  });
+
   test('QR butonu tiklaninca kamera acilir (getUserMedia cagrilir)', async ({ page }) => {
     await sahteKameraKur(page);
     await page.goto('/index.html');
