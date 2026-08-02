@@ -46,4 +46,33 @@ test.describe('B. Kurum oluşturma ve kalıcılık', () => {
     const k2 = kurumlar.find((k) => k.ad === ad2);
     expect(k1.id).not.toBe(k2.id);
   });
+
+  // --- Kurum/Birim Hiyerarşisi + Tür (2026-08-02, Faz 2 Commit 3) ---
+
+  test('kurum turu secilip kaydedilir, sayfa yenilemesinden sonra kalicidir', async ({ page }) => {
+    await page.goto('/index.html');
+    const ad = benzersizAd('Universite');
+
+    await gercekKurumEkle(page, ad, 'universite');
+
+    const kurumlarOnce = await storeTumu(page, 'kurumlar');
+    const kayitOnce = kurumlarOnce.find((k) => k.ad === ad);
+    expect(kayitOnce.tur).toBe('universite');
+
+    await page.reload();
+    const kurumlarSonra = await storeTumu(page, 'kurumlar');
+    const kayitSonra = kurumlarSonra.find((k) => k.ad === ad);
+    expect(kayitSonra.tur).toBe('universite');
+  });
+
+  test('kurum turu belirtilmezse null kaydedilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const ad = benzersizAd('TurYok');
+
+    await gercekKurumEkle(page, ad);
+
+    const kurumlar = await storeTumu(page, 'kurumlar');
+    const kayit = kurumlar.find((k) => k.ad === ad);
+    expect(kayit.tur).toBeNull();
+  });
 });

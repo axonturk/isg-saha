@@ -4694,13 +4694,33 @@ async function _birimSecimDegisti() {
 if (typeof window !== 'undefined') window._birimSecimDegisti = _birimSecimDegisti;
 
 async function yeniKurumEkle() {
-  const ad = prompt('Kurum adı (örn: KMÜ Rektörlüğü, Veterinerlik Fakültesi):');
-  if (!ad || !ad.trim()) return;
-  const kurum = { id: uuid(), ad: ad.trim(), olusturma: new Date().toISOString() };
-  await dbEkle('kurumlar', kurum);
-  await kurumlariYukle();
-  document.getElementById('setup-kurum').value = kurum.id;
-  await birimleriYukle();
+  // Kurum/Birim Hiyerarşisi + Tür (2026-08-02, Faz 2 Commit 3) -- tek
+  // prompt() yerine küçük bir form: ad + tür seçimi. Tür SADECE ÖNERİ
+  // amaçlı (birim/oda öneri şablonlarını tetikler), zorunlu değil.
+  const turSecenekleri = '<option value="">— Belirtilmemiş —</option>' +
+    Object.entries(KURUM_TUR_SABLONLARI).map(([k, v]) =>
+      `<option value="${k}">${_esc(v.ad)}</option>`).join('');
+
+  showFormModal('Yeni Kurum', `
+    <div class="input-group">
+      <label>Kurum Adı</label>
+      <input type="text" id="form-kurum-ad" placeholder="Örn: KMÜ Rektörlüğü, Veterinerlik Fakültesi">
+    </div>
+    <div class="input-group" style="margin-top:15px;">
+      <label>Kurum Türü (öneri şablonları için, zorunlu değil)</label>
+      <select id="form-kurum-tur">${turSecenekleri}</select>
+    </div>
+  `, async () => {
+    const ad = document.getElementById('form-kurum-ad').value.trim();
+    if (!ad) { alert('Kurum adı gerekli.'); return; }
+    const tur = document.getElementById('form-kurum-tur').value || null;
+    const kurum = { id: uuid(), ad, tur, olusturma: new Date().toISOString() };
+    await dbEkle('kurumlar', kurum);
+    closeFormModal();
+    await kurumlariYukle();
+    document.getElementById('setup-kurum').value = kurum.id;
+    await birimleriYukle();
+  }, 'Kurumu Oluştur');
 }
 
 async function yeniBirimEkle(onceTip) {
@@ -4710,6 +4730,15 @@ async function yeniBirimEkle(onceTip) {
   const profilSecenekleri = '<option value="">Seçiniz...</option>' +
     Object.entries(PROFILLER).map(([k, v]) => `<option value="${k}">${_esc(v.ad)}</option>`).join('') +
     '<option value="genel">Genel / Diğer</option>';
+
+  // Kurum/Birim Hiyerarşisi (2026-08-02, Faz 2 Commit 3) -- "Üst Birim"
+  // seçimi mevcut konteyner/daire öneri akışının YANINDA, ayrı ve genel bir
+  // alan: sabit "alt_birim" seviyesi yerine keyfi derinlik kurar
+  // (parentBirimId). Mevcut chip akışı (ad ÖNERİSİ) hiç değişmedi --
+  // placeholder-only davranış (Kütüphane bulgusu regresyonu) korunuyor.
+  const mevcutBirimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
+  const ustSecenekleri = mevcutBirimler.map(b =>
+    `<option value="${b.id}">${_esc(b.ad)}</option>`).join('');
 
   showFormModal('Yeni Birim', `
     <div class="input-group">
@@ -4732,6 +4761,13 @@ async function yeniBirimEkle(onceTip) {
       <label>Kaç Katlı?</label>
       <input type="number" id="form-birim-kat" value="1" min="1">
     </div>
+    <div class="input-group" style="margin-top:15px;">
+      <label>Üst Birim (opsiyonel -- hiyerarşi kurmak için)</label>
+      <select id="form-birim-ust">
+        <option value="">— Yok (üst seviye) —</option>
+        ${ustSecenekleri}
+      </select>
+    </div>
   `, async () => {
     const ad = document.getElementById('form-birim-ad').value.trim();
     if (!ad) { alert('Birim adı gerekli.'); return; }
@@ -4740,8 +4776,10 @@ async function yeniBirimEkle(onceTip) {
     const katSayisi = parseInt(document.getElementById('form-birim-kat').value) || 1;
     let katlar = ['Zemin'];
     if (katSayisi > 1) katlar = ['Zemin', ...Array.from({ length: katSayisi - 1 }, (_, i) => `${i + 1}.Kat`)];
+    const parentBirimId = document.getElementById('form-birim-ust').value || null;
 
-    const birim = { id: uuid(), kurumId, ad, tip: profil, katlar, odalar: [], ozelAlanlar: [], olusturma: new Date().toISOString() };
+    const birim = { id: uuid(), kurumId, ad, tip: profil, katlar, odalar: [], ozelAlanlar: [],
+                     parentBirimId, olusturma: new Date().toISOString() };
     await dbEkle('birimler', birim);
     closeFormModal();
     await birimleriYukle();

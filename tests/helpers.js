@@ -9,9 +9,10 @@ function benzersizAd(onEk) {
   return `${onEk}_${Date.now()}_${rastgele}`;
 }
 
-/** Native `prompt()` diyaloğunu TEK SEFERLİK karşılar (yeniKurumEkle/_katEkle
- * gibi native prompt kullanan akışlar için) -- dialog tetiklenmeden ÖNCE
- * kaydedilmelidir. */
+/** Native `prompt()` diyaloğunu TEK SEFERLİK karşılar (_katEkle/
+ * _birimFormOzelDaireEkle gibi hâlâ native prompt kullanan akışlar için --
+ * yeniKurumEkle 2026-08-02'den itibaren form modalına geçti, artık prompt
+ * kullanmıyor) -- dialog tetiklenmeden ÖNCE kaydedilmelidir. */
 function promptKarsila(page, deger) {
   page.once('dialog', (dialog) => dialog.accept(deger));
 }
@@ -44,22 +45,34 @@ async function storeAdlari(page) {
 }
 
 /** Kurulum ekranındaki "Kurum" seçicisine yeni bir kurum ekler (gerçek UI:
- * native prompt() akışı) ve eklenen kurumun adını döner. */
-async function gercekKurumEkle(page, ad) {
-  promptKarsila(page, ad);
+ * form modalı -- Kurum/Birim Hiyerarşisi 2026-08-02, Faz 2 Commit 3'ten
+ * itibaren artık native prompt() DEĞİL). `tur` verilirse KURUM_TUR_
+ * SABLONLARI anahtarlarından biri olmalı (ör. 'universite'). Eklenen
+ * kurumun adını döner. */
+async function gercekKurumEkle(page, ad, tur = null) {
   await page.click('button[onclick="yeniKurumEkle()"]');
+  await page.locator('#form-kurum-ad').fill(ad);
+  if (tur !== null) {
+    await page.locator('#form-kurum-tur').selectOption(tur);
+  }
+  await page.click('#form-action-btn');
   await page.locator('#setup-kurum').locator(`option[value]`, { hasText: ad }).waitFor({ state: 'attached' });
   return ad;
 }
 
 /** Seçili kuruma yeni bir birim ekler (gerçek UI: form modalı). `profil`
- * PROFILLER anahtarlarından biri olmalı (ör. 'genel' → "Genel / Diğer"). */
-async function gercekBirimEkle(page, { ad, profil = 'genel', katSayisi = null }) {
+ * PROFILLER anahtarlarından biri olmalı (ör. 'genel' → "Genel / Diğer").
+ * `ustBirimId` verilirse "Üst Birim" seçicisinden o birim seçilir
+ * (Kurum/Birim Hiyerarşisi 2026-08-02, Faz 2 Commit 3). */
+async function gercekBirimEkle(page, { ad, profil = 'genel', katSayisi = null, ustBirimId = null }) {
   await page.click('button[onclick="yeniBirimEkle()"]');
   await page.locator('#form-birim-profil').selectOption(profil);
   await page.locator('#form-birim-ad').fill(ad);
   if (katSayisi !== null) {
     await page.locator('#form-birim-kat').fill(String(katSayisi));
+  }
+  if (ustBirimId !== null) {
+    await page.locator('#form-birim-ust').selectOption(ustBirimId);
   }
   await page.click('#form-action-btn');
   await page.locator('#setup-birim').locator(`option[value]`, { hasText: ad }).waitFor({ state: 'attached' });

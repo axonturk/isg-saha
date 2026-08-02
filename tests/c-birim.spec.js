@@ -58,4 +58,39 @@ test.describe('C. Birim oluşturma ve kalıcılık', () => {
     const birim = birimler.find((b) => b.ad === birimAdi);
     expect(birim.katlar).toEqual(['Zemin']);
   });
+
+  // --- Kurum/Birim Hiyerarşisi (2026-08-02, Faz 2 Commit 3) ---
+
+  test('ust birim secilirse parentBirimId dogru kaydedilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Kurum');
+    const ustAdi = benzersizAd('Rektorluk');
+    const altAdi = benzersizAd('SGDB');
+
+    await gercekKurumEkle(page, kurumAdi);
+    await gercekBirimEkle(page, { ad: ustAdi, profil: 'genel' });
+
+    const birimlerOnce = await storeTumu(page, 'birimler');
+    const ust = birimlerOnce.find((b) => b.ad === ustAdi);
+
+    await gercekBirimEkle(page, { ad: altAdi, profil: 'genel', ustBirimId: ust.id });
+
+    const birimlerSonra = await storeTumu(page, 'birimler');
+    const alt = birimlerSonra.find((b) => b.ad === altAdi);
+    expect(alt.parentBirimId).toBe(ust.id);
+    expect(ust.parentBirimId == null).toBe(true);
+  });
+
+  test('ust birim secilmezse parentBirimId null kaydedilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Kurum');
+    const birimAdi = benzersizAd('UstSeviye');
+
+    await gercekKurumEkle(page, kurumAdi);
+    await gercekBirimEkle(page, { ad: birimAdi, profil: 'genel' });
+
+    const birimler = await storeTumu(page, 'birimler');
+    const birim = birimler.find((b) => b.ad === birimAdi);
+    expect(birim.parentBirimId).toBeNull();
+  });
 });
