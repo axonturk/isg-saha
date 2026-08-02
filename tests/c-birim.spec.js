@@ -93,4 +93,49 @@ test.describe('C. Birim oluşturma ve kalıcılık', () => {
     const birim = birimler.find((b) => b.ad === birimAdi);
     expect(birim.parentBirimId).toBeNull();
   });
+
+  // --- Kurum türüne göre birim-adı önerisi (2026-08-02) ---
+
+  test('turu hastane olan kurumda birim adi onerisi chipleri gorunur ve tiklaninca ad alanini doldurur', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Hastane');
+    await gercekKurumEkle(page, kurumAdi, 'hastane');
+
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    const oneriChip = page.locator('#form-birim-ad-onerisi-chips .chip', { hasText: 'Acil Servis Bloğu' });
+    await expect(oneriChip).toBeVisible();
+    await oneriChip.click();
+    await expect(page.locator('#form-birim-ad')).toHaveValue('Acil Servis Bloğu');
+
+    await page.locator('#form-birim-profil').selectOption('genel');
+    await page.click('#form-action-btn');
+
+    const birimler = await storeTumu(page, 'birimler');
+    expect(birimler.some((b) => b.ad === 'Acil Servis Bloğu')).toBe(true);
+  });
+
+  test('turu belirtilmemis kurumda birim adi onerisi chip alani gorunmez', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('TurYokKurum');
+    await gercekKurumEkle(page, kurumAdi);
+
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    await expect(page.locator('#form-birim-ad-onerisi-wrap')).toHaveCount(0);
+  });
+
+  test('oneri chipi tiklandiktan sonra kullanici ad alanini serbestce degistirebilir', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Fabrika');
+    await gercekKurumEkle(page, kurumAdi, 'fabrika');
+
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    await page.locator('#form-birim-ad-onerisi-chips .chip', { hasText: 'Üretim Bölümü' }).click();
+    await page.locator('#form-birim-ad').fill('Kendi Yazdığım Ad');
+    await page.locator('#form-birim-profil').selectOption('genel');
+    await page.click('#form-action-btn');
+
+    const birimler = await storeTumu(page, 'birimler');
+    expect(birimler.some((b) => b.ad === 'Kendi Yazdığım Ad')).toBe(true);
+    expect(birimler.some((b) => b.ad === 'Üretim Bölümü')).toBe(false);
+  });
 });

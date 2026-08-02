@@ -184,6 +184,42 @@ const KURUM_TUR_SABLONLARI = {
   santiye:       { ad: 'Şantiye',        birimTipleri: ['santiye'] }
 };
 
+// Kurum türü -> tipik BİRİM (blok/departman) adı önerileri (2026-08-02,
+// kullanıcı talebiyle eklendi). ALT_BIRIM_LISTELERI ile aynı fikir ama
+// birim.tip yerine kurum.tur'a bağlı -- üniversite hariç (o zaten PROFİLLER
+// + ALT_BIRIM_LISTELERI ile kapsanıyor, PROFİLLER'in "ad" alanları zaten
+// tipik üst-seviye birim adları). SADECE ÖNERİ: tıklanınca "Birim Adı"
+// alanına yazılır (mevcut _birimFormDaireSec ile aynı davranış -- placeholder
+// değil, doğrudan değer -- çünkü kullanıcı somut, adlandırılmış bir
+// seçenek arasından AÇIKÇA seçim yapıyor), serbestçe değiştirilebilir/
+// silinebilir. Fabrika/kamu kurumu/şantiye için resmi bir isimlendirme
+// standardı yok (üniversitenin YÖK-tipi standardının aksine) -- bu yüzden
+// bu üç liste "hastane/eğitim kurumu"na göre daha düşük isabetli bir
+// başlangıç taslağı, sahada kullanılıp genişletilmesi beklenir.
+const KURUM_TUR_BIRIM_ONERILERI = {
+  hastane: [
+    'Acil Servis Bloğu', 'Poliklinikler Bloğu', 'Ameliyathane ve Yoğun Bakım Bloğu',
+    'Yataklı Servisler Bloğu', 'Laboratuvar ve Görüntüleme Bloğu', 'Eczane',
+    'İdari Birim', 'Teknik Servis / Tesis Yönetimi'
+  ],
+  egitim_kurumu: [
+    'İdare Binası', 'Derslik Bloğu', 'Fen/Bilgisayar Laboratuvarları',
+    'Spor Salonu', 'Kütüphane', 'Yemekhane / Kantin', 'Atölye', 'Pansiyon'
+  ],
+  fabrika: [
+    'Üretim Bölümü', 'Bakım-Onarım Atölyesi', 'Kalite Kontrol Laboratuvarı',
+    'Depo / Lojistik', 'İdari Bina', 'Sosyal Tesisler', 'Enerji / Kazan Dairesi'
+  ],
+  kamu_kurumu: [
+    'Müdürlük / Başkanlık Binası', 'Şube Müdürlüğü', 'Halkla İlişkiler / Başvuru Birimi',
+    'Arşiv Birimi', 'Saha / Teknik Birim', 'Bağlı Kurum (ayrı adres)'
+  ],
+  santiye: [
+    'Şantiye Şefliği', 'İş Güvenliği Birimi', 'Malzeme / Depo Sahası',
+    'Sosyal Tesisler (Yemekhane/Barınma)', 'Şantiye İdari Ofisi', 'Teknik Ofis / Proje Birimi'
+  ]
+};
+
 // Konteyner tiplerde (Rektörlük, Enstitü) hazır alt-birim önerileri — HER
 // TİP KENDİ LİSTESİNİ KULLANIR (ilk sürümde ikisi de aynı Daire Başkanlığı
 // listesini paylaşıyordu, Enstitü için anlamsızdı — düzeltildi).
@@ -4746,6 +4782,20 @@ async function yeniBirimEkle(onceTip) {
   const ustSecenekleri = mevcutBirimler.map(b =>
     `<option value="${_esc(b.id)}">${_esc(b.ad)}</option>`).join('');
 
+  // Kurum türüne göre BİRİM adı önerisi (2026-08-02) -- KURUM_TUR_BIRIM_
+  // ONERILERI'nden, kurum.tur ayarlıysa gösterilir. Üniversite hariç
+  // (zaten PROFİLLER/ALT_BIRIM_LISTELERI kapsıyor). Sadece öneri: tıklanınca
+  // Ad alanına yazılır, serbestçe değiştirilebilir.
+  const kurum = await dbGetir('kurumlar', kurumId);
+  const birimAdOnerileri = (kurum && KURUM_TUR_BIRIM_ONERILERI[kurum.tur]) || null;
+  const birimAdOnerisiHtml = birimAdOnerileri ? `
+    <div class="input-group" id="form-birim-ad-onerisi-wrap" style="margin-top:10px;">
+      <label>Birim Adı Önerisi (${_esc(KURUM_TUR_SABLONLARI[kurum.tur].ad)} için tipik, opsiyonel)</label>
+      <div class="chip-group" id="form-birim-ad-onerisi-chips">
+        ${birimAdOnerileri.map((ad) => `<div class="chip" onclick="_birimFormAdOnerisiSec(this)">${_esc(ad)}</div>`).join('')}
+      </div>
+    </div>` : '';
+
   showFormModal('Yeni Birim', `
     <div class="input-group">
       <label>Bina Tipi (alan tipi listesini belirler)</label>
@@ -4759,6 +4809,7 @@ async function yeniBirimEkle(onceTip) {
       </div>
       <div class="chip-group" id="form-birim-daire-chips" style="display:none; margin-top:8px;"></div>
     </div>
+    ${birimAdOnerisiHtml}
     <div class="input-group" id="form-birim-ad-wrap" style="margin-top:15px;">
       <label>Birim Adı</label>
       <input type="text" id="form-birim-ad" placeholder="Örn: Veteriner Hastanesi">
@@ -4871,6 +4922,17 @@ function _birimFormOzelDaireEkle() {
   document.getElementById('form-birim-ad').value = ad.trim();
 }
 if (typeof window !== 'undefined') window._birimFormOzelDaireEkle = _birimFormOzelDaireEkle;
+
+/** Kurum türüne göre birim-adı önerisi chip'i tıklanınca Ad alanına yazar
+ * (2026-08-02) -- _birimFormDaireSec ile aynı davranış: placeholder değil
+ * doğrudan değer, çünkü kullanıcı somut bir seçenek arasından açıkça
+ * seçim yapıyor; serbestçe değiştirilebilir/silinebilir. */
+function _birimFormAdOnerisiSec(el) {
+  document.querySelectorAll('#form-birim-ad-onerisi-chips .chip').forEach((c) => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('form-birim-ad').value = el.textContent;
+}
+if (typeof window !== 'undefined') window._birimFormAdOnerisiSec = _birimFormAdOnerisiSec;
 
 // ─── KURUM/BİRİM QR AKTARIMI (2026-08-02, Faz 2 Commit 5) ──────────────
 // Desktop'un ürettiği QR kare(ler)ini tarar, kurum/birim ağacını yerel
