@@ -8,6 +8,9 @@
     <meta name="theme-color" content="#2c3e50">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <!-- Kurum/Birim QR Aktarımı (2026-08-02) -- offline-first ilkesi gereği
+         CDN değil yerel vendor dosyası (bkz. vendor/jsqr.min.js). -->
+    <script src="vendor/jsqr.min.js"></script>
     <style>
         :root {
             --primary: #2c3e50;
@@ -279,6 +282,9 @@
                         <option value="">Seçiniz...</option>
                     </select>
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniKurumEkle()">+</button>
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" title="QR ile Aktar" onclick="qrTaramayiAc()">
+                        <i class="fas fa-qrcode"></i>
+                    </button>
                 </div>
             </div>
 
@@ -721,6 +727,19 @@
             <div style="display:flex; gap:10px; margin-top:20px">
                 <button class="btn btn-outline" onclick="closeFormModal()">Vazgeç</button>
                 <button id="form-action-btn" class="btn btn-primary">Kaydet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KURUM/BİRİM QR TARAMA (2026-08-02) -->
+    <div id="modal-qr-tarama" class="modal">
+        <div class="modal-content" style="max-width:420px;">
+            <h3>Kurum/Birim QR Tarama</h3>
+            <video id="qr-video" autoplay playsinline muted style="width:100%; border-radius:8px; background:#000;"></video>
+            <canvas id="qr-canvas" style="display:none"></canvas>
+            <p id="qr-durum" style="margin-top:10px;">Kamerayı Desktop'taki QR koda doğrultun...</p>
+            <div style="display:flex; gap:10px; margin-top:10px">
+                <button class="btn btn-outline" onclick="qrTaramayiKapat()">İptal</button>
             </div>
         </div>
     </div>

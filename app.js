@@ -4606,7 +4606,8 @@ function _geriTikla(oncekiEkranId) {
 
 function _modalAcikMi() {
   return document.getElementById('modal-confirm').style.display === 'flex' ||
-         document.getElementById('modal-form').style.display === 'flex';
+         document.getElementById('modal-form').style.display === 'flex' ||
+         document.getElementById('modal-qr-tarama').style.display === 'flex';
 }
 
 // Modal açık halde geri tuşuna basılırsa: sadece modalı kapat, ekranı DEĞİŞTİRME.
@@ -4627,6 +4628,7 @@ window.addEventListener('popstate', (e) => {
   if (_modalAcikMi()) {
     closeModal();
     closeFormModal();
+    qrTaramayiKapat();
   }
   const ekran = e.state && e.state.ekran;
   if (ekran === 'kat-alan') {
@@ -4865,6 +4867,176 @@ function _birimFormOzelDaireEkle() {
   document.getElementById('form-birim-ad').value = ad.trim();
 }
 if (typeof window !== 'undefined') window._birimFormOzelDaireEkle = _birimFormOzelDaireEkle;
+
+// ─── KURUM/BİRİM QR AKTARIMI (2026-08-02, Faz 2 Commit 5) ──────────────
+// Desktop'un ürettiği QR kare(ler)ini tarar, kurum/birim ağacını yerel
+// IndexedDB'ye upsert eder. Wire-format Desktop'un kurum_qr_aktarim.py'si
+// ile birebir: her kare "SIRA|TOPLAM|<base64>" biçiminde bir metin, base64
+// içeriği ham (header'sız) deflate (zlib wbits=-15 ile bit-uyumlu,
+// DecompressionStream('deflate-raw') ile açılır) sıkıştırılmış JSON.
+let _qrParcalar = {};
+let _qrToplam = null;
+let _qrStream = null;
+let _qrKareId = null;
+
+/** Bir QR karesinden çözülen metni işler -- Desktop formatına uymayan
+ * (üç parçadan az) metinleri sessizce yoksayar (yabancı bir QR/barkod
+ * okunmuş olabilir). Test edilebilirlik için ayrı, saf bir fonksiyon. */
+function _qrKareyiIsle(metin) {
+  if (typeof metin !== 'string') return null;
+  const ilkIki = metin.split('|', 2);
+  if (ilkIki.length < 2) return null;
+  const sira = parseInt(ilkIki[0], 10);
+  const toplam = parseInt(ilkIki[1], 10);
+  if (!Number.isInteger(sira) || !Number.isInteger(toplam) || sira < 1 || toplam < 1 || sira > toplam) return null;
+  const b64 = metin.slice(ilkIki[0].length + ilkIki[1].length + 2);
+  _qrToplam = toplam;
+  _qrParcalar[sira] = b64;
+  return { toplananSayi: Object.keys(_qrParcalar).length, toplam };
+}
+if (typeof window !== 'undefined') window._qrKareyiIsle = _qrKareyiIsle;
+
+/** Toplanan parçaları birleştirip base64 -> ham deflate açma -> JSON.parse
+ * zincirini uygular. Eksik parça varsa hata fırlatır. */
+async function _qrPayloadCoz() {
+  if (!_qrToplam) throw new Error('Henüz hiçbir kare okunmadı.');
+  const eksik = [];
+  for (let i = 1; i <= _qrToplam; i++) if (!_qrParcalar[i]) eksik.push(i);
+  if (eksik.length) throw new Error(`Eksik parça(lar): ${eksik.join(', ')}`);
+  const b64 = Array.from({ length: _qrToplam }, (_, i) => _qrParcalar[i + 1]).join('');
+  const ikili = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const acici = new DecompressionStream('deflate-raw');
+  const yazici = acici.writable.getWriter();
+  yazici.write(ikili);
+  yazici.close();
+  const acilmisBuffer = await new Response(acici.readable).arrayBuffer();
+  return JSON.parse(new TextDecoder('utf-8').decode(acilmisBuffer));
+}
+if (typeof window !== 'undefined') window._qrPayloadCoz = _qrPayloadCoz;
+
+function _qrDurumSifirla() {
+  _qrParcalar = {};
+  _qrToplam = null;
+}
+
+/** QR'dan gelen kurum/birim ağacını yerel IndexedDB'ye upsert eder --
+ * "gerçek veri şablonun önüne geçer" ilkesi: mevcut bir birimin sahada
+ * gerçekten doldurulmuş tip/katlar/odalar/ozelAlanlar alanları KORUNUR,
+ * yalnız ad/sgkNo/adres/parentBirimId Desktop'tan gelen değerle güncellenir.
+ * Yeni (daha önce bu cihazda hiç görülmemiş) birimler tip='genel' ile
+ * oluşturulur -- Desktop'ta birim.tip kavramı yok, PWA'nın kendi checklist
+ * ekseni, kurum.tur'dan bağımsız. */
+async function kurumAgaciUpsertEt(payload) {
+  const mevcutKurum = await dbGetir('kurumlar', payload.kurum.id);
+  const kurum = {
+    id: payload.kurum.id,
+    ad: payload.kurum.ad,
+    tur: payload.kurum.tur || null,
+    olusturma: (mevcutKurum && mevcutKurum.olusturma) || new Date().toISOString()
+  };
+  if (mevcutKurum) await dbGuncelle('kurumlar', kurum); else await dbEkle('kurumlar', kurum);
+
+  async function _dugumuIsle(dugum, parentBirimId) {
+    const mevcutBirim = await dbGetir('birimler', dugum.id);
+    const birim = {
+      id: dugum.id,
+      kurumId: payload.kurum.id,
+      ad: dugum.ad,
+      tip: (mevcutBirim && mevcutBirim.tip) || 'genel',
+      katlar: (mevcutBirim && mevcutBirim.katlar) || ['Zemin'],
+      odalar: (mevcutBirim && mevcutBirim.odalar) || [],
+      ozelAlanlar: (mevcutBirim && mevcutBirim.ozelAlanlar) || [],
+      parentBirimId,
+      sgkNo: dugum.sgkNo || null,
+      adres: dugum.adres || null,
+      olusturma: (mevcutBirim && mevcutBirim.olusturma) || new Date().toISOString()
+    };
+    if (mevcutBirim) await dbGuncelle('birimler', birim); else await dbEkle('birimler', birim);
+    for (const cocuk of (dugum.children || [])) await _dugumuIsle(cocuk, dugum.id);
+  }
+  for (const dugum of (payload.birimler || [])) await _dugumuIsle(dugum, null);
+
+  await kurumlariYukle();
+  document.getElementById('setup-kurum').value = payload.kurum.id;
+  await birimleriYukle();
+  return { kurumAdi: payload.kurum.ad, birimSayisi: _agacDugumSayisi(payload.birimler || []) };
+}
+if (typeof window !== 'undefined') window.kurumAgaciUpsertEt = kurumAgaciUpsertEt;
+
+function _agacDugumSayisi(dugumler) {
+  let sayi = 0;
+  for (const d of dugumler) sayi += 1 + _agacDugumSayisi(d.children || []);
+  return sayi;
+}
+
+async function qrTaramayiAc() {
+  _qrDurumSifirla();
+  document.getElementById('qr-durum').textContent = "Kamerayı Desktop'taki QR koda doğrultun...";
+  document.getElementById('modal-qr-tarama').style.display = 'flex';
+  _modalHistoryAc();
+  try {
+    _qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (e) {
+    document.getElementById('qr-durum').textContent = 'Kamera erişimi reddedildi veya kullanılamıyor.';
+    return;
+  }
+  const video = document.getElementById('qr-video');
+  video.srcObject = _qrStream;
+  await video.play();
+  _qrTaramaDongusu();
+}
+if (typeof window !== 'undefined') window.qrTaramayiAc = qrTaramayiAc;
+
+function _qrTaramaDongusu() {
+  if (!_qrStream) return;  // taranırken kapatıldıysa döngüyü durdur
+  const video = document.getElementById('qr-video');
+  const canvas = document.getElementById('qr-canvas');
+  if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR === 'function') {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const goruntu = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const kod = jsQR(goruntu.data, goruntu.width, goruntu.height);
+    if (kod && kod.data) {
+      const durum = _qrKareyiIsle(kod.data);
+      if (durum) {
+        document.getElementById('qr-durum').textContent =
+          `Kare ${durum.toplananSayi}/${durum.toplam} okundu...`;
+        if (durum.toplananSayi === durum.toplam) {
+          _qrTamamlandi();
+          return;
+        }
+      }
+    }
+  }
+  _qrKareId = requestAnimationFrame(_qrTaramaDongusu);
+}
+
+async function _qrTamamlandi() {
+  try {
+    const payload = await _qrPayloadCoz();
+    const sonuc = await kurumAgaciUpsertEt(payload);
+    qrTaramayiKapat();
+    alert(`"${sonuc.kurumAdi}" kurumu ve ${sonuc.birimSayisi} birim aktarıldı.`);
+  } catch (e) {
+    document.getElementById('qr-durum').textContent = `Hata: ${e.message}`;
+    _qrDurumSifirla();
+    _qrKareId = requestAnimationFrame(_qrTaramaDongusu);
+  }
+}
+
+function qrTaramayiKapat() {
+  if (_qrKareId) { cancelAnimationFrame(_qrKareId); _qrKareId = null; }
+  if (_qrStream) { _qrStream.getTracks().forEach((t) => t.stop()); _qrStream = null; }
+  const modal = document.getElementById('modal-qr-tarama');
+  if (modal && modal.style.display === 'flex') {
+    modal.style.display = 'none';
+    _modalHistoryKapat();
+  }
+  _qrDurumSifirla();
+}
+if (typeof window !== 'undefined') window.qrTaramayiKapat = qrTaramayiKapat;
 
 function _birimOdalari(birim, kat) {
   return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
