@@ -138,4 +138,41 @@ test.describe('C. Birim oluşturma ve kalıcılık', () => {
     expect(birimler.some((b) => b.ad === 'Kendi Yazdığım Ad')).toBe(true);
     expect(birimler.some((b) => b.ad === 'Üretim Bölümü')).toBe(false);
   });
+
+  // --- İçerik genişletmesi (2026-08-02) -- fabrika/kamu kurumu/şantiye ---
+
+  test('fabrika: genisletilmis birim adi onerileri (Ar-Ge Merkezi) gorunur', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Fabrika2');
+    await gercekKurumEkle(page, kurumAdi, 'fabrika');
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    await expect(page.locator('#form-birim-ad-onerisi-chips .chip', { hasText: 'Ar-Ge Merkezi' })).toBeVisible();
+  });
+
+  test('kamu kurumu: genisletilmis birim adi onerileri (Meclis / Encümen Salonu) gorunur', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('KamuKurumu');
+    await gercekKurumEkle(page, kurumAdi, 'kamu_kurumu');
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    await expect(page.locator('#form-birim-ad-onerisi-chips .chip', { hasText: 'Meclis / Encümen Salonu' })).toBeVisible();
+  });
+
+  test('santiye: genisletilmis birim adi onerileri (Beton Santrali) gorunur', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Santiye');
+    await gercekKurumEkle(page, kurumAdi, 'santiye');
+    await page.click('button[onclick="yeniBirimEkle()"]');
+    await expect(page.locator('#form-birim-ad-onerisi-chips .chip', { hasText: 'Beton Santrali / Karışım Alanı' })).toBeVisible();
+  });
+
+  test('fabrika: genisletilmis oda/alan tipi listesinde yeni maddeler var', async ({ page }) => {
+    await page.goto('/index.html');
+    const kurumAdi = benzersizAd('Fabrika3');
+    const birimAdi = benzersizAd('FabrikaBirimi');
+    await gercekKurumEkle(page, kurumAdi, 'fabrika');
+    await gercekBirimEkle(page, { ad: birimAdi, profil: 'fabrika' });
+    await page.click('button[onclick="ekranKatAlanaGec()"]');
+    await expect(page.locator('#kat-alan-alan-dropdown option', { hasText: 'Kaynak atölyesi' })).toHaveCount(1);
+    await expect(page.locator('#kat-alan-alan-dropdown option', { hasText: 'İSG / güvenlik ofisi' })).toHaveCount(1);
+  });
 });

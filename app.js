@@ -135,15 +135,25 @@ const YEMEKHANE_ALANLAR = [
 const FABRIKA_ALANLAR = [
   'Üretim hattı / atölye', 'Bakım-onarım atölyesi', 'Kalite kontrol laboratuvarı',
   'Hammadde/ürün deposu', 'Kompresör dairesi', 'Trafo / elektrik dağıtım odası',
-  'Forklift şarj istasyonu', 'Kimyasal depolama alanı'
+  'Forklift şarj istasyonu', 'Kimyasal depolama alanı',
+  // (2026-08-02, genişletme) -- sahada karşılaşılan yaygın üretim alanları
+  'Boyahane / kaplama atölyesi', 'Kaynak atölyesi', 'Montaj hattı',
+  'Ambalajlama / paketleme alanı', 'Numune / Ar-Ge odası', 'İSG / güvenlik ofisi',
+  'Basınçlı hava/gaz tesisatı odası', 'Atık toplama/ayrıştırma alanı'
 ];
 const KAMU_ALANLAR = [
   'Müdürlük / şube odası', 'Evrak kayıt / arşiv', 'Halkla ilişkiler / başvuru bankosu',
-  'Sunucu / sistem odası'
+  'Sunucu / sistem odası',
+  // (2026-08-02, genişletme) -- belediye/kaymakamlık/müdürlük ortak alanları
+  'Meclis / encümen salonu', 'Vezne / tahsilat gişesi', 'Personel yemekhanesi',
+  'Bilgi işlem birimi', 'İnsan kaynakları / personel birimi', 'Arşiv deposu (kapalı)'
 ];
 const SANTIYE_ALANLAR = [
   'Şantiye şefliği konteyneri', 'İş güvenliği kabini', 'Vinç / iskele alanı',
-  'Malzeme deposu sahası', 'Şantiye yemekhanesi / barınma', 'Elektrik panosu / jeneratör alanı'
+  'Malzeme deposu sahası', 'Şantiye yemekhanesi / barınma', 'Elektrik panosu / jeneratör alanı',
+  // (2026-08-02, genişletme) -- inşaat sahasında yaygın alanlar
+  'Beton santrali / karışım alanı', 'Kalıp / demir atölyesi',
+  'Tuvalet / duş konteyneri', 'Sağlık / ilk yardım konteyneri', 'Araç park / manevra sahası'
 ];
 
 const PROFILLER = {
@@ -208,15 +218,23 @@ const KURUM_TUR_BIRIM_ONERILERI = {
   ],
   fabrika: [
     'Üretim Bölümü', 'Bakım-Onarım Atölyesi', 'Kalite Kontrol Laboratuvarı',
-    'Depo / Lojistik', 'İdari Bina', 'Sosyal Tesisler', 'Enerji / Kazan Dairesi'
+    'Depo / Lojistik', 'İdari Bina', 'Sosyal Tesisler', 'Enerji / Kazan Dairesi',
+    // (2026-08-02, genişletme)
+    'Ar-Ge Merkezi', 'Sevkiyat / Lojistik Bölümü', 'Boyahane / Kaplama Bölümü'
   ],
   kamu_kurumu: [
     'Müdürlük / Başkanlık Binası', 'Şube Müdürlüğü', 'Halkla İlişkiler / Başvuru Birimi',
-    'Arşiv Birimi', 'Saha / Teknik Birim', 'Bağlı Kurum (ayrı adres)'
+    'Arşiv Birimi', 'Saha / Teknik Birim', 'Bağlı Kurum (ayrı adres)',
+    // (2026-08-02, genişletme) -- ağırlıklı olarak belediye bağlamında, diğer
+    // kamu kurumu tiplerinde (kaymakamlık/müdürlük) hepsi geçerli olmayabilir
+    'Meclis / Encümen Salonu', 'Basın ve Halkla İlişkiler Birimi',
+    'Bilgi İşlem Birimi', 'İnsan Kaynakları / Personel Birimi'
   ],
   santiye: [
     'Şantiye Şefliği', 'İş Güvenliği Birimi', 'Malzeme / Depo Sahası',
-    'Sosyal Tesisler (Yemekhane/Barınma)', 'Şantiye İdari Ofisi', 'Teknik Ofis / Proje Birimi'
+    'Sosyal Tesisler (Yemekhane/Barınma)', 'Şantiye İdari Ofisi', 'Teknik Ofis / Proje Birimi',
+    // (2026-08-02, genişletme)
+    'Beton Santrali / Karışım Alanı', 'Araç Park / Bakım Sahası'
   ]
 };
 
