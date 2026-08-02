@@ -128,6 +128,24 @@ const YEMEKHANE_ALANLAR = [
   'Pişirme alanı (fritöz/kazan/davlumbaz)', 'Soğuk oda / depo', 'Kuru gıda deposu',
   'Bulaşıkhane', 'Servis / yemek salonu', 'LPG/doğalgaz hattı', 'Personel soyunma'
 ];
+// Kurum/Birim Hiyerarşisi + Tür (2026-08-02, Faz 2) -- fabrika/kamu/şantiye
+// kurum türleri için yeni birim tipleri + kendi alanlar listeleri. Hastane/
+// eğitim/myo BİLEREK yeniden kullanılıyor -- üniversiteye özgü değiller,
+// bağımsız bir hastane/okul kurumunun birimi de aynı tip'i kullanabilir.
+const FABRIKA_ALANLAR = [
+  'Üretim hattı / atölye', 'Bakım-onarım atölyesi', 'Kalite kontrol laboratuvarı',
+  'Hammadde/ürün deposu', 'Kompresör dairesi', 'Trafo / elektrik dağıtım odası',
+  'Forklift şarj istasyonu', 'Kimyasal depolama alanı'
+];
+const KAMU_ALANLAR = [
+  'Müdürlük / şube odası', 'Evrak kayıt / arşiv', 'Halkla ilişkiler / başvuru bankosu',
+  'Sunucu / sistem odası'
+];
+const SANTIYE_ALANLAR = [
+  'Şantiye şefliği konteyneri', 'İş güvenliği kabini', 'Vinç / iskele alanı',
+  'Malzeme deposu sahası', 'Şantiye yemekhanesi / barınma', 'Elektrik panosu / jeneratör alanı'
+];
+
 const PROFILLER = {
   rektorluk: { ad: 'Rektörlük',                          alanlar: ORTAK_ALANLAR, konteyner: true },
   enstitu:   { ad: 'Enstitü',                            alanlar: [...EGITIM_ALANLAR, ...ORTAK_ALANLAR], konteyner: true },
@@ -139,7 +157,31 @@ const PROFILLER = {
   havuz:     { ad: 'Yüzme havuzu',                       alanlar: [...HAVUZ_ALANLAR, ...ORTAK_ALANLAR] },
   spor:      { ad: 'Spor kompleksi',                     alanlar: [...SPOR_ALANLAR, ...ORTAK_ALANLAR] },
   kres:      { ad: 'Kreş',                               alanlar: [...KRES_ALANLAR, ...ORTAK_ALANLAR] },
-  yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] }
+  yemekhane: { ad: 'Merkezi yemekhane',                  alanlar: [...YEMEKHANE_ALANLAR, ...ORTAK_ALANLAR] },
+  fabrika:   { ad: 'Fabrika / üretim tesisi',            alanlar: [...FABRIKA_ALANLAR, ...ORTAK_ALANLAR] },
+  kamu:      { ad: 'Kamu kurumu / idari bina',           alanlar: [...KAMU_ALANLAR, ...ORTAK_ALANLAR] },
+  santiye:   { ad: 'Şantiye / inşaat sahası',            alanlar: [...SANTIYE_ALANLAR, ...ORTAK_ALANLAR] }
+};
+
+// Kurum türü -> isimlendirme şablonu (SADECE ÖNERİ, zorunlu değil, serbest
+// metin her zaman kalır). "birimTipleri" o kurum türünde tipik olarak
+// karşılaşılacak birim.tip anahtarları -- yeniBirimEkle formunda önce bunlar
+// gösterilir. Üniversite mevcut PROFİLLER'in tamamını referans alıyor
+// (zaten hazır, yeni içerik gerekmedi); hastane/eğitim kurumu bağımsız
+// kullanımda da AYNI hastane/egitim tip'ini kullanır (üniversiteye özgü
+// değiller). tür seviyesinde bir "tip" alanı YOK -- checklist içeriğini
+// belirleyen birim.tip (PROFİLLER) ayrı bir eksen, kurum.tur'dan bağımsız.
+const KURUM_TUR_SABLONLARI = {
+  universite: {
+    ad: 'Üniversite',
+    birimTipleri: ['rektorluk', 'enstitu', 'idari', 'egitim', 'myo', 'hastane',
+                   'kutuphane', 'havuz', 'spor', 'kres', 'yemekhane']
+  },
+  hastane:       { ad: 'Hastane',        birimTipleri: ['hastane'] },
+  egitim_kurumu: { ad: 'Eğitim Kurumu',  birimTipleri: ['egitim'] },
+  fabrika:       { ad: 'Fabrika',        birimTipleri: ['fabrika'] },
+  kamu_kurumu:   { ad: 'Kamu Kurumu',    birimTipleri: ['kamu'] },
+  santiye:       { ad: 'Şantiye',        birimTipleri: ['santiye'] }
 };
 
 // Konteyner tiplerde (Rektörlük, Enstitü) hazır alt-birim önerileri — HER
@@ -193,7 +235,13 @@ const HIZLI_ALANLAR = {
   kres:      ['Oyun odası / etkinlik alanı', 'Uyku odası', 'Çocuk WC / alt değiştirme',
               'Bahçe / oyun parkı', 'Giriş güvenliği', 'Çocuk mutfağı / mama hazırlama'],
   yemekhane: ['Pişirme alanı (fritöz/kazan/davlumbaz)', 'Servis / yemek salonu', 'Bulaşıkhane',
-              'Soğuk oda / depo', 'Islak hacim (WC/lavabo)', 'Personel soyunma']
+              'Soğuk oda / depo', 'Islak hacim (WC/lavabo)', 'Personel soyunma'],
+  fabrika:   ['Üretim hattı / atölye', 'Bakım-onarım atölyesi', 'Kalite kontrol laboratuvarı',
+              'Hammadde/ürün deposu', 'Islak hacim (WC/lavabo)', 'Elektrik pano odası'],
+  kamu:      ['Müdürlük / şube odası', 'Toplantı salonu', 'Evrak kayıt / arşiv',
+              'Islak hacim (WC/lavabo)', 'Koridor / merdiven / kaçış yolu', 'Arşiv / depo'],
+  santiye:   ['Şantiye şefliği konteyneri', 'İş güvenliği kabini', 'Vinç / iskele alanı',
+              'Malzeme deposu sahası', 'Elektrik panosu / jeneratör alanı', 'Şantiye yemekhanesi / barınma']
 };
 
 function _birimHizliAlanlar(birim) {
