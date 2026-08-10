@@ -5701,17 +5701,39 @@ function _checklistChipleriGoster() {
     const chip = document.createElement('div');
     chip.className = 'chip';
     chip.textContent = madde;
-    chip.onclick = () => _checklistChipTiklandi(madde);
+    // SUPV-25 (2026-08-11) -- daha önce tıklanmış maddeler (checklistTaslak'a
+    // zaten girmiş) YENİDEN oluşturulan chip listesinde "active" (mavi)
+    // görünür -- yeni oda/oturuma geçince taslak sıfırlandığı için burada
+    // her zaman GÜNCEL durumu yansıtır.
+    if (checklistTaslak.includes(madde)) chip.classList.add('active');
+    chip.onclick = () => _checklistChipTiklandi(madde, chip);
     grup.appendChild(chip);
   }
 }
 
-function _checklistChipTiklandi(metin) {
+// SUPV-25 (2026-08-11) -- GERÇEK kullanımda kullanıcı chip'e dokununca
+// hiçbir görünür değişiklik FARK ETMEDİĞİNİ bildirdi (chip'in kendisi
+// hiç görsel durum değiştirmiyordu VE 3 satırlık textarea, 2. satırdan
+// itibaren TAŞIYOR ama otomatik aşağı kaymıyordu -- kullanıcı textarea'yı
+// elle kaydırmadıkça eklenen metni HİÇ GÖRMÜYORDU, 58 maddelik chip
+// listesi ekranda hareketsiz durduğu için "ayrı bir liste" izlenimi
+// yaratıyordu). Kod/veri KATMANI baştan beri doğruydu (bkz. e-bulgu-not.
+// spec.js testleri) -- eksik olan yalnız görsel GERİ BİLDİRİMDİ. Bu
+// fonksiyon artık: (a) textarea'yı yeni eklenen satırın görünür olacağı
+// şekilde aşağı kaydırır, (b) tıklanan chip'i kalıcı olarak "active"
+// (mavi) işaretler -- kullanıcı hangi maddelere zaten dokunduğunu tek
+// bakışta görür, (c) AYNI chip'e ikinci kez dokununca metni TEKRAR
+// EKLEMEZ (önceden sessizce yinelenen bir satır bug'ıydı -- checklistTaslak
+// zaten dedup ediyordu ama textarea metni ETMİYORDU).
+function _checklistChipTiklandi(metin, chipEl) {
   const kutu = document.getElementById('finding-manual');
   if (!kutu) return;
+  if (checklistTaslak.includes(metin)) return;  // zaten eklendi -- yinelenmez
   const mevcut = kutu.value.trim();
   kutu.value = mevcut ? mevcut + '\n' + metin : metin;
-  if (!checklistTaslak.includes(metin)) checklistTaslak.push(metin);
+  kutu.scrollTop = kutu.scrollHeight;
+  checklistTaslak.push(metin);
+  if (chipEl) chipEl.classList.add('active');
 }
 
 function addQuickFinding(text) {

@@ -127,6 +127,50 @@ test.describe('SUPV-22 -- Checklist kütüphanesi chip UI', () => {
     expect(bulgular[0].checklist).toEqual(maddeler);
   });
 
+  // SUPV-25 (2026-08-11) -- gerçek kullanımda kullanıcı chip'e dokununca
+  // "hiçbir şey olmuyor, ayrı bir liste gibi görünüyor" bildirdi. Kod/veri
+  // katmanı baştan beri doğruydu (üstteki testler) -- eksik olan GÖRSEL
+  // GERİ BİLDİRİMDİ: 3 satırlık textarea 2. maddeden itibaren taşıyordu
+  // ama otomatik kaymıyordu, chip'in kendisi hiç görsel durum
+  // değiştirmiyordu. Bu 3 test o düzeltmeyi kalıcı regresyona bağlar.
+  test('chip tiklaninca "active" sinifi kalici olarak eklenir (gorsel geri bildirim)', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const ilkChip = page.locator('#checklist-chip-grup .chip').first();
+    await expect(ilkChip).not.toHaveClass(/active/);
+    await ilkChip.click();
+    await expect(ilkChip).toHaveClass(/active/);
+  });
+
+  test('chip tiklaninca textarea yeni eklenen satirin gorunur olacagi sekilde asagi kayar', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const chipler = page.locator('#checklist-chip-grup .chip');
+    // 3 satirlik textarea'yi tasiracak kadar (2+ madde) tikla.
+    await chipler.nth(0).click();
+    await chipler.nth(1).click();
+
+    const kaydiginiDogrula = await page.locator('#finding-manual').evaluate((ta) => {
+      return ta.scrollTop + ta.clientHeight >= ta.scrollHeight - 2;
+    });
+    expect(kaydiginiDogrula).toBe(true);
+  });
+
+  test('ayni chip ikinci kez tiklaninca metin TEKRAR EKLENMEZ (yineleme onlenir)', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const ilkChip = page.locator('#checklist-chip-grup .chip').first();
+    await ilkChip.click();
+    const degerBirTiklamaSonra = await page.locator('#finding-manual').inputValue();
+
+    await ilkChip.click();  // ayni chip'e IKINCI tiklama
+    const degerIkiTiklamaSonra = await page.locator('#finding-manual').inputValue();
+
+    expect(degerIkiTiklamaSonra).toBe(degerBirTiklamaSonra);
+    expect(degerIkiTiklamaSonra.split('\n').length).toBe(1);
+
+    await page.click('button[onclick="saveFinding()"]');
+    const bulgular = await storeTumu(page, 'bulgular');
+    expect(bulgular[0].checklist.length).toBe(1);
+  });
+
   test('checklist chip HIC tiklanmazsa kayitta checklist alani null kalir (eski davranisla ayni)', async ({ page }) => {
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
     await page.locator('#finding-manual').fill('Sadece elle yazıldı.');
