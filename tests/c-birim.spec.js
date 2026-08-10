@@ -175,4 +175,67 @@ test.describe('C. Birim oluşturma ve kalıcılık', () => {
     await expect(page.locator('#kat-alan-alan-dropdown option', { hasText: 'Kaynak atölyesi' })).toHaveCount(1);
     await expect(page.locator('#kat-alan-alan-dropdown option', { hasText: 'İSG / güvenlik ofisi' })).toHaveCount(1);
   });
+
+  // SUPV-22 (2026-08-10) -- Birim dropdown düzeltmesi: eskiden Object.
+  // entries(PROFILLER) üzerinden HER profil için ayrı "+Yeni: X" kısayolı
+  // üretiliyordu (onlarca öneri, kuruma bağlı birim sayısından bağımsız
+  // sabit bir liste). Artık tek bir genel "+ Yeni Birim Ekle" seçeneği var.
+  test.describe('SUPV-22 -- Birim dropdown duzeltmesi', () => {
+    test('dropdown yalnizca TEK "+ Yeni Birim Ekle" secenegi gosterir, onlarca per-profil kisayolu YOK', async ({ page }) => {
+      await page.goto('/index.html');
+      const kurumAdi = benzersizAd('Kurum');
+      await gercekKurumEkle(page, kurumAdi);
+
+      const yeniSecenekler = page.locator('#setup-birim option', { hasText: '+ Yeni' });
+      await expect(yeniSecenekler).toHaveCount(1);
+      await expect(yeniSecenekler.first()).toHaveText('+ Yeni Birim Ekle');
+      // Eski per-profil kısayolları (ör. "+ Yeni: Rektörlük") artık YOK.
+      await expect(page.locator('#setup-birim option', { hasText: '+ Yeni: Rektörlük' })).toHaveCount(0);
+      await expect(page.locator('#setup-birim option', { hasText: '+ Yeni: Hastane' })).toHaveCount(0);
+    });
+
+    test('dropdown yalnizca SECILI kuruma bagli birimleri listeler, baska kurumun birimi sizmaz', async ({ page }) => {
+      await page.goto('/index.html');
+      const kurumA = benzersizAd('KurumA');
+      const kurumB = benzersizAd('KurumB');
+      const birimA = benzersizAd('BirimA');
+      const birimB = benzersizAd('BirimB');
+
+      await gercekKurumEkle(page, kurumA);
+      await gercekBirimEkle(page, { ad: birimA, profil: 'genel' });
+
+      await gercekKurumEkle(page, kurumB);
+      await gercekBirimEkle(page, { ad: birimB, profil: 'genel' });
+
+      // Kurum B seçiliyken yalnız Birim B görünür, Birim A sızmaz.
+      await expect(page.locator('#setup-birim option', { hasText: birimB })).toHaveCount(1);
+      await expect(page.locator('#setup-birim option', { hasText: birimA })).toHaveCount(0);
+
+      // Kurum A'ya geri dönünce yalnız Birim A görünür, Birim B sızmaz.
+      await page.locator('#setup-kurum').selectOption({ label: kurumA });
+      await expect(page.locator('#setup-birim option', { hasText: birimA })).toHaveCount(1);
+      await expect(page.locator('#setup-birim option', { hasText: birimB })).toHaveCount(0);
+    });
+
+    test('"+ Yeni Birim Ekle" secilince yeni birim formu acilir, tip formun icinde secilir', async ({ page }) => {
+      await page.goto('/index.html');
+      const kurumAdi = benzersizAd('Kurum');
+      const birimAdi = benzersizAd('DropdownBirimi');
+      await gercekKurumEkle(page, kurumAdi);
+
+      await page.locator('#setup-birim').selectOption('YENI');
+      await expect(page.locator('#form-birim-profil')).toBeVisible();
+      // onceTip verilmedigi icin "Bina Tipi" varsayilan bos ("Seçiniz...").
+      await expect(page.locator('#form-birim-profil')).toHaveValue('');
+
+      await page.locator('#form-birim-profil').selectOption('genel');
+      await page.locator('#form-birim-ad').fill(birimAdi);
+      await page.click('#form-action-btn');
+
+      // yeniBirimEkle()'nin kendi kaydetme akışı, oluşturulan birimi
+      // dropdown'da OTOMATİK seçili bırakır (bkz. app.js'teki
+      // `document.getElementById('setup-birim').value = birim.id;`).
+      await expect(page.locator('#setup-birim option:checked')).toHaveText(birimAdi);
+    });
+  });
 });

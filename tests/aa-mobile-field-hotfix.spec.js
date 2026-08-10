@@ -30,10 +30,12 @@ function kucukPngBuffer() {
 // Android/Pixel benzeri dar viewport + dokunmatik.
 test.use({ viewport: { width: 393, height: 851 }, hasTouch: true });
 
-// "Rektörlük" değil "Rektörlük Binası" -- #setup-birim açılır listesinde her
-// zaman bulunan sabit "+ Yeni: Rektörlük" kısayol seçeneğiyle (PROFILLER.
-// rektorluk.ad) metin çakışmasını önler, breadcrumb testinde yine "Rektörlük"
-// alt dizesini içerir.
+// "Rektörlük" değil "Rektörlük Binası" -- breadcrumb testinde yine
+// "Rektörlük" alt dizesini içerir. (SUPV-22, 2026-08-10: #setup-birim
+// açılır listesindeki eski per-profil "+ Yeni: X" kısayolları TEK bir
+// "+ Yeni Birim Ekle" seçeneğiyle değiştirildi -- bu isim seçimi artık
+// zorunlu bir çakışma önleme DEĞİL, yalnız test okunabilirliği için
+// korundu.)
 async function _kurumBirimHazirla(page, birimAdi = 'Rektörlük Binası') {
   const kurumAdi = benzersizAd('Kurum');
   await page.goto('/index.html');

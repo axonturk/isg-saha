@@ -21,9 +21,9 @@ function kucukPngBuffer() {
 
 test.use({ viewport: { width: 393, height: 851 }, hasTouch: true });
 
-// "Rektörlük" değil "Rektörlük Binası" -- #setup-birim açılır listesindeki
-// sabit "+ Yeni: Rektörlük" kısayol seçeneğiyle (PROFILLER.rektorluk.ad)
-// metin çakışmasını önler (bkz. tests/aa-mobile-field-hotfix.spec.js).
+// "Rektörlük" değil "Rektörlük Binası" -- bkz. tests/aa-mobile-field-
+// hotfix.spec.js (SUPV-22, 2026-08-10: eski "+ Yeni: Rektörlük" dropdown
+// kısayolu kaldırıldı, isim seçimi artık yalnız test okunabilirliği için).
 async function _kurumBirimHazirla(page, birimAdi = 'Rektörlük Binası') {
   const kurumAdi = benzersizAd('Kurum');
   await page.goto('/index.html');

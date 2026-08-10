@@ -4730,26 +4730,27 @@ async function birimleriYukle() {
   const secili = sel.value;
   const birimler = await dbIndexTumu('birimler', 'kurumId', kurumId);
 
-  // Ön tanımlı tip kısayolları: seçilince "Yeni Birim" formu o tiple önceden
-  // doldurulmuş açılır (bkz. _birimSecimDegisti). Gerçek birim kaydı değil.
-  const yeniKisayollari = Object.entries(PROFILLER)
-    .map(([k, v]) => `<option value="YENI:${k}">+ Yeni: ${_esc(v.ad)}</option>`).join('');
-
+  // SUPV-22 (2026-08-10) -- ESKİDEN Object.entries(PROFILLER) üzerinden
+  // HER profil için ayrı bir "+Yeni: X" kısayolı üretilirdi (onlarca
+  // seçenek, kuruma bağlı birim sayısından bağımsız olarak SABİT ve
+  // GEREKSİZ büyük bir liste). yeniBirimEkle()'nin kendi formunda ZATEN
+  // TAM bir "Bina Tipi" seçici var (bkz. form-birim-profil) -- dropdown
+  // seviyesinde tip'i ÖNCEDEN seçtirmek gereksiz TEKRARdı. Artık TEK bir
+  // genel "+ Yeni Birim Ekle" seçeneği var, tip formun İÇİNDE seçilir.
   sel.innerHTML = '<option value="">Seçiniz...</option>' +
     (birimler.length
       ? `<optgroup label="Mevcut Birimler">${birimler.map(b => `<option value="${_esc(b.id)}">${_esc(b.ad)}</option>`).join('')}</optgroup>`
       : '') +
-    `<optgroup label="Yeni Birim Ekle">${yeniKisayollari}</optgroup>`;
+    '<option value="YENI">+ Yeni Birim Ekle</option>';
   if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
 }
 
 async function _birimSecimDegisti() {
   const sel = document.getElementById('setup-birim');
   const deger = sel.value;
-  if (deger.startsWith('YENI:')) {
-    const tip = deger.slice(5);
+  if (deger === 'YENI') {
     sel.value = '';
-    await yeniBirimEkle(tip);
+    await yeniBirimEkle();
   }
 }
 if (typeof window !== 'undefined') window._birimSecimDegisti = _birimSecimDegisti;
