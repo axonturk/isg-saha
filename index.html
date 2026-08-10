@@ -11,6 +11,10 @@
     <!-- Kurum/Birim QR Aktarımı (2026-08-02) -- offline-first ilkesi gereği
          CDN değil yerel vendor dosyası (bkz. vendor/jsqr.min.js). -->
     <script src="vendor/jsqr.min.js"></script>
+    <!-- Checklist Kütüphanesi (SUPV-22, 2026-08-10) -- Desktop'un
+         checklist_kutuphanesi.py'sinden üretilen veri, app.js'den ÖNCE
+         yüklenmeli (CHECKLIST_KUTUPHANESI/checklistKaynagiBul global). -->
+    <script src="checklist-kutuphanesi.js"></script>
     <style>
         :root {
             --primary: #2c3e50;
@@ -684,6 +688,12 @@
                 <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
                 <div class="chip" onclick="addQuickFinding('Priz Yerinden Çıkmış')">Priz</div>
             </div>
+            <!-- Checklist Kütüphanesi (SUPV-22) -- pasif hatırlatma: dokununca
+                 nota metin eklenir, zorunlu tamamlama/Evet-Hayır durumu YOK. -->
+            <div id="checklist-chip-baslik" class="bulgu-alt-baslik" style="display:none; margin-top:15px">
+                Kontrol Listesi Hatırlatması (dokunun, nota eklenir)
+            </div>
+            <div id="checklist-chip-grup" class="chip-group"></div>
             <button id="btn-hayati-risk" class="btn hayati-risk-btn" style="margin-top:15px" onclick="toggleHayatiRisk()">
                 <i class="fas fa-triangle-exclamation"></i> <span id="hayati-risk-etiket">Hayati Risk İşaretle</span>
             </button>

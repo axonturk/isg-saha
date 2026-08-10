@@ -58,6 +58,7 @@ let kameraModu        = 'kanit';  // 'kanit' (bulgu fotoğrafı) | 'etiket' (oda
 let aktifFotolarTaslak = [];    // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış fotolar (sınırsız)
 let aktifSeslerTaslak  = [];    // ses kayıtlarından gelen [{blob, sure}, ...] (sınırsız)
 let hayatiRiskAktif   = false;
+let checklistTaslak   = [];     // SUPV-22 -- tıklanan checklist chip metinleri (audit izi, Evet/Hayır YOK)
 let sesRecorder       = null;
 let sesChunks         = [];
 let secilenKat        = null;   // Ekran B'de seçili kat
@@ -5627,6 +5628,9 @@ async function saveFinding() {
       })),
       sesler: aktifSeslerTaslak.map(s => ({ blob: s.blob, sure: s.sure })),
       hayatiRisk: hayatiRiskAktif,
+      // SUPV-22 -- tıklanan checklist chip metinleri (audit izi -- Evet/
+      // Hayır durumu TUTULMAZ, yalnız hangi hatırlatmaların kullanıldığı).
+      checklist: checklistTaslak.length ? checklistTaslak.slice() : null,
       zaman: new Date().toISOString()
     };
     await dbEkle('bulgular', bulgu);
@@ -5655,12 +5659,58 @@ function _taslakTemizle() {
   aktifFotolarTaslak = [];
   aktifSeslerTaslak = [];
   hayatiRiskAktif = false;
+  checklistTaslak = [];
   _hayatiRiskButonGuncelle();
   _sesButonSifirla();
   _fotoOnizlemeGoster();
   _sesOnizlemeGoster();
   const metin = document.getElementById('finding-manual');
   if (metin) metin.value = '';
+  // SUPV-22 -- her yeni oda/oturuma girişte (startInspection/resumeSession,
+  // bu fonksiyonun kendi "HER giriş noktasında çağrılmalı" ilkesiyle AYNI)
+  // checklist chip'leri currentSession.alanTipi'ne göre yeniden kurulur.
+  _checklistChipleriGoster();
+}
+
+// ─── CHECKLIST KÜTÜPHANESİ CHIP'LERİ (SUPV-22, 2026-08-10) ──────────────
+// Desktop'un TAM yapılandırılmış formunun (Evet/Hayır/Gerekli Değil)
+// AKSİNE burada HAFİF chip UI -- dokununca metin nota EKLENİR, zorunlu
+// tamamlama/Evet-Hayır durumu TUTULMAZ (plan §7 "pasif hatırlatma"
+// kararı, 2026-08-10). checklistKaynagiBul (checklist-kutuphanesi.js)
+// yalnız basit anahtar-kelime eşleşmesi yapar -- eşleşme yoksa satır HİÇ
+// gösterilmez (zorunlu değil).
+function _checklistChipleriGoster() {
+  const baslik = document.getElementById('checklist-chip-baslik');
+  const grup = document.getElementById('checklist-chip-grup');
+  if (!baslik || !grup) return;
+  grup.innerHTML = '';
+  const alanTipi = currentSession && currentSession.alanTipi;
+  if (!alanTipi || typeof checklistKaynagiBul !== 'function') {
+    baslik.style.display = 'none';
+    return;
+  }
+  const kod = checklistKaynagiBul(alanTipi, null);
+  const kaynak = kod && CHECKLIST_KUTUPHANESI[kod];
+  if (!kaynak) {
+    baslik.style.display = 'none';
+    return;
+  }
+  baslik.style.display = '';
+  for (const madde of kaynak.maddeler) {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.textContent = madde;
+    chip.onclick = () => _checklistChipTiklandi(madde);
+    grup.appendChild(chip);
+  }
+}
+
+function _checklistChipTiklandi(metin) {
+  const kutu = document.getElementById('finding-manual');
+  if (!kutu) return;
+  const mevcut = kutu.value.trim();
+  kutu.value = mevcut ? mevcut + '\n' + metin : metin;
+  if (!checklistTaslak.includes(metin)) checklistTaslak.push(metin);
 }
 
 function addQuickFinding(text) {
@@ -6353,7 +6403,9 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       hayatiRisk: !!b.hayatiRisk,
       fotografsiz: fotoAdlari.length === 0,
       sesNotlari: sesAdlari,
-      checklist: null,
+      // SUPV-22 -- daha önce HER ZAMAN null'dı (checklist UI yoktu);
+      // artık bulgunun kendi checklist alanına (varsa) yazılır.
+      checklist: b.checklist || null,
       zaman: b.zaman,
       fotolar: fotoAdlari
     };
