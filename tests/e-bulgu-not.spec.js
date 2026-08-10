@@ -137,23 +137,30 @@ test.describe('SUPV-22 -- Checklist kütüphanesi chip UI', () => {
   });
 
   test('yeni bulgu kaydedilince checklist taslak sifirlanir, bir sonraki bulguya tasinmaz', async ({ page }) => {
+    // KÖK NEDEN NOTU (bu test önceden ara sıra başarısız oluyordu, teşhis
+    // edildi -- bkz. debug oturumu): uygulama mantığı HER ZAMAN doğruydu
+    // (checklistTaslak doğrudan __DEBUG hook'uyla 8/8 tekrarda [] olarak
+    // doğrulandı). Gerçek hata BU TESTTEYDİ: `bulgular[1]` -- IndexedDB
+    // `getAll()` insertion sırasına GÖRE DEĞİL, birincil anahtara (id =
+    // uuid(), rastgele) göre sıralar; iki bulgunun rastgele UUID'lerinin
+    // sözlük sırası hangi kaydın index 0/1'e düştüğünü belirliyordu --
+    // bir yazı-turadan farksızdı. Düzeltme: kaydı METNİYLE bul, dizideki
+    // KONUMUNA asla güvenme.
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
     await page.locator('#checklist-chip-grup .chip').first().click();
     await page.click('button[onclick="saveFinding()"]');
-    // saveFinding() -- dbEkle/dbGuncelle (IndexedDB, gerçek tarayıcı olay
-    // döngüsü) tamamlanana kadar _taslakTemizle() ÇALIŞMAZ -- ikinci
-    // bulguya geçmeden önce ilk kaydın gerçekten bittiğini (liste
-    // güncellendi) bekle, yoksa checklistTaslak henüz sıfırlanmamışken
-    // ikinci bulgu oluşturulabilir (yarış durumu, test-yalnız sorun).
     await expect(page.locator('.finding-item')).toHaveCount(1);
 
     // İkinci bulgu -- hiç chip tıklanmadı, taslak önceki bulgudan miras
     // ALINMAMALI.
     await page.locator('#finding-manual').fill('İkinci bulgu, chip yok.');
     await page.click('button[onclick="saveFinding()"]');
+    await expect(page.locator('.finding-item')).toHaveCount(2);
 
     const bulgular = await storeTumu(page, 'bulgular');
     expect(bulgular.length).toBe(2);
-    expect(bulgular[1].checklist).toBeNull();
+    const ikinciBulgu = bulgular.find((b) => b.metin === 'İkinci bulgu, chip yok.');
+    expect(ikinciBulgu).toBeTruthy();
+    expect(ikinciBulgu.checklist).toBeNull();
   });
 });
