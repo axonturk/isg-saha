@@ -581,6 +581,11 @@ function _dofYerelKayitOlustur(kayit, paketUuid) {
     r: kayit.r ?? null,
     duzelticiFaaliyet: kayit.duzelticiFaaliyet ?? '',
     aksiyonSuresi: kayit.aksiyonSuresi ?? '',
+    // SUPV-28 -- Desktop dof_islemleri.py'nin export'una eklenen additive
+    // alan (risk_yontemi_getir ile AYNI kaynak). Eski/legacy export
+    // paketlerinde bu alan yok -- eksikse 'fine_kinney' varsayılan
+    // (isg_denetim'in "eksik/legacy -> fine_kinney" konvansiyonuyla AYNI).
+    riskYontemi: kayit.riskYontemi ?? 'fine_kinney',
     iceAktarilmaZamani: new Date().toISOString(),
   };
 }
@@ -685,7 +690,7 @@ async function dofPaketiIceriAktar(paketVeyaJsonMetni) {
 }
 
 // ─── DÖF TAKİP TASLAĞI (PWA Commit 4A) ──────────────────────────
-// İzinli sekiz public takip alanı (isg_denetim/dof_takip_contract.py +
+// İzinli dokuz public takip alanı (isg_denetim/dof_takip_contract.py +
 // dof_islemleri.py::_dof_takip_guncelle_core salt-okunur doğrulanmıştır)
 // için yerel taslak katmanı. Kanonik imported DÖF kaydından mantıksal
 // olarak AYRI, nested `takipTaslagi` alanında saklanır -- import
@@ -694,16 +699,80 @@ async function dofPaketiIceriAktar(paketVeyaJsonMetni) {
 
 const _DOF_TARIH_ALANLARI = ['planlanan_tarih', 'etkinlik_kontrol_tarihi'];
 const _DOF_METIN_ALANLARI = ['sorumlu', 'gerceklesen_faaliyet', 'gozlem_degerlendirme'];
-const _DOF_OFS_ALANLARI = ['yeni_o', 'yeni_f', 'yeni_s'];
+// SUPV-28 -- fiziksel depolama alanları HER ZAMAN dördü (o/f/s/d) --
+// isg_denetim dof_islemleri.py'nin `_ARTIK_RISK_ALANLARI` ile AYNI
+// felsefe: 4 kolon HER ZAMAN vardır (allowlist düzeyinde sabit), hangi
+// alt kümenin BU DÖF için GEREKLİ/gösterilecek olduğu riskin KENDİ
+// yöntemine göre (bkz. _dofYontemDepolamaAlanlari) DEĞİŞİR.
+const _DOF_OFS_ALANLARI = ['yeni_o', 'yeni_f', 'yeni_s', 'yeni_d'];
 const _DOF_TAKIP_ALANLARI = [..._DOF_TARIH_ALANLARI, ..._DOF_METIN_ALANLARI, ..._DOF_OFS_ALANLARI];
 
-// Fine-Kinney kanonik değer kümeleri -- isg_denetim/fine_kinney.py'den
-// salt-okunur doğrulandı (OLASILIK/FREKANS/SIDDET).
-const _DOF_FINE_KINNEY_KUMELERI = {
-  yeni_o: new Set([10, 6, 3, 1, 0.5, 0.2]),
-  yeni_f: new Set([10, 6, 3, 2, 1, 0.5]),
-  yeni_s: new Set([100, 40, 15, 7, 3, 1]),
+// risk_yontemleri.GIRDI_TABLOLARI'nin (isg_denetim) PWA karşılığı --
+// SUPV-27/28: skor hesaplama/kapanış eşiği (skor_hesapla/kabul_
+// edilebilir_mi) BİLEREK YOK -- PWA kapanış kararı VERMEZ (Desktop
+// dof_kapat/dof_gerekceli_kapat tek yetkili, bkz. SUPV-27 madde 3).
+// Yalnız BU DÖF'ün riski hangi yöntemle değerlendirildiyse
+// (kayit.riskYontemi -- Desktop dof_islemleri.py export'undan SUPV-28
+// ile taşınan additive alan, eksik/legacy Fine-Kinney varsayılan) o
+// yöntemde hangi depolama alanının (yeni_o/f/s/d) hangi ETİKETLE ve
+// hangi SABİT DEĞER KÜMESİYLE gösterileceği. DİKKAT: FMEA "Olasılık"ı
+// (o) DEĞİL, "Frekans"ı (f -- burada "Oluşma Sıklığı" olarak yeniden
+// yorumlanır) gösterir/gerektirir -- isg_denetim risk_yontemleri.py'nin
+// GIRDI_TABLOLARI[YONTEM_FMEA] = {"f":..., "s":..., "d":...} eşlemesiyle
+// (storage kolonu yeni_f'nin FMEA'da "Oluşma Sıklığı" taşıması) BİREBİR,
+// İCAT EDİLMEDİ.
+const _DOF_FK_GIRDI_TABLOSU = {
+  o: { etiket: 'Olasılık (O)', degerler: [10, 6, 3, 1, 0.5, 0.2] },
+  f: { etiket: 'Frekans (F)', degerler: [10, 6, 3, 2, 1, 0.5] },
+  s: { etiket: 'Şiddet (Ş)', degerler: [100, 40, 15, 7, 3, 1] },
 };
+const _DOF_5X5_GIRDI_TABLOSU = {
+  o: { etiket: 'Olasılık (O)', degerler: [1, 2, 3, 4, 5] },
+  s: { etiket: 'Şiddet (Ş)', degerler: [1, 2, 3, 4, 5] },
+};
+const _DOF_FMEA_1_10 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const _DOF_FMEA_GIRDI_TABLOSU = {
+  f: { etiket: 'Oluşma Sıklığı (O)', degerler: _DOF_FMEA_1_10 },
+  s: { etiket: 'Şiddet (Ş)', degerler: _DOF_FMEA_1_10 },
+  d: { etiket: 'Saptanabilirlik (D)', degerler: _DOF_FMEA_1_10 },
+};
+const _DOF_YONTEM_VARSAYILAN = 'fine_kinney';
+// isg_denetim risk_yontemleri.YONTEM_BILGI[...]['ad']'den salt-okunur --
+// yalnız görünen ad, PWA'da açıklama/eşik metni İCAT EDİLMEDİ (madde 3
+// gereği gerekmiyor).
+const _DOF_YONTEM_ADI = {
+  fine_kinney: 'Fine-Kinney',
+  risk_matrisi_5x5: '5x5 Risk Matrisi',
+  l_tipi: 'L Tipi Matris',
+  fmea: 'FMEA (Hata Türü ve Etkileri Analizi)',
+  jsa: 'JSA/JHA (İş Güvenliği Analizi)',
+  pha: 'PHA (Ön Tehlike Analizi)',
+};
+const _DOF_YONTEM_GIRDI_TABLOLARI = {
+  fine_kinney: _DOF_FK_GIRDI_TABLOSU,
+  jsa: _DOF_FK_GIRDI_TABLOSU,
+  pha: _DOF_FK_GIRDI_TABLOSU,
+  risk_matrisi_5x5: _DOF_5X5_GIRDI_TABLOSU,
+  l_tipi: _DOF_5X5_GIRDI_TABLOSU,
+  fmea: _DOF_FMEA_GIRDI_TABLOSU,
+};
+const _DOF_ALAN_SIRASI = ['o', 'f', 's', 'd'];
+
+/** Bilinmeyen/boş yöntem Fine-Kinney'e düşer -- isg_denetim
+ * risk_yontemi_getir'in "eksik/legacy -> fine_kinney" konvansiyonuyla
+ * AYNI. */
+function _dofYontemGirdiTablosu(yontem) {
+  return _DOF_YONTEM_GIRDI_TABLOLARI[yontem] || _DOF_YONTEM_GIRDI_TABLOLARI[_DOF_YONTEM_VARSAYILAN];
+}
+
+/** O yöntemde GÖSTERİLECEK/gerekli depolama alanlarını (`yeni_o` vb.,
+ * _DOF_ALAN_SIRASI sırasında) döner. */
+function _dofYontemDepolamaAlanlari(yontem) {
+  const tablo = _dofYontemGirdiTablosu(yontem);
+  return _DOF_ALAN_SIRASI
+    .filter((a) => Object.prototype.hasOwnProperty.call(tablo, a))
+    .map((a) => `yeni_${a}`);
+}
 
 const _DOF_TARIH_DESENI = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -724,7 +793,7 @@ function _dofBosTaslak() {
   return {
     planlanan_tarih: null, sorumlu: null, gerceklesen_faaliyet: null,
     etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null,
-    yeni_o: null, yeni_f: null, yeni_s: null,
+    yeni_o: null, yeni_f: null, yeni_s: null, yeni_d: null,
   };
 }
 
@@ -745,8 +814,13 @@ function _dofKanonikMi(kayit) {
  * doğrular/normalize eder ve normalize edilmiş değeri döner. Geçersizse
  * `DofImportHatasi('GECERSIZ_TAKIP_DEGERI', ...)` fırlatır. Bu fonksiyon
  * yalnız DEĞER doğrular -- alan adının allowlist'te olup olmadığını
- * ÇAĞIRAN taraf önceden kontrol etmiş olmalıdır. */
-function _dofTakipAlanDogrula(alan, deger) {
+ * ÇAĞIRAN taraf önceden kontrol etmiş olmalıdır.
+ *
+ * `yontem` (SUPV-28) -- yalnız O/F/S/D (_DOF_OFS_ALANLARI) alanları için
+ * anlamlıdır: BU DÖF'ün riskinin KENDİ yöntemi (kayit.riskYontemi,
+ * eksik/legacy 'fine_kinney' varsayılan). Tarih/metin alanları yöntemden
+ * BAĞIMSIZDIR, parametre onlar için yok sayılır. */
+function _dofTakipAlanDogrula(alan, deger, yontem = _DOF_YONTEM_VARSAYILAN) {
   if (_DOF_TARIH_ALANLARI.includes(alan)) {
     if (deger === null) return null;
     if (typeof deger !== 'string') {
@@ -782,8 +856,19 @@ function _dofTakipAlanDogrula(alan, deger) {
     if (typeof deger !== 'number' || !Number.isFinite(deger)) {
       throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} sonlu bir sayı veya null olmalı.`);
     }
-    if (!_DOF_FINE_KINNEY_KUMELERI[alan].has(deger)) {
-      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} Fine-Kinney kanonik değer kümesinde değil: ${deger}`);
+    const soyutAlan = alan.slice('yeni_'.length);   // 'o'/'f'/'s'/'d'
+    const girdi = _dofYontemGirdiTablosu(yontem)[soyutAlan];
+    if (!girdi) {
+      // Bu DÖF'ün yöntemi bu alanı hiç KULLANMIYOR (ör. FMEA'da yeni_o) --
+      // Desktop _artik_risk_dogrula bu durumu ÖNEMSEMEZ (ilgisiz alanın
+      // değeri sessizce yok sayılır), ama PWA burada BİLİNÇLİ olarak DAHA
+      // SIKI: kullanıcı arayüzü zaten bu alanı hiç GÖSTERMEYECEK, bu yüzden
+      // bir değer gelmesi ya programatik bir hata ya da yanlış DÖF'e
+      // yazma girişimidir -- sessizce yutmak yerine açıkça reddedilir.
+      throw new DofImportHatasi('IZINSIZ_TAKIP_ALANI', `${alan} bu DÖF'ün yöntemi (${yontem}) için kullanılmıyor.`);
+    }
+    if (!girdi.degerler.includes(deger)) {
+      throw new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${alan} bu yöntemin (${yontem}) kanonik değer kümesinde değil: ${deger}`);
     }
     return deger;
   }
@@ -792,13 +877,14 @@ function _dofTakipAlanDogrula(alan, deger) {
   throw new DofImportHatasi('IZINSIZ_TAKIP_ALANI', `Bilinmeyen takip alanı: ${alan}`);
 }
 
-/** `yeni_o`/`yeni_f`/`yeni_s` ÜÇLÜSÜ birlikte değerlendirilir (Desktop
- * `_artik_risk_dogrula` ile aynı kural): ya üçü de null (henüz
- * değerlendirilmemiş), ya da üçü de dolu -- kısmi (1 veya 2 dolu) durum
- * GEÇERSİZ. */
-function _dofOfsUclusuGecerliMi(o, f, s) {
-  const hepsiNull = o === null && f === null && s === null;
-  const hepsiDolu = o !== null && f !== null && s !== null;
+/** Verilen (yöntemin GEREKLİ saydığı) değerler dizisinin HEPSİ null ya da
+ * HEPSİ dolu olup olmadığını kontrol eder (Desktop `_artik_risk_dogrula`
+ * ile AYNI kural) -- SUPV-28 öncesi sabit 3'lüydü (yeni_o/f/s), artık
+ * yönteme göre 2 (5x5/L-Tipi) veya 3 (Fine-Kinney/JSA/PHA/FMEA) alanlı
+ * olabilir; kısmi doluluk (bazısı dolu bazısı boş) HER ZAMAN GEÇERSİZ. */
+function _dofDegerlerHepsiYaDaHicbiriMi(degerler) {
+  const hepsiNull = degerler.every((v) => v === null);
+  const hepsiDolu = degerler.every((v) => v !== null);
   return hepsiNull || hepsiDolu;
 }
 
@@ -808,7 +894,10 @@ function _dofOfsUclusuGecerliMi(o, f, s) {
  * ETKİLENMEZ. Kayıt yoksa `DofImportHatasi('DOF_BULUNAMADI', ...)`. Kayıt
  * varsa ama kanonik replay-v2 şeklinde DEĞİLSE (legacy/WIP -- bkz.
  * `_dofKanonikMi`) `DofImportHatasi('KANONIK_DOF_DEGIL', ...)` -- legacy
- * kaydın içeriği veya varsa kendi taslağı HİÇBİR biçimde dışarı sızmaz. */
+ * kaydın içeriği veya varsa kendi taslağı HİÇBİR biçimde dışarı sızmaz.
+ *
+ * `riskYontemi` (SUPV-28) dönüş değerine eklendi -- UI'ın hangi O/F/S/D
+ * alanlarını göstereceğine karar vermesi için (bkz. _dofTakipFormYukle). */
 async function dofTakipTaslagiGetir(dofUuid) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -825,7 +914,8 @@ async function dofTakipTaslagiGetir(dofUuid) {
         return;
       }
       const taslak = { ..._dofBosTaslak(), ...(kayit.takipTaslagi || {}) };
-      resolve({ dofUuid, takipTaslagi: taslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null });
+      const yontem = kayit.riskYontemi || _DOF_YONTEM_VARSAYILAN;
+      resolve({ dofUuid, takipTaslagi: taslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null, riskYontemi: yontem });
     };
     getReq.onerror = () => {
       reject(new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`));
@@ -834,7 +924,7 @@ async function dofTakipTaslagiGetir(dofUuid) {
 }
 
 /** Kanonik bir DÖF kaydının yerel takip taslağını PARTIAL biçimde
- * günceller. Yalnız sekiz allowlist alanına izin verilir (bilinmeyen/
+ * günceller. Yalnız dokuz allowlist alanına izin verilir (bilinmeyen/
  * yetkisiz herhangi bir anahtar -- `__proto__`/`constructor`/`prototype`
  * dahil -- `IZINSIZ_TAKIP_ALANI` ile REDDEDİLİR, sessizce düşürülmez).
  * Kaynak nesne asla `{...kayit, ...degisiklikler}` ile yayılmaz -- her
@@ -845,12 +935,12 @@ async function dofTakipTaslagiGetir(dofUuid) {
  * PWA Commit 4A-2 (kök düzeltme): `takipTaslagi` artık SPARSE/PARTIAL bir
  * nesnedir -- yalnız kullanıcının GERÇEKTEN dokunduğu (bu veya önceki bir
  * çağrıda anahtar olarak geçirdiği) alanlar own-property olarak saklanır.
- * Önceki tasarım (`_dofBosTaslak()` ile tüm 8 alanı ön-doldurup birleştirme)
+ * Önceki tasarım (`_dofBosTaslak()` ile tüm alanları ön-doldurup birleştirme)
  * "hiç dokunulmamış" ile "dokunulup null'a temizlenmiş" alanı storage'da
  * AYNI (own-property + null) hâle getiriyordu -- bu ayrım artık
  * `Object.prototype.hasOwnProperty` ile güvenle korunur (bkz. commit
  * raporu). `dofTakipTaslagiGetir` bu sparse veriyi KENDİ `_dofBosTaslak()`
- * birleştirmesiyle (değişmedi) hâlâ dolu 8-alanlı biçimde GÖSTERİR --
+ * birleştirmesiyle (değişmedi) hâlâ dolu 9-alanlı biçimde GÖSTERİR --
  * yalnız iç storage formatı değişti, Getir/Temizle'nin dış sözleşmesi
  * AYNI kaldı (ikisi de değişmedi). */
 async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
@@ -863,12 +953,16 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
       throw new DofImportHatasi('IZINSIZ_TAKIP_ALANI', `İzinsiz/bilinmeyen takip alanı: ${anahtar}`);
     }
   }
-  // Değer doğrulama/normalizasyon -- DB durumundan bağımsız, bu yüzden
-  // transaction AÇILMADAN ÖNCE yapılabilir (yalnız yeni_o/f/s ÜÇLÜ
-  // tamlık kuralı mevcut kayda bağlıdır, o kontrol transaction içinde).
+  // Tarih/metin alanları DB durumundan bağımsız, transaction AÇILMADAN
+  // ÖNCE doğrulanabilir. O/F/S/D (_DOF_OFS_ALANLARI) alanları SUPV-28'den
+  // beri DB-bağımlı (bu DÖF'ün KENDİ yöntemine göre hangi kanonik değer
+  // kümesi geçerli) -- onlar transaction İÇİNDE, kayıt okunduktan sonra
+  // doğrulanır.
   const dogrulanmisDegisiklikler = {};
   for (const anahtar of anahtarlar) {
-    dogrulanmisDegisiklikler[anahtar] = _dofTakipAlanDogrula(anahtar, degisiklikler[anahtar]);
+    if (!_DOF_OFS_ALANLARI.includes(anahtar)) {
+      dogrulanmisDegisiklikler[anahtar] = _dofTakipAlanDogrula(anahtar, degisiklikler[anahtar]);
+    }
   }
 
   const db = await openDB();
@@ -892,6 +986,23 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
         return;
       }
 
+      const yontem = kayit.riskYontemi || _DOF_YONTEM_VARSAYILAN;
+      // O/F/S/D alanları -- yalnız ŞİMDİ, kayıt+yöntem elimizdeyken
+      // doğrulanır (transaction içindeki senkron `catch` -- IDB event
+      // handler'ından atılan exception promise'i reddetmez, bu yüzden
+      // mevcut `hata`/`tx.abort()` deseniyle YAKALANIP taşınır).
+      try {
+        for (const anahtar of anahtarlar) {
+          if (_DOF_OFS_ALANLARI.includes(anahtar)) {
+            dogrulanmisDegisiklikler[anahtar] = _dofTakipAlanDogrula(anahtar, degisiklikler[anahtar], yontem);
+          }
+        }
+      } catch (e) {
+        hata = e;
+        tx.abort();
+        return;
+      }
+
       // SPARSE birleştirme -- `_dofBosTaslak()` ile ön-doldurma YOK. Yalnız
       // daha önce GERÇEKTEN dokunulmuş alanlar (mevcutTaslak'ın own-
       // property'leri) + bu çağrıda dokunulan alanlar own-property olarak
@@ -902,23 +1013,30 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
         yeniTaslak[anahtar] = dogrulanmisDegisiklikler[anahtar];
       }
 
-      // O/F/S üçlü own-property kuralı: biri own-property ise üçü de
-      // own-property olmalı (değeri null olsa bile) -- yalnız BİRİ
-      // dokunulmuşsa (diğer ikisi hiç dokunulmamışsa) reddedilir.
-      const ofsOwnAlanlar = _DOF_OFS_ALANLARI.filter((a) => Object.prototype.hasOwnProperty.call(yeniTaslak, a));
-      if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < 3) {
-        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', 'yeni_o/yeni_f/yeni_s üçü de dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.');
+      // O/F/S/D own-property kuralı -- SUPV-28: artık sabit 3 değil, BU
+      // DÖF'ün yöntemine göre GEREKLİ depolama alanları (2, 3 -- FMEA'da
+      // 'o' hiç yok, listede değil). Biri own-property ise HEPSİ own-
+      // property olmalı (değeri null olsa bile) -- yalnız bazısı
+      // dokunulmuşsa reddedilir. Yöntemin KULLANMADIĞI alanlar (ör.
+      // Fine-Kinney'de yeni_d) bu kuralın tamamen DIŞINDADIR -- zaten
+      // yukarıdaki _dofTakipAlanDogrula onları IZINSIZ_TAKIP_ALANI ile
+      // reddetmiş olurdu, own-property olarak asla buraya ulaşmazlar.
+      const gerekliOfsAlanlari = _dofYontemDepolamaAlanlari(yontem);
+      const ofsOwnAlanlar = gerekliOfsAlanlari.filter((a) => Object.prototype.hasOwnProperty.call(yeniTaslak, a));
+      if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < gerekliOfsAlanlari.length) {
+        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${gerekliOfsAlanlari.join('/')} hepsi dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.`);
         tx.abort();
         return;
       }
-      if (ofsOwnAlanlar.length === 3 && !_dofOfsUclusuGecerliMi(yeniTaslak.yeni_o, yeniTaslak.yeni_f, yeniTaslak.yeni_s)) {
-        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) girilmelidir.');
+      if (ofsOwnAlanlar.length === gerekliOfsAlanlari.length && gerekliOfsAlanlari.length > 0
+          && !_dofDegerlerHepsiYaDaHicbiriMi(gerekliOfsAlanlari.map((a) => yeniTaslak[a]))) {
+        hata = new DofImportHatasi('GECERSIZ_TAKIP_DEGERI', `${gerekliOfsAlanlari.join('/')} birlikte (hepsi dolu veya hepsi boş) girilmelidir.`);
         tx.abort();
         return;
       }
 
       // Dönen değer (`sonucDegeri.takipTaslagi`) -- Getir'in kendi
-      // `_dofBosTaslak()` birleştirmesiyle AYNI, dolu 8-alanlı GÖSTERİM
+      // `_dofBosTaslak()` birleştirmesiyle AYNI, dolu 9-alanlı GÖSTERİM
       // biçimi (dış sözleşme/geriye uyumluluk için). STORAGE'a yazılan
       // (`store.put`) ise SPARSE `yeniTaslak`'ın kendisidir -- bu ikisi
       // kasıtlı olarak farklıdır.
@@ -927,7 +1045,7 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
       const degisti = JSON.stringify(yeniTaslak) !== JSON.stringify(mevcutTaslak);
       if (!degisti) {
         // No-op: hiçbir put YOK, taslakGuncellenmeZamani DEĞİŞMEZ.
-        sonucDegeri = { durum: 'degismedi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null };
+        sonucDegeri = { durum: 'degismedi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: kayit.taslakGuncellenmeZamani ?? null, riskYontemi: yontem };
         return;
       }
 
@@ -937,7 +1055,7 @@ async function dofTakipTaslagiGuncelle(dofUuid, degisiklikler) {
       // buraya asla doğrudan yayılmaz, yalnız doğrulanmış (sparse)
       // `yeniTaslak` nested alanı eklenir.
       store.put({ ...kayit, takipTaslagi: yeniTaslak, taslakGuncellenmeZamani: yeniZaman });
-      sonucDegeri = { durum: 'guncellendi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: yeniZaman };
+      sonucDegeri = { durum: 'guncellendi', dofUuid, takipTaslagi: gosterimTaslak, taslakGuncellenmeZamani: yeniZaman, riskYontemi: yontem };
     };
     getReq.onerror = () => {
       hata = new DofImportHatasi('VERITABANI_HATASI', `dofler okuma hatası: ${getReq.error && getReq.error.message}`);
@@ -1403,9 +1521,12 @@ async function _dofKanonikKayitlariOku(dofUuidler) {
 /** Ham (DB'den okunan, doğrudan manipülasyona açık olabilecek)
  * `takipTaslagi` nesnesini SAVUNMACI biçimde yeniden doğrular -- taslak
  * servisinin (`dofTakipTaslagiGuncelle`) daha önce doğrulamış olmasına
- * körü körüne güvenmez. Mevcut `_dofTakipAlanDogrula`/`_dofOfsUclusuGecerliMi`
+ * körü körüne güvenmez. Mevcut `_dofTakipAlanDogrula`/`_dofDegerlerHepsiYaDaHicbiriMi`
  * yardımcılarını (tekrar yazmadan) reuse eder. Geçersizse
  * `DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', ...)` fırlatır.
+ *
+ * `yontem` (SUPV-28) -- BU DÖF'ün kaydından (`kayit.riskYontemi`) okunur,
+ * çağıran taraf geçirir (bkz. çağrı yerleri).
  *
  * PWA Commit 4B-1: 4A-2'nin SPARSE own-property semantiğini KORUR --
  * eksik alanları null ile DOLDURMAZ, yalnız gerçekten own-property olan
@@ -1414,7 +1535,7 @@ async function _dofKanonikKayitlariOku(dofUuidler) {
  * istenir (ör. trim edilmemiş " x " veya "" -- servis bunları asla
  * yazmaz) -- sapma, doğrudan DB manipülasyonu demektir ve sessizce
  * düzeltilmek yerine reddedilir. */
-function _dofTaslakSavunmaciDogrula(taslak) {
+function _dofTaslakSavunmaciDogrula(taslak, yontem = _DOF_YONTEM_VARSAYILAN) {
   if (taslak === null || typeof taslak !== 'object' || Array.isArray(taslak)) {
     throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'takipTaslagi bir nesne olmalı.');
   }
@@ -1429,7 +1550,7 @@ function _dofTaslakSavunmaciDogrula(taslak) {
     const deger = taslak[alan];
     let normalize;
     try {
-      normalize = _dofTakipAlanDogrula(alan, deger);
+      normalize = _dofTakipAlanDogrula(alan, deger, yontem);
     } catch (e) {
       throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `takipTaslagi.${alan} geçersiz: ${e.message}`);
     }
@@ -1438,15 +1559,18 @@ function _dofTaslakSavunmaciDogrula(taslak) {
     }
     dogrulanmis[alan] = deger;
   }
-  // O/F/S üçlü own-property kuralı (4A-2 storage kuralıyla aynı): biri
-  // own-property ise üçü de own-property olmalı; üçü de own ise değerler
-  // ya hep null ya hep geçerli Fine-Kinney olmalı.
-  const ofsOwnAlanlar = _DOF_OFS_ALANLARI.filter((a) => Object.prototype.hasOwnProperty.call(dogrulanmis, a));
-  if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < 3) {
-    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'yeni_o/yeni_f/yeni_s üçü de dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.');
+  // O/F/S/D own-property kuralı (4A-2 storage kuralıyla aynı, SUPV-28'de
+  // yönteme göre 2/3 alanlı hale getirildi): biri own-property ise BU
+  // yöntemin gerektirdiği HEPSİ own-property olmalı; hepsi own ise
+  // değerler ya hep null ya hep bu yöntemin kanonik kümesinde olmalı.
+  const gerekliOfsAlanlari = _dofYontemDepolamaAlanlari(yontem);
+  const ofsOwnAlanlar = gerekliOfsAlanlari.filter((a) => Object.prototype.hasOwnProperty.call(dogrulanmis, a));
+  if (ofsOwnAlanlar.length > 0 && ofsOwnAlanlar.length < gerekliOfsAlanlari.length) {
+    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `${gerekliOfsAlanlari.join('/')} hepsi dokunulmuş (own property) olmalı veya hiçbiri dokunulmamış olmalı.`);
   }
-  if (ofsOwnAlanlar.length === 3 && !_dofOfsUclusuGecerliMi(dogrulanmis.yeni_o, dogrulanmis.yeni_f, dogrulanmis.yeni_s)) {
-    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', 'yeni_o/yeni_f/yeni_s üçlü olarak (hepsi dolu veya hepsi boş) olmalı.');
+  if (ofsOwnAlanlar.length === gerekliOfsAlanlari.length && gerekliOfsAlanlari.length > 0
+      && !_dofDegerlerHepsiYaDaHicbiriMi(gerekliOfsAlanlari.map((a) => dogrulanmis[a]))) {
+    throw new DofImportHatasi('GECERSIZ_TAKIP_TASLAGI', `${gerekliOfsAlanlari.join('/')} birlikte (hepsi dolu veya hepsi boş) olmalı.`);
   }
   return dogrulanmis;
 }
@@ -1488,7 +1612,7 @@ async function dofDonusBelgesiOlustur(girdiler) {
     if (kayit.takipTaslagi !== undefined && (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object')) {
       throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
     }
-    const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {});
+    const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {}, kayit.riskYontemi || _DOF_YONTEM_VARSAYILAN);
     // Sparse own-property mapping (4B-1): yalnız kullanıcının gerçekten
     // dokunduğu alanlar belgeye girer -- explicit null (temizleme talebi)
     // DAHİL. Hiç dokunulmamış alan (own-property değil) belgeye GİRMEZ.
@@ -1668,7 +1792,7 @@ function _dofHazirlikKayitDogrula(kayit, dofUuid, medyalar) {
   if (kayit.takipTaslagi !== undefined && (!kayit.takipTaslagi || typeof kayit.takipTaslagi !== 'object')) {
     throw new DofImportHatasi('BOS_TAKIP_TASLAGI', `dofUuid için takip taslağı yok: ${dofUuid}`);
   }
-  const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {});
+  const taslak = _dofTaslakSavunmaciDogrula(kayit.takipTaslagi || {}, kayit.riskYontemi || _DOF_YONTEM_VARSAYILAN);
   const dokunulan = _DOF_TAKIP_ALANLARI.some((alan) => Object.prototype.hasOwnProperty.call(taslak, alan));
   const reviewStatusExportEdilebilir = _dofReviewStatusExportEdilebilirMi(kayit);
   const medyaVar = (medyalar || []).length > 0;
@@ -3421,7 +3545,7 @@ if (typeof window !== 'undefined') {
 }
 
 // ─── DÖF TAKİP DÜZENLEME (PWA Commit 4H) ─────────────────────────
-// Yalnız izinli sekiz takip alanını düzenler -- gerçek servisleri
+// Yalnız izinli dokuz takip alanını düzenler -- gerçek servisleri
 // (`dofTakipTaslagiGetir`/`Guncelle`/`Temizle`, Commit 4A/4A-1/4A-2)
 // DEĞİŞTİRMEDEN çağırır. Replay hazırlık/ZIP/medya UI'ı YOKTUR.
 //
@@ -3430,16 +3554,19 @@ if (typeof window !== 'undefined') {
 // `_dofTakipDokunulanAlanlar` kümesiyle izler -- her Kaydet'te tüm 8
 // alanı göndermez, yalnız dokunulanları gönderir (dokunulmayan absent
 // kalır, temizlenen explicit null olarak gider). `dofTakipTaslagiGetir`
-// dış sözleşme gereği HER ZAMAN dolu 8-alanlı gösterim döner (Commit
-// 4A-2 notu) -- bu, formu doldururken kullanılır ama dirty-izleme BUNA
-// değil, kullanıcının bu oturumdaki GERÇEK etkileşimine dayanır.
+// dış sözleşme gereği HER ZAMAN dolu 9-alanlı gösterim döner (Commit
+// 4A-2 notu, SUPV-28 ile yeni_d eklendi) -- bu, formu doldururken
+// kullanılır ama dirty-izleme BUNA değil, kullanıcının bu oturumdaki
+// GERÇEK etkileşimine dayanır.
 //
-// O/F/S üçlü kuralı: biri dokunulursa üçü birlikte gönderilir (mevcut
-// form değerleriyle) -- kısmi üçlü İSTEMCİ TARAFINDA engellenmez, servisin
-// KENDİ (zaten test edilmiş) `_dofOfsUclusuGecerliMi` reddi kullanılır;
-// bu, mantığı UI'da tekrarlamaz/çatallaştırmaz (bkz. commit raporu).
+// O/F/S/D grubu kuralı (SUPV-28 -- artık BU DÖF'ün yöntemine göre 2 veya 3
+// alanlı): biri dokunulursa grubun TAMAMI birlikte gönderilir (mevcut form
+// değerleriyle) -- kısmi grup İSTEMCİ TARAFINDA engellenmez, servisin
+// KENDİ (zaten test edilmiş) `_dofDegerlerHepsiYaDaHicbiriMi` reddi
+// kullanılır; bu, mantığı UI'da tekrarlamaz/çatallaştırmaz.
 
 let _dofTakipSecliDofUuid = null;
+let _dofTakipSecliYontem = _DOF_YONTEM_VARSAYILAN;
 let _dofTakipDokunulanAlanlar = new Set();
 
 const _DOF_TAKIP_ALAN_ELEMENT_ID = {
@@ -3451,8 +3578,47 @@ const _DOF_TAKIP_ALAN_ELEMENT_ID = {
   yeni_o: 'dof-takip-yeni-o',
   yeni_f: 'dof-takip-yeni-f',
   yeni_s: 'dof-takip-yeni-s',
+  yeni_d: 'dof-takip-yeni-d',
 };
-const _DOF_TAKIP_OFS_ALANLARI_UI = ['yeni_o', 'yeni_f', 'yeni_s'];
+// SUPV-28 -- artık sabit 3 değil, fiziksel OFS alanlarının TAMAMI (görünüm
+// katmanı `_dofTakipYontemGorunumUygula` ile bunların yalnız YÖNTEME göre
+// GEREKLİ olan alt kümesini gösterir/gizler).
+const _DOF_TAKIP_OFS_ALANLARI_UI = ['yeni_o', 'yeni_f', 'yeni_s', 'yeni_d'];
+
+/** BU DÖF'ün yöntemine göre O/F/S/D kutularını göster/gizle + etiket ve
+ * sabit değer kümesini (select option'ları) yeniden kurar. `<select>`in
+ * MEVCUT seçili değeri (varsa) korunur -- yalnız YÖNTEM DEĞİŞTİĞİNDE
+ * (farklı bir DÖF seçildiğinde) çağrılır, form her yeniden yazımında
+ * DEĞİL (bkz. _dofTakipFormYukle -- yöntem aynı kalırken gereksiz DOM
+ * churn'den kaçınmak için `_dofTakipGosterilenYontem` ile karşılaştırılır). */
+let _dofTakipGosterilenYontem = null;
+function _dofTakipYontemGorunumUygula(yontem) {
+  if (yontem === _dofTakipGosterilenYontem) return;
+  _dofTakipGosterilenYontem = yontem;
+  const tablo = _dofYontemGirdiTablosu(yontem);
+  const etiket = document.getElementById('dof-takip-yontem-etiketi');
+  if (etiket) etiket.textContent = `Artık Risk — ${_DOF_YONTEM_ADI[yontem] || yontem} (ilgili alanlar birlikte doldurulmalı veya boş bırakılmalı)`;
+  for (const alan of _DOF_ALAN_SIRASI) {
+    const kutu = document.getElementById(`dof-takip-yeni-${alan}-kutu`);
+    const girdi = tablo[alan];
+    if (!kutu) continue;
+    if (!girdi) {
+      kutu.style.display = 'none';
+      continue;
+    }
+    kutu.style.display = '';
+    const etiketEl = document.getElementById(`dof-takip-yeni-${alan}-etiket`);
+    if (etiketEl) etiketEl.textContent = girdi.etiket;
+    const secim = document.getElementById(`dof-takip-yeni-${alan}`);
+    if (secim) {
+      const oncekiDeger = secim.value;
+      secim.innerHTML = '<option value="">—</option>' + girdi.degerler.map((d) => `<option value="${d}">${d}</option>`).join('');
+      // Önceki seçim yeni değer kümesinde HÂLÂ geçerliyse korunur (aynı
+      // yöntemde kalırken erken çağrılmaz zaten, ama savunma amaçlı).
+      if (girdi.degerler.some((d) => String(d) === oncekiDeger)) secim.value = oncekiDeger;
+    }
+  }
+}
 
 const _DOF_TAKIP_HATA_METINLERI = {
   GECERSIZ_TAKIP_DEGERI: 'Takip alanlarında geçersiz değer var.',
@@ -3481,6 +3647,7 @@ function _dofTakipFormaYaz(taslak, korunacakAlanlar = null) {
   yaz('yeni_o', 'dof-takip-yeni-o', (taslak.yeni_o ?? '') === '' ? '' : String(taslak.yeni_o));
   yaz('yeni_f', 'dof-takip-yeni-f', (taslak.yeni_f ?? '') === '' ? '' : String(taslak.yeni_f));
   yaz('yeni_s', 'dof-takip-yeni-s', (taslak.yeni_s ?? '') === '' ? '' : String(taslak.yeni_s));
+  yaz('yeni_d', 'dof-takip-yeni-d', (taslak.yeni_d ?? '') === '' ? '' : String(taslak.yeni_d));
 }
 
 /** Bir form alanının GÜNCEL değerini, servisin beklediği tipe (tarih/metin
@@ -3619,6 +3786,12 @@ async function _dofTakipFormYukle(dofUuid) {
     for (const alan of _dofTakipDokunulanAlanlar) {
       if (!cagriBaslangicDokunulanlar.has(alan)) yeniDokunulanlar.add(alan);
     }
+    // SUPV-28: option listeleri/görünürlük yöntem RENDER edilmeden ÖNCE
+    // kurulur -- aksi halde az sonraki _dofTakipFormaYaz'ın yazdığı .value
+    // değeri, _dofTakipYontemGorunumUygula'nın innerHTML rebuild'i
+    // tarafından SİLİNİRDİ.
+    _dofTakipYontemGorunumUygula(sonuc.riskYontemi);
+    _dofTakipSecliYontem = sonuc.riskYontemi;
     _dofTakipFormaYaz(sonuc.takipTaslagi, yeniDokunulanlar);
     _dofTakipDokunulanAlanlar = yeniDokunulanlar;
     _dofTakipButonDurumGuncelle();
@@ -3658,9 +3831,15 @@ async function _dofTakipKaydet() {
     return;
   }
 
+  // SUPV-28: sabit 3'lü DEĞİL -- yalnız SEÇİLİ DÖF'ün yönteminin GEREKLİ
+  // saydığı depolama alanları (2 ila 3) birlikte gönderilir. Bu DÖF'ün
+  // yönteminin kullanmadığı alanlar (ör. Fine-Kinney'de yeni_d) zaten UI'da
+  // GİZLİ -- kullanıcı onlara dokunamaz, _dofTakipDokunulanAlanlar'a hiç
+  // girmezler.
+  const gerekliOfsAlanlariUI = _dofYontemDepolamaAlanlari(_dofTakipSecliYontem);
   const gonderilecekAlanlar = new Set(_dofTakipDokunulanAlanlar);
-  if (_DOF_TAKIP_OFS_ALANLARI_UI.some((a) => gonderilecekAlanlar.has(a))) {
-    for (const a of _DOF_TAKIP_OFS_ALANLARI_UI) gonderilecekAlanlar.add(a);
+  if (gerekliOfsAlanlariUI.some((a) => gonderilecekAlanlar.has(a))) {
+    for (const a of gerekliOfsAlanlariUI) gonderilecekAlanlar.add(a);
   }
   const payload = {};
   for (const alan of gonderilecekAlanlar) {
@@ -3685,18 +3864,23 @@ async function _dofTakipKaydet() {
     const kod = e && e.kod;
     _dofDebug.sonKaydetSonucu = 'save_error:' + (kod || (e && e.name) || 'bilinmiyor');
     let mesaj = (kod && _DOF_TAKIP_HATA_METINLERI[kod]) || (e && e.message) || 'Bilinmeyen hata';
-    // 4R-PKG-3I: gerçek sahada EN SIK karşılaşılan reddedilme nedeni, O/F/S
-    // üçlüsünden yalnız birini/ikisini doldurmaktır (servis kuralı: ya üçü
-    // de dolu ya da üçü de boş -- Desktop `_artik_risk_dogrula` ile aynı).
-    // Kural BURADA TEKRARLANMAZ (tek kaynak hâlâ servis); yalnız servis
-    // zaten reddettiyse kullanıcıya sebep AÇIKÇA söylenir -- öncesinde
-    // "Takip alanlarında geçersiz değer var." denip bırakılıyordu ve saha
-    // kullanıcısı bunu "Kaydet güvenilmez" olarak deneyimliyordu.
+    // 4R-PKG-3I: gerçek sahada EN SIK karşılaşılan reddedilme nedeni, O/F/S/D
+    // grubundan yalnız bir kısmını doldurmaktır (servis kuralı: BU DÖF'ün
+    // yönteminin gerektirdiği alanların ya hepsi dolu ya da hepsi boş --
+    // Desktop `_artik_risk_dogrula` ile aynı, SUPV-28 ile artık 2 veya 3
+    // alanlı da olabilir). Kural BURADA TEKRARLANMAZ (tek kaynak hâlâ
+    // servis); yalnız servis zaten reddettiyse kullanıcıya sebep AÇIKÇA
+    // söylenir -- öncesinde "Takip alanlarında geçersiz değer var."
+    // denip bırakılıyordu ve saha kullanıcısı bunu "Kaydet güvenilmez"
+    // olarak deneyimliyordu.
     if (kod === 'GECERSIZ_TAKIP_DEGERI' || kod === 'GECERSIZ_DEGISIKLIK') {
-      const ofsDegerleri = _DOF_TAKIP_OFS_ALANLARI_UI.map((a) => _dofTakipFormDegerOku(a));
+      const gerekliOfsAlanlari = _dofYontemDepolamaAlanlari(_dofTakipSecliYontem);
+      const ofsDegerleri = gerekliOfsAlanlari.map((a) => _dofTakipFormDegerOku(a));
       const doluSayisi = ofsDegerleri.filter((v) => v !== null).length;
-      if (doluSayisi > 0 && doluSayisi < 3) {
-        mesaj = 'Yeni O, Yeni F ve Yeni S birlikte doldurulmalı (ya üçü de dolu ya üçü de boş).';
+      if (doluSayisi > 0 && doluSayisi < gerekliOfsAlanlari.length) {
+        const tablo = _dofYontemGirdiTablosu(_dofTakipSecliYontem);
+        const etiketler = gerekliOfsAlanlari.map((a) => tablo[a.slice('yeni_'.length)].etiket);
+        mesaj = `${etiketler.join(', ')} birlikte doldurulmalı (ya hepsi dolu ya hepsi boş).`;
       }
     }
     durum.textContent = mesaj;

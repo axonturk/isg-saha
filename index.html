@@ -458,17 +458,24 @@
                 <label for="dof-takip-gozlem-degerlendirme">Gözlem/Değerlendirme</label>
                 <textarea id="dof-takip-gozlem-degerlendirme" rows="2" oninput="_dofTakipAlanDegisti('gozlem_degerlendirme', event)" onchange="_dofTakipAlanDegisti('gozlem_degerlendirme', event)"></textarea>
             </div>
+            <!-- SUPV-28: hangi alan(lar)ın görünür olacağı, hangi etiket/değer
+                 kümesiyle -- DÖF'ün KENDİ riskYontemi'ne göre JS tarafından
+                 _dofTakipYontemGorunumUygula() ile RUNTIME'da kurulur (bkz.
+                 app.js). Statik <option> listeleri yalnız JS'in ilk boyama
+                 öncesi/hata durumunda makul bir varsayılan (Fine-Kinney)
+                 göstermesi içindir -- gerçek kaynak HER ZAMAN JS tarafı. -->
+            <div id="dof-takip-yontem-etiketi" style="font-size:0.8rem; color:#666; margin-top:6px;"></div>
             <div class="location-grid">
-                <div class="input-group">
-                    <label for="dof-takip-yeni-o">Yeni O</label>
+                <div class="input-group" id="dof-takip-yeni-o-kutu">
+                    <label for="dof-takip-yeni-o" id="dof-takip-yeni-o-etiket">Olasılık (O)</label>
                     <select id="dof-takip-yeni-o" onchange="_dofTakipAlanDegisti('yeni_o', event)" oninput="_dofTakipAlanDegisti('yeni_o', event)">
                         <option value="">—</option>
                         <option value="10">10</option><option value="6">6</option><option value="3">3</option>
                         <option value="1">1</option><option value="0.5">0.5</option><option value="0.2">0.2</option>
                     </select>
                 </div>
-                <div class="input-group">
-                    <label for="dof-takip-yeni-f">Yeni F</label>
+                <div class="input-group" id="dof-takip-yeni-f-kutu">
+                    <label for="dof-takip-yeni-f" id="dof-takip-yeni-f-etiket">Frekans (F)</label>
                     <select id="dof-takip-yeni-f" onchange="_dofTakipAlanDegisti('yeni_f', event)" oninput="_dofTakipAlanDegisti('yeni_f', event)">
                         <option value="">—</option>
                         <option value="10">10</option><option value="6">6</option><option value="3">3</option>
@@ -476,12 +483,22 @@
                     </select>
                 </div>
             </div>
-            <div class="input-group">
-                <label for="dof-takip-yeni-s">Yeni S</label>
+            <div class="input-group" id="dof-takip-yeni-s-kutu">
+                <label for="dof-takip-yeni-s" id="dof-takip-yeni-s-etiket">Şiddet (Ş)</label>
                 <select id="dof-takip-yeni-s" onchange="_dofTakipAlanDegisti('yeni_s', event)" oninput="_dofTakipAlanDegisti('yeni_s', event)">
                     <option value="">—</option>
                     <option value="100">100</option><option value="40">40</option><option value="15">15</option>
                     <option value="7">7</option><option value="3">3</option><option value="1">1</option>
+                </select>
+            </div>
+            <div class="input-group" id="dof-takip-yeni-d-kutu" style="display:none;">
+                <label for="dof-takip-yeni-d" id="dof-takip-yeni-d-etiket">Saptanabilirlik (D)</label>
+                <select id="dof-takip-yeni-d" onchange="_dofTakipAlanDegisti('yeni_d', event)" oninput="_dofTakipAlanDegisti('yeni_d', event)">
+                    <option value="">—</option>
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                    <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                    <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                    <option value="10">10</option>
                 </select>
             </div>
             <div id="dof-takip-durum" style="margin-top:10px; font-weight:600;"></div>
