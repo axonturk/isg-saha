@@ -47,6 +47,10 @@ function gecerliDofKaydi(overrides = {}) {
     replayVersion: 2,
     baseStateHash: sentetikHash64(),
     aktifTurSirasi: 1,
+    // SUPV-28 -- Desktop dof_islemleri.py export'una eklenen additive alan
+    // (risk_yontemi_getir ile aynı kaynak). Varsayılan 'fine_kinney' --
+    // FMEA/5x5/L-Tipi/JSA/PHA senaryoları overrides ile geçirilir.
+    riskYontemi: 'fine_kinney',
     ...overrides,
   };
 }

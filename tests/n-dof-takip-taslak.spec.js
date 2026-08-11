@@ -73,7 +73,8 @@ test.describe('N. DÖF takip taslağı (izinli 8 alan)', () => {
     expect(sonuc.sonuc.durum).toBe('guncellendi');
     expect(sonuc.sonuc.takipTaslagi).toEqual({
       planlanan_tarih: null, sorumlu: 'Ahmet Yilmaz', gerceklesen_faaliyet: 'Pano kapatildi',
-      etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null, yeni_o: null, yeni_f: null, yeni_s: null,
+      etkinlik_kontrol_tarihi: null, gozlem_degerlendirme: null,
+      yeni_o: null, yeni_f: null, yeni_s: null, yeni_d: null,
     });
 
     const sonKayit = await dofKaydiGetir(page, dofUuid);
@@ -87,17 +88,24 @@ test.describe('N. DÖF takip taslağı (izinli 8 alan)', () => {
     await dofIceriAktarDene(page, paket);
     const dofUuid = paket.tehlikeler[0].dofUuid;
 
+    // Bu DÖF varsayılan yöntemde (fine_kinney, gecerliDofKaydi'nin
+    // default'u) -- bu yüzden yeni_d BURADA gönderilmez (o alan bu
+    // yöntemde kullanılmaz, IZINSIZ_TAKIP_ALANI ile reddedilir). Gösterim
+    // katmanı (_dofBosTaslak) HER ZAMAN dokuz alanlı döner -- FMEA/5x5
+    // özel kapsamı ayrı bir senaryo (bkz. checklist-dof-zincir-e2e.spec.js
+    // Madde E).
     const tamDegerler = {
       planlanan_tarih: '2026-07-15', sorumlu: 'Ahmet Yilmaz', gerceklesen_faaliyet: 'Pano kapatildi',
       etkinlik_kontrol_tarihi: '2026-09-05', gozlem_degerlendirme: 'Kontrol edildi, uygun.',
       yeni_o: 0.2, yeni_f: 3, yeni_s: 1,
     };
+    const tamDegerlerGosterim = { ...tamDegerler, yeni_d: null };
     const sonuc = await taslakGuncelleDene(page, dofUuid, tamDegerler);
     expect(sonuc.basarili).toBe(true);
-    expect(sonuc.sonuc.takipTaslagi).toEqual(tamDegerler);
+    expect(sonuc.sonuc.takipTaslagi).toEqual(tamDegerlerGosterim);
 
     const okunan = await taslakGetirDene(page, dofUuid);
-    expect(okunan.sonuc.takipTaslagi).toEqual(tamDegerler);
+    expect(okunan.sonuc.takipTaslagi).toEqual(tamDegerlerGosterim);
 
     const kayit = await dofKaydiGetir(page, dofUuid);
     for (const alan of Object.keys(tamDegerler)) {

@@ -19,13 +19,19 @@
 // ayrı ayrı ama aynı senaryo içinde kanıtlar -- aralarındaki BOŞLUĞU
 // (yerel terfi/DÖF-oluşturma YOK) SESSİZCE gizlemez, açıkça yorumlar.
 //
-// DÖF "SONRA" HÂLÂ FINE-KINNEY VARSAYIYOR (bilinen PWA sınırı, plan §8,
-// Desktop'un SUPV-14 ile "önce" VE "sonra" tarafını yöntem-farkındalı
-// yaptığı ama PWA'nın DONDURULMUŞ kaldığı nokta) -- bu dosya bunu
-// GİZLEMEZ, açıkça test eder: _DOF_TAKIP_ALANLARI/_DOF_OFS_ALANLARI
-// (app.js) hâlâ yalnız yeni_o/yeni_f/yeni_s (3 alan, "yeni_d" YOK) kabul
-// eder, FMEA/5x5 gibi bir yöntemin Saptanabilirlik boyutunu TEMSİL
-// EDEMEZ -- aşağıdaki "F." testi bunu somut, otomatik bir ret ile kanıtlar.
+// DÖF "SONRA" ARTIK YÖNTEM-FARKINDALI (SUPV-28, 2026-08-11) -- Desktop'un
+// SUPV-14 ile "önce" VE "sonra" tarafını yöntem-farkındalı yaptığı, PWA'nın
+// ise (plan §8'de kayıtlı bilinen sınır olarak) HÂLÂ Fine-Kinney'e sabit
+// kaldığı boşluk artık KAPANDI: Desktop dof_islemleri.py'nin export
+// payload'ına eklenen additive `riskYontemi` alanı (SUPV-28 madde 1) PWA'ya
+// taşınıyor, PWA `_DOF_YONTEM_GIRDI_TABLOLARI` (app.js, isg_denetim
+// risk_yontemleri.GIRDI_TABLOLARI'nin salt-okunur portu) ile BU DÖF'ün
+// yöntemine göre hangi O/F/S/D alanının gerekli/geçerli olduğunu bilir.
+// Aşağıdaki "E." testi bunu FMEA senaryosuyla POZİTİF kanıtlar (SUPV-23'ün
+// eski negatif kanıtının YERİNE) -- "yeni_d" artık FMEA'lı bir DÖF için
+// KABUL edilir, ama AYNI DÖF için "yeni_o" (FMEA'nın kullanmadığı alan)
+// hâlâ reddedilir; bu ikisi birlikte yöntem-farkındalığın gerçekten
+// çalıştığını (yalnız "her şeyi kabul et"e gevşemediğini) gösterir.
 const { test, expect } = require('@playwright/test');
 const { benzersizAd, gercekKurumEkle, gercekBirimEkle, storeTumu } = require('./helpers');
 const { dbTemizle } = require('./migration-helpers');
@@ -162,26 +168,47 @@ test.describe('SUPV-23 -- Checklist -> Bulgu -> [Desktop DÖF] -> DÖF Sonra zin
     expect(kayit.takipTaslagi).toBeUndefined();
   });
 
-  test('E. Bilinen PWA sınırı: "sonra" hâlâ SADECE Fine-Kinney (yeni_o/f/s) kabul eder, "yeni_d" (FMEA/Saptanabilirlik) İZİNSİZ alan olarak reddedilir', async ({ page }) => {
-    // Bu test, Desktop'un SUPV-14 ile yöntem-farkındalı hale getirdiği
-    // "sonra" tarafının PWA'da HÂLÂ yapılmadığını -- bilinçli, plan §8'de
-    // kayıtlı, "tam çözüldü" olarak SUNULMAYAN bir sınır olduğunu --
-    // somut, otomatik bir başarısızlıkla kanıtlar. PWA dondurulduğu için
-    // bu davranış DÜZELTİLMEDİ, yalnız DOĞRULANDI.
-    const paket = gecerliDofPaketi({ tehlikelerOverride: [gecerliDofKaydi({ dofId: 1 })] });
+  test('E. FMEA yöntemli DÖF -- "yeni_d" (Saptanabilirlik) artık KABUL edilir, "yeni_o" (bu yöntemde kullanılmayan alan) hâlâ reddedilir', async ({ page }) => {
+    // SUPV-28 öncesi bu test PWA'nın "yeni_d"yi HER ZAMAN reddettiğini
+    // (bilinen, plan §8'de kayıtlı bir sınır) kanıtlıyordu. Artık Desktop
+    // export'u DÖF'ün riskYontemi'ni taşıyor (dof_islemleri.py SUPV-28),
+    // PWA da bunu kullanıyor -- bu test şimdi TERSİNİ, pozitif kabulü
+    // kanıtlıyor. FMEA'nın gerçek alan haritası (isg_denetim
+    // risk_yontemleri.GIRDI_TABLOLARI[YONTEM_FMEA]) "f"/"s"/"d" -- "o" HİÇ
+    // yok (Desktop storage kolonu yeni_f, FMEA'da "Oluşma Sıklığı" taşır,
+    // "Olasılık" değil) -- bu İKİ yönlü kanıt (d kabul + o ret) yöntem-
+    // farkındalığın GERÇEKTEN çalıştığını, "her şeyi kabul et"e
+    // gevşemediğini gösterir.
+    const paket = gecerliDofPaketi({
+      tehlikelerOverride: [gecerliDofKaydi({ dofId: 1, riskYontemi: 'fmea' })],
+    });
     await dofIceriAktarDene(page, paket);
     const dofUuid = paket.tehlikeler[0].dofUuid;
 
-    const sonuc = await taslakGuncelleDene(page, dofUuid, {
-      yeni_o: null, yeni_f: 2, yeni_s: 3, yeni_d: 2,
+    // FMEA'nın gerçek üçlüsü (f/s/d) -- hepsi birlikte, kanonik 1-10 kümesinde.
+    const kabul = await taslakGuncelleDene(page, dofUuid, {
+      yeni_f: 2, yeni_s: 3, yeni_d: 7,
     });
-    expect(sonuc.basarili).toBe(false);
-    expect(sonuc.kod).toBe('IZINSIZ_TAKIP_ALANI');
-    expect(sonuc.mesaj).toContain('yeni_d');
+    expect(kabul.basarili).toBe(true);
+    expect(kabul.sonuc.durum).toBe('guncellendi');
+    expect(kabul.sonuc.takipTaslagi.yeni_f).toBe(2);
+    expect(kabul.sonuc.takipTaslagi.yeni_s).toBe(3);
+    expect(kabul.sonuc.takipTaslagi.yeni_d).toBe(7);
 
-    // Kayıt tamamen DEĞİŞMEDEN kalır (reddedilen çağrı hiçbir yan etki
-    // bırakmaz -- D testindeki "üçlü kısmi" reddiyle AYNI atomiklik).
-    const kayit = await dofKaydiGetir(page, dofUuid);
-    expect(kayit.takipTaslagi).toBeUndefined();
+    const kayitKabulSonrasi = await dofKaydiGetir(page, dofUuid);
+    expect(kayitKabulSonrasi.takipTaslagi).toEqual({ yeni_f: 2, yeni_s: 3, yeni_d: 7 });
+
+    // Aynı FMEA DÖF'üne "yeni_o" göndermek -- bu yöntem hiç kullanmıyor,
+    // İZİNSİZ_TAKIP_ALANI ile reddedilir (sessizce yok sayılmaz).
+    const ret = await taslakGuncelleDene(page, dofUuid, { yeni_o: 1 });
+    expect(ret.basarili).toBe(false);
+    expect(ret.kod).toBe('IZINSIZ_TAKIP_ALANI');
+    expect(ret.mesaj).toContain('yeni_o');
+    expect(ret.mesaj).toContain('fmea');
+
+    // Reddedilen çağrı hiçbir yan etki bırakmaz -- önceki kabul edilmiş
+    // taslak DEĞİŞMEDEN kalır.
+    const kayitRetSonrasi = await dofKaydiGetir(page, dofUuid);
+    expect(kayitRetSonrasi.takipTaslagi).toEqual({ yeni_f: 2, yeni_s: 3, yeni_d: 7 });
   });
 });

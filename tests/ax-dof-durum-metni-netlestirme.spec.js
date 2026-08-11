@@ -166,7 +166,7 @@ test.describe('AX. Kaydet durum metni ve UI netleştirme (4R-PKG-3J)', () => {
     await expect(kaydetBtn).toBeEnabled();
     await kaydetBtn.click();
 
-    await expect(page.locator('#dof-takip-durum')).toContainText('Yeni O, Yeni F ve Yeni S birlikte doldurulmalı');
+    await expect(page.locator('#dof-takip-durum')).toContainText('Olasılık (O), Frekans (F), Şiddet (Ş) birlikte doldurulmalı');
     await expect(durumMetni).toHaveText('Kaydedilemedi — tekrar deneyin');
     await expect(durumMetni).not.toContainText('Kaydedildi');
 

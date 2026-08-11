@@ -213,7 +213,7 @@ test.describe('AW. Android canlı sözleşme + teşhis (4R-PKG-3I)', () => {
     await page.selectOption('#dof-takip-yeni-o', '10');   // yalnız O -- F ve S boş
     await page.locator('#dof-takip-kaydet-btn').click();
 
-    await expect(page.locator('#dof-takip-durum')).toContainText('Yeni O, Yeni F ve Yeni S birlikte doldurulmalı');
+    await expect(page.locator('#dof-takip-durum')).toContainText('Olasılık (O), Frekans (F), Şiddet (Ş) birlikte doldurulmalı');
     const kayit = await page.evaluate((u) => window._idb.dbGetir('dofler', u), dofUuid);
     expect(kayit.takipTaslagi).toBeUndefined();   // DB DEĞİŞMEDİ
     // Kullanıcı düzeltebilsin diye buton tekrar aktif olmalı.

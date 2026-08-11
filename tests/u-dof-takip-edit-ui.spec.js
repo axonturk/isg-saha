@@ -154,8 +154,10 @@ test.describe('U. DÖF takip alanları düzenleme UI', () => {
     // "Takip alanlarında geçersiz değer var." deniyordu ve saha kullanıcısı
     // bunu "Kaydet güvenilmez" olarak deneyimliyordu (gerçek Android geri
     // bildirimi). Servis kuralı ve reddin KENDİSİ DEĞİŞMEDİ -- yalnız mesaj.
+    // SUPV-28: mesaj artık BU DÖF'ün yöntemine göre dinamik etiketlerden
+    // kurulur (bu DÖF varsayılan fine_kinney -- Olasılık/Frekans/Şiddet).
     await expect(page.locator('#dof-takip-durum')).toHaveText(
-      'Yeni O, Yeni F ve Yeni S birlikte doldurulmalı (ya üçü de dolu ya üçü de boş).'
+      'Olasılık (O), Frekans (F), Şiddet (Ş) birlikte doldurulmalı (ya hepsi dolu ya hepsi boş).'
     );
 
     const sonrakiKayit = await dofKaydiGetir(page, dofUuid);
