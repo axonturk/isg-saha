@@ -1,20 +1,24 @@
 /**
- * checklist-kutuphanesi.js -- SUPV-22 (2026-08-10) -- Desktop'in
- * checklist_kutuphanesi.py'sinden URETILDI (isg_denetim reposu, ayni
- * icerik, madde metinlerinde TEK bir karakter bile elle degistirilmedi
- * -- Python KAYNAKLAR dict'i json.dumps ile bu dosyaya aktarildi).
+ * checklist-kutuphanesi.js -- SUPV-22 (2026-08-10) + SUPV-26 (2026-08-11)
+ * -- Desktop'in checklist_kutuphanesi.py'sinden URETILDI (isg_denetim
+ * reposu, ayni icerik, madde metinlerinde TEK bir karakter bile elle
+ * degistirilmedi -- Python KAYNAKLAR dict'i json ile bu dosyaya
+ * aktarildi).
  *
- * Faz 1: 9 kaynak (683 madde). MEB + 2 kalan CSGB listesi (Desktop
- * Faz 2) eklendiginde bu dosya YENIDEN URETILIR -- kod DEGISMEZ,
- * yalniz CHECKLIST_KUTUPHANESI buyur (checklistKaynagiBul'un dongusu
- * Object.entries uzerinden calisir, kaynak sayisina bagli DEGIL).
+ * Tamamlandi -- 30 kaynak (1183 madde): 9 CSGB sektor listesi (Faz 1,
+ * SUPV-22) + MEB KL-01..19 (244 madde, Alan Tipi eksenli) + CSGB Cephe
+ * Iskeleleri (133 madde) + CSGB Seracilik (123 madde) (Faz 2, SUPV-26).
  *
  * anahtarKelimeler: Desktop'taki sektorler.py FK iliskisinin AKSINE,
  * PWA'da Kurum.sektor alani YOK (yalniz Kurum Turu + oda alanTipi
  * serbest metin) -- checklistKaynagiBul() bu yuzden basit kucuk/
  * buyuk harf duyarsiz alt-dize eslesmesi kullanir, Desktop'un FK
  * tabanli kaynak_onerileri()'nin YERINE GECMEZ, PWA'ya OZGU basit bir
- * yaklasimdir.
+ * yaklasimdir. Yeni (Faz 2) kaynaklarin anahtar kelimeleri, mevcut
+ * kaynaklarin bare-kelime anahtarlarıyla CAKISMAYACAK sekilde secildi
+ * (orn. bare 'atolye' csgb_ahsap_mobilya'da zaten var -> MEB
+ * atolyeler/sanat odasi icin 'okul atolyesi' gibi nitelikli ifadeler
+ * kullanildi).
  */
 const CHECKLIST_KUTUPHANESI = {
   "csgb_eczaneler": {
@@ -792,6 +796,697 @@ const CHECKLIST_KUTUPHANESI = {
       "Kalkan sistemleri kazıya yerleştirilirken kazı içerisinde çalışan olmamasına dikkat edilmekte midir?",
       "İksa ve kalkan sistemlerinin sökülmesi ve kaldırılması ile birlikte çalışanların kazıya girmesi veya muhtemel göçüğe karşı kazı doldurma işlemleri başlamakta mıdır?",
       "Göçük veya malzeme altında kalma durumuna karşı uygulanacak kurtarma işlemi sırasında alınacak önlemler acil durum planında belirtilmiş midir?"
+    ]
+  },
+  "meb_kl01_okul_ortak_alanlar": {
+    "ad": "Okul Ortak Kullanım Alanları Kontrol Listesi (MEB KL-01)",
+    "anahtarKelimeler": [
+      "okul ortak kullanım",
+      "okul girişi",
+      "okul bahçesi"
+    ],
+    "maddeler": [
+      "Havalandırmaya ihtiyaç olan yerlerde pencereler açılabiliyor mu?",
+      "Pencere açıklığı yaralanma ve düşme riski olan gruplarda 100 mm ile sınırlandırıldı mı?",
+      "Güvenlik açısından cam kapılar, camlı bölümler vs. değerlendirildi ve önlem alındı mı?",
+      "İhtiyaç noktalarında uygun çöp kovaları veya geridönüşüm kutuları güvenli olarak yerleştirildi mi?",
+      "Bariyerler, zincirler, pervazlar vs. takılıp düşmeyi engellemek için açıkça işaretlendi mi?",
+      "Çatıya izinsiz çıkış önlemi alındı mı?",
+      "Okul saatleri dışında alarm durumu için belirlenen bir prosedür var mı?",
+      "Ziyaretçilerin ve araçların giriş çıkışları ile ilgili prosedür belirlendi mi?",
+      "Yer değişikliği olduğunda radyatör, sıcak su boruları göz önünde bulunduruluyor mu?",
+      "İlan panoları var mı?",
+      "Panolardaki duyurular güncel tutuluyor mu?",
+      "İlk yardım dolapları var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?",
+      "Koridorlar, geçiş yolları gibi insan trafiğinin yoğun olduğu yerlerde geçişi engelleyecek malzemeler ortadan kaldırılmış mı?",
+      "Elektrik kabloları, bilgisayar kabloları gibi malzemelerin tehlike oluşturması (düşme vb) önlenmiş mi?",
+      "Kayma ve düşmeye karşı zeminler uygun malzemelerden yapılmış mı?",
+      "Elektrik kesintilerinde aydınlatma sağlanabiliyor mu?",
+      "Trabzanlar tam ve devamlı mı?",
+      "Trabzanlar standartlara uygun mu?",
+      "Merdivenlerde basamaklar eşit genişlikte mi?",
+      "Merdivenlerde rıhtlar eşit yükseklikte mi?",
+      "Basamak geçişlerinde ve aralarda istiflenmiş malzemeler gibi engeller var mı?",
+      "Aktif araçlar, bina hava girişlerinden yeterince uzakta mı?"
+    ]
+  },
+  "meb_kl02_acil_plan": {
+    "ad": "Acil Plan Kontrol Listesi (MEB KL-02)",
+    "anahtarKelimeler": [
+      "okul acil durum planı",
+      "okul acil planı"
+    ],
+    "maddeler": [
+      "Okulun yangın, sel, kundaklama, sivil kargaşa, araç kazası, davetsiz misafir vb. olağandışı durumlar için kapsamlı bir acil durum planı mevcut mu?",
+      "Plan güncelleniyor ve test ediliyor mu?",
+      "Acil durum tatbikatları gerektiği şekilde yapılıyor mu?",
+      "Acil çıkışları açıkça belli mi ve acil çıkış yazıları ışıklandırılmış mı?",
+      "Acil ışıklandırması gerekli yerlerde mevcut mu?",
+      "Acil çıkışlarında herhangi bir engel var mı?",
+      "Acil çıkışları her an açık mı?",
+      "Yerel Sivil Savunma ekipleriyle koordinasyon var mı?"
+    ]
+  },
+  "meb_kl03_atolyeler": {
+    "ad": "Atölyeler Kontrol Listesi (MEB KL-03)",
+    "anahtarKelimeler": [
+      "meslek dersliği",
+      "uygulamalı meslek dersi"
+    ],
+    "maddeler": [
+      "Çalışma masaları, makineler ve tabureler ergonomik mi?",
+      "Çalışma masaları, makineler ve taburelerin yükseklikleri ayarlanabiliyor mu?",
+      "Aydınlatma yeterli mi?",
+      "Havalandırma ve baca tesisatı standartlara uygun mu?",
+      "İlkyardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?",
+      "Acil durum alarmı ve acil çıkış levhası var mı?",
+      "Uyarı levhaları asılmış mı?",
+      "Zeminler kaymaya, düşmeye karşı uygun malzemelerden yapılmış mı?",
+      "Elektrik panolarında gerekli önlemler alınmış mı?",
+      "Makinelerin kullanım talimatları asılmış mı?",
+      "Çalışanlar için gerekli KKD var mı?",
+      "KKD uygun şekilde muhafaza ediliyor mu?",
+      "Zarar verici maddeler kilit altında mı?",
+      "Kimyasal maddelerin zararlarına karşı gerekli önlemler alındı mı?",
+      "Gaz, elektrik, sıhhi tesisat ve pis su tesisatları standartlara uygun mu?",
+      "Wc ve duş var mı?",
+      "Duyuru panosu var mı?",
+      "Atölye sorumlusunun telefonları panoda asılı mı?",
+      "Çalışan için soyunma dolapları var mı?",
+      "Çalışma planı (vaziyet planı) asılı mı?"
+    ]
+  },
+  "meb_kl04_laboratuar": {
+    "ad": "Laboratuar Kontrol Listesi (MEB KL-04)",
+    "anahtarKelimeler": [
+      "okul laboratuvarı",
+      "fen laboratuvarı",
+      "kimya laboratuvarı"
+    ],
+    "maddeler": [
+      "Laboratuvar masaları ve tabureleri ergonomiye uygun mu?",
+      "Çalışma tezgahı ve masa yüksekliği standartlara uygun mu?",
+      "Laboratuvarda havalandırma ve baca tesisatları standartlara uygun mu?",
+      "Çalışma ortamında yeterli aydınlatma sağlanmış mı?",
+      "Tehlikeli maddeler kilit altına alınmış mı?",
+      "Laboratuvarda yangın için özel önlem alınmış mı?",
+      "Kimyasal sızıntılara karşı gerekli önlemler alındı mı?",
+      "Tehlikeli maddelerin muhafaza edildikleri yerlerde gerekli uyarı işaretleri var mı?",
+      "Laboratuvar panosunda laboratuvar sorumlusuna ulaşabilecek telefonlar var mı?",
+      "Laboratuvar elektrik panolarında gerekli önlemler alınmış mı?",
+      "Laboratuvardaki gaz, elektrik, sıhhi tesisat ve pis su tesisatları standartlara uygun mu?",
+      "Laboratuvarda ilk yardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?",
+      "Acil durum alarmı ve çıkış levhası var mı?",
+      "Laboratuvar zemini kaymaya, düşmeye karşı uygun malzemelerden yapılmış mı?",
+      "Laboratuvarda uyarı levhaları asılmış mı?",
+      "Deney güvenliği için limitler biliniyor ve dikkat ediliyor mu? (Isı, basınç, elektrik, devir/dakika, diğer)",
+      "Deney veya test düzeneği deneyden önce kontrol ediliyor mu?",
+      "Deney düzeneğini başlangıç noktasına getirirken nelere dikkat edilmesi gerekiyor, biliniyor mu?",
+      "Tehlikeli malzemeler ve atıkların ne şekilde uzaklaştırılacağı biliniyor mu?",
+      "Deney yapılırken olası hava, buhar, elektrik veya vakum vb. kesintisine karşı güvenlik tedbirleri alındı mı?",
+      "Yangın söndürücü uygun mu ya da başka söndürücüye ihtiyaç var mı? (Kağıt ve tahta \"A\", çözücü \"B\", elektrik \"C\")",
+      "Tavan yüksekliği 2m.'den az mı ya 2m.'den az olan kısımlar bulunuyorsa bunlar işaretlenmiş mi?",
+      "Tüm konteyner veya laboratuvar kaplarının üzerinde içerik, tarih, sorumlu kişi bilgileri var mı?",
+      "Siper veya maske gibi maruziyeti engellemeye ve cihazları korumaya yönelik araçlar kullanılıyor mu?",
+      "Etiketler ve işaretlerin yeri ve büyüklüğü standartlara uygun mu?",
+      "Deneyler sırasında kıyafet veya takılar dikkate alındı mı?",
+      "Toz ve partiküller limit değer altında mı? (toksik değilse limit 10 mg/cm)",
+      "Öğrencilerin tehlikeli buhar ve gazlara maruz kalmaması için gerekli tedbirler alınıyor mu?",
+      "Sıçrama ve dökülme durumu için çalışılan malzeme cinslerine göre tedbirler alınıyor mu?"
+    ]
+  },
+  "meb_kl05_kantin_kafeterya": {
+    "ad": "Kantin ve Kafeterya Kontrol Listesi (MEB KL-05)",
+    "anahtarKelimeler": [
+      "okul büfesi",
+      "okul yemek salonu"
+    ],
+    "maddeler": [
+      "Havalandırma ve baca her türlü kokuyu önleyecek şekilde mi?",
+      "Çalışan personel için tüberküloz, portör muayenesi yapıldı mı?",
+      "İlkyardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?",
+      "Yangın için özel önlemler alınmış mı?",
+      "Zemin kaymaya, düşmeye karşı uygun malzemelerden yapılmış mı?",
+      "Çalışan personel için soyunma dolabı var mı?",
+      "Çalışan personel temizlik kurallarına (Tırnakların kısa kesilmiş ve kıyafetlerinin temiz olması) uygun mu?",
+      "Satışa sunulan gıda maddelerinin ilgili mevzuat uyarınca Tarım Ve Köy İşleri Bakanlığından Üretim/İthalat izinleri var mı?",
+      "WC'ler gıda üretim, satış ve tüketim yapılan yerlerden uygun uzaklıkta mı?",
+      "Ortamın ısınması ve aydınlatılması yeterli mi?",
+      "Çöp ve her türlü atığın konulacağı kap yeterli sayıda, büyüklükte ve ağzı kapalı mı?"
+    ]
+  },
+  "meb_kl06_genel_temizlik": {
+    "ad": "Genel Temizlik Kontrol Listesi (MEB KL-06)",
+    "anahtarKelimeler": [
+      "okul genel temizlik"
+    ],
+    "maddeler": [
+      "Okulda gerekli uyarı levhaları asılmış mı?",
+      "WC'lerde hijyen sağlanmış mı?",
+      "Temizlik malzemeleri sağlığa uygun mu?",
+      "Okul personeli tarafından düzenli bir şekilde temizlik yapılıyor mu?",
+      "Zeminin kaymaya, düşmeye karşı uygun malzemeden yapılmış mı?",
+      "Okulda elle temasın bulunduğu sıralar, kapı kolları, dolap, masa gibi yüzeyler su ve sabun ile periyodik temizliği yapılıyor mu?",
+      "Okulda çöp kovaları temiz, muhafazalı mı?",
+      "Öğrencilerin görebileceği şekilde temizlik ile ilgili uyarılar yeterli mi?",
+      "Okullarda bulunan hizmetlinin telefon numarası panoda asılmış mı?"
+    ]
+  },
+  "meb_kl07_siniflar": {
+    "ad": "Sınıflar Kontrol Listesi (MEB KL-07)",
+    "anahtarKelimeler": [
+      "sınıf",
+      "derslik"
+    ],
+    "maddeler": [
+      "Zemin kaymaya, düşmeye karşı uygun malzemeden yapılmış mı?",
+      "Aydınlatma ve ısıtma sistemi yeterli mi?",
+      "Öğrencilerin oturma planı asılmış mı?",
+      "Acil durum alarmı ve acil çıkış levhaları asılmış mı?",
+      "Elektrik prizleri korumalı mı?",
+      "TV, bilgisayar ve projeksiyon gibi elektrikli cihazlar için güvenlik önlemleri alınmış mı?",
+      "Çöp kovası yeterli büyüklükte ve ağzı kapalı mı?",
+      "Duyuru panosu asılı mı?",
+      "Havalandırma yeterli mi?"
+    ]
+  },
+  "meb_kl08_koridorlar": {
+    "ad": "Koridorlar Kontrol Listesi (MEB KL-08)",
+    "anahtarKelimeler": [
+      "okul koridoru",
+      "okul koridorları"
+    ],
+    "maddeler": [
+      "Zemin kaymaya veya düşmeye karşı uygun malzemeden yapılmış mı?",
+      "Aydınlatma ve ısıtma sistemi yeterli mi?",
+      "Duyuru panoları asılmış mı?",
+      "Acil durum alarmı var mı?",
+      "Acil çıkış levhaları asılmış mı?",
+      "Koridorlarda yangın için özel önlemler alınmış mı?",
+      "Uyarı levhaları asılmış mı?",
+      "Koridorlarının hijyenine özen gösterilmiş mi?",
+      "Koridorlardaki çöp kovalarının ağzı kapalı mı?"
+    ]
+  },
+  "meb_kl09_okul_araclari_servisler": {
+    "ad": "Okul Araçları ve Servisler Kontrol Listesi (MEB KL-09)",
+    "anahtarKelimeler": [
+      "okul servisi",
+      "öğrenci servisi"
+    ],
+    "maddeler": [
+      "Servis araçları ve araç kullanıcıları yasal mevzuatlara uygun mu?",
+      "Araçların okul içindeki güzergahları ve güvenlik kuralları belirlenmiş mi?",
+      "Servis işletmesi ve/veya araç şoförleri ile öğrenciler okul güvenlik politikasını biliyor mu?",
+      "Yağışlı havalarda araca biniş ve iniş merdivenlerinde kayma ve düşmeleri engellemek için önlem düşünülmüş mü?",
+      "Servis aracı sürücüleri ile öğrencilere okul güvenlik politikasına uygun olarak araçlara iniş ve binişler ile güvenli davranışlar konusunda bilgi veriyor mu?",
+      "Araçların içi kullanım öncesi havalandırılıyor mu?"
+    ]
+  },
+  "meb_kl10_toplanti_salonu": {
+    "ad": "Toplantı Salonu Kontrol Listesi (MEB KL-10)",
+    "anahtarKelimeler": [
+      "okul toplantı salonu",
+      "konferans salonu"
+    ],
+    "maddeler": [
+      "Aydınlatma kumanda panosundaki açma kapama anahtarlarları ve şalterler çalışır durumda mı?",
+      "Uzatma kablosu kullanımını gerektirmeyecek kadar sabit tesisat var mı?",
+      "Tüm elektrik anahtarları ve prizleri düzgün çalışıyor mu?",
+      "Yeterli sayıda elektrik prizi var mı ve görsel-işitsel cihazların kullanımı için uygun yerlerde mi?",
+      "Toplantı salonunda havalandırma sistemi yeterli mi?",
+      "Zemin, kaymaya ve düşmeye karşı uygun malzemeden yapılmış mı?",
+      "Aydınlatma sistemi yeterli mi?",
+      "Isıtma sistemi yeterli mi?",
+      "Acil durum alarmı var mı?",
+      "Mevzuata uygun olarak acil çıkış kapısı var mı?",
+      "Acil çıkış yönlendirme levhaları asılmış mı?"
+    ]
+  },
+  "meb_kl11_okul_disi_aktiviteler": {
+    "ad": "Okul Dışı Aktiviteler Kontrol Listesi (MEB KL-11)",
+    "anahtarKelimeler": [
+      "okul dışı etkinlik",
+      "okul gezisi"
+    ],
+    "maddeler": [
+      "Okul dışında gerçekleştirilen faaliyetlerde ortaya çıkabilecek riskler ve güvenlik tedbirleri konusunda öğrencilere bilgi veriliyor mu?",
+      "Okul dışı aktivitelerde kullanılan ulaşım aracı mevzuatlara uygun mu?",
+      "Ulaşım sırasında ve okul dışında yürütülecek faaliyetlerde tüm öğrenciler ve personel sigorta kapsamında mı?",
+      "Okul dışı faaliyetlerden önce ön inceleme yapılıyor mu?"
+    ]
+  },
+  "meb_kl12_muzik_odasi": {
+    "ad": "Müzik Odası Kontrol Listesi (MEB KL-12)",
+    "anahtarKelimeler": [
+      "müzik odası"
+    ],
+    "maddeler": [
+      "Yeterli aydınlatma sağlanmış mı?",
+      "Isıtma, havalandırma ve iklimlendirme şartları yeterli mi?",
+      "Ses izolasyonu standartlara uygun olarak yapılmış mı?",
+      "Odadaki akustik uygulaması yeterli mi ve duvara veya duvarlara monte edilmiş mi?",
+      "Zeminde kayma ve düşmeleri engelleyecek döşeme sistemi mevcut mu?",
+      "Oda kapısı çift kanatlı ve izolasyonlu mu?",
+      "Odada oturma ve çalışma ergonomisi gözetilmiş mi?",
+      "Elektronik müzik aletleri için gerekli elektrik tesisatı ve bunlara uygun standart elektrik panoları mevcut mu?",
+      "Aletler güvenliği etkilemeyecek şekilde muhafaza ediliyormu?",
+      "Acil durumlar için acil çıkış yön levhaları var mı?",
+      "Yangın tesisatı ve gerekli alarm sistemi var mı?"
+    ]
+  },
+  "meb_kl13_sanat_odasi": {
+    "ad": "Sanat Odası Kontrol Listesi (MEB KL-13)",
+    "anahtarKelimeler": [
+      "resim odası",
+      "görsel sanatlar odası",
+      "el sanatları odası"
+    ],
+    "maddeler": [
+      "Yeterli aydınlatma sağlanmış mı?",
+      "Isıtma, havalandırma ve iklimlendirme şartları yeterli mi?",
+      "Odada oturma ve çalışma ergonomisi var mı?",
+      "Zeminde kayma ve düşmeleri engelleyecek döşeme sistemi mevcut mu?",
+      "Gerekli elektrik tesisatı ve bunlara uygun standart elektrik panoları mevcut mu?",
+      "Elektrik tesisatına kaçak akım rölesi konulmuş mu?",
+      "Kimyasal malzemeler kullanılan kısımlarda kimyasallar kilit altında mı?",
+      "Kimyasal sızıntılar için gerekli önlemler alınmış mı?",
+      "Kimyasallar kullanılırken KKD'ler kullanılması için gerekli uyarılar asılmış mı?",
+      "Yangın tesisatı ve gerekli alarm sistemi var mı?",
+      "Acil durumlar için acil çıkış yön levhaları var mı?",
+      "Fırınlar düzgün biçimde havalandırılıyor ve izole edilmiş mi?",
+      "Makas gibi keskin veya sivri uçlu objelerin muhafaza edildiği kutu benzeri belli bir yeri var mı?"
+    ]
+  },
+  "meb_kl14_islak_hacimler": {
+    "ad": "Islak Hacimler (WC ve Duşlar) Kontrol Listesi (MEB KL-14)",
+    "anahtarKelimeler": [
+      "ıslak hacim",
+      "okul tuvaleti",
+      "okul duşu"
+    ],
+    "maddeler": [
+      "Yeterli aydınlatma sağlanmış mı?",
+      "Isıtma, havalandırma ve iklimlendirme şartları yeterli mi?",
+      "Saç ve el kurutucusu, elektrikli ısıtıcısı gibi elektrikli aletlerin kullanım talimatı uygun yerlere asılmış mı?",
+      "Zeminlerde kaymaya engel olmak için gerekli tedbir alınmış mı?",
+      "Duş içinde herhangi bir düşme sırasında tutunabilecek sağlam bir tutunma aparatı takılmış mı?",
+      "Islak hacim kapıları, herhangi bir düşme sırasında, tehlike yaratmaması için uygun bir malzemeden yapılmış mı?",
+      "Islak zeminden dolayı, elektrik tesisatı ile ilgili kaçak akım rölesi vs gibi önlemler alınmış mı?",
+      "Islak hacimlerde temizlik kurallarına uyuluyor mu?",
+      "Islak hacimler engellilerin kullanımına uygun olarak tasarlanmış mı?"
+    ]
+  },
+  "meb_kl15_spor_salonlari": {
+    "ad": "Spor Salonları Kontrol Listesi (MEB KL-15)",
+    "anahtarKelimeler": [
+      "spor salonu",
+      "beden eğitimi salonu"
+    ],
+    "maddeler": [
+      "Yeterli aydınlatma sağlanmış mı?",
+      "Isıtma, havalandırma ve iklimlendirme şartları yeterli mi?",
+      "Zemin döşeme malzemesi standartlara uygun mu?",
+      "Seyirci koltuklarında gerekli ergonomi sağlanmış mı?",
+      "Seyirci koltukları arasında standart ölçülerde boşluk bırakılmış mı?",
+      "Yangın tesisatı ve gerekli alarm sistemi var mı?",
+      "Acil çıkış kapıları yeterli sayıda ve mevzuata uygun mu?",
+      "Acil çıkış yön levhaları var mı?",
+      "Spor salonlarında sporculara zarar verebilecek (Kolon köşeleri, radyatör, metal direkler vb.) nesneler darbe emici izolasyon malzemeleri ile kaplanmış mı?",
+      "İlkyardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?"
+    ]
+  },
+  "meb_kl16_yuzme_havuzu": {
+    "ad": "Yüzme Havuzu Kontrol Listesi (MEB KL-16)",
+    "anahtarKelimeler": [
+      "yüzme havuzu",
+      "havuz"
+    ],
+    "maddeler": [
+      "Islak yerlerdeki elektrik tesisatı kaçak akım rölesi ile korunuyor mu?",
+      "Havuzun kullanımda olmadığı zamanlarda koruma var mı?",
+      "Uyarı ve havuz kullanım kuralları görünür yerde mi?",
+      "Havuz merdivenleri ve trabzanlar uygun ve güvenli malzemeden mi?",
+      "Havuz kullanımı sırasında güvenliği sağlayacak bir personel var mı?",
+      "Havuzda kullanılan kimyasallar standartlara uygun mu?",
+      "Havuz etrafı kaymaz malzeme ile donatılmış mı?",
+      "Havuz derinliği görünür bir şekilde işaretlenmiş mi?",
+      "İlkyardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?"
+    ]
+  },
+  "meb_kl17_kazan_daireleri": {
+    "ad": "Kazan Daireleri Kontrol Listesi (MEB KL-17)",
+    "anahtarKelimeler": [
+      "kazan dairesi"
+    ],
+    "maddeler": [
+      "Kazan dairesi işletme talimatı görünür bir yere asılmış mı?",
+      "Kazan dairesi içerisinde bulunan kazan, boyler, kapalı genleşme deposu vb gibi kapalı kaplar üzerinde kapasite, çalışma basıncı, test basıncı, imalat tarihi vb bilgilerin olduğu etiket var mı?",
+      "Boru hatları, pompa ve vanalar üzerine isimleri yazılı mı?",
+      "Aydınlatma yeterli mi?",
+      "Havalandırma yeterli mi?",
+      "Temiz hava girişi tarafında yanıcı, patlayıcı gaz girişi önlenmiş mi?",
+      "Sorumlu haricindeki kişilerin girmesini engelleyici tedbirler alınıyor mu?",
+      "Periyodik bakım onarım kartı düzenlenmiş mi?",
+      "Periyodik bakımları yapılıyor mu?",
+      "Duman kanalları ve baca çekişi kontrol ediliyor mu?",
+      "Yangın algılama ve bildirme tesisatı yapılmış mı?",
+      "Yangın söndürme tüpü var mı?",
+      "Sıvı yakıtlı ve doğalgazlı sistemlerde yangın, deprem ve statik elektrik ile ilgili güvenlik sistemleri var mı?",
+      "Kazan dairesi içerisinde gereksiz malzemeler var mı?",
+      "Elektrik panoları, aydınlatma ve diğer kablo tesisatları exproof malzemelerden yapılmış mı?",
+      "Kazanlar yakılmadan önce, kazan görevlisi tarafından tüm vanaların, klepelerin, kapakların, emniyet durumu, yakıt ve su miktarları ve işletme ile ilgili bütün hususlar kontrol ediliyor mu?",
+      "Zemin temizliğine dikkat ediliyor mu?",
+      "Sıvı yakıtlı kazan dairelerinde yakıt tankları ve yakıt tesisatlarından kaynaklanan kaçaklar var mı?",
+      "Boru tesisatları, açma kapama elemanları içinden geçen akışkan cinsine ve standartlara göre boyanarak etiketlenmiş mi?",
+      "Açıktan giden tesisatlarda donmaya karşı tedbir alınmış mı?",
+      "İlkyardım dolabı var mı?",
+      "İlkyardım dolapları hemen erişim sağlanabilecek yerlerde mi?",
+      "İlkyardım dolaplarının ihtiyaç malzemeleri yeterli mi?"
+    ]
+  },
+  "meb_kl18_ergonomi_bedensel": {
+    "ad": "Ergonomi-Bedensel İşler Kontrol Listesi (MEB KL-18)",
+    "anahtarKelimeler": [
+      "bedensel iş ergonomisi",
+      "ağır iş ergonomisi"
+    ],
+    "maddeler": [
+      "Malzemelerin taşınması için yeterli ekipman veya araç (mekanik aletler veya kutu, kap vs.) mevcut mu?",
+      "Çalışma sırasında bedeni zorlayıcı pozisyonlar (eğilme, çömelme, dönme, diz çökme vs.) oluyor mu?",
+      "Oturarak yapılan çalışmalarda çalışma yüksekliği uygun mu?",
+      "Oturma pozisyonları ergonomik olarak tasarlanmış mı?",
+      "Çalışma alanı/boşluğu uygun mu?",
+      "Ağır malzemeler, bel sorunlarına yol açmaması için bel ile diz arasında bir hizada teçhiz edilmiş olan raflarda mı?",
+      "Yüksek noktalara erişim için ayaklı merdiven mevcut mu?",
+      "Ağır yüklerin taşınması, mümkün olduğunda parçalar halinde veya küçük iş paketleri haline getirilerek taşınıyor mu?",
+      "Taşıma aracının tutma kolu var mı?",
+      "Elle taşıma yapılan mesafeler yakın mı?",
+      "Ağır malzemelerin taşınacağı platformda engebe veya merdiven var mı?",
+      "Malzemelerin taşınması konusunda dikkat edilmesi gereken hususlar hakkında kişiler bilgi sahibi mi?",
+      "Malzemelerin taşınmasında eğilme veya dönme gerektiren pozisyonlar elimine ediliyor mu?",
+      "Malzemeleri tutmak ve taşımak için gerekli aparatlardan/araçlardan faydalanılıyor mu?",
+      "El ile taşımayı en aza indirmek için raflar çalışma tezgahlarına yakın tasarlanmış mı?"
+    ]
+  },
+  "meb_kl19_ergonomi_buro": {
+    "ad": "Ergonomi-Büro İşleri Kontrol Listesi (MEB KL-19)",
+    "anahtarKelimeler": [
+      "ekran başı çalışma ergonomisi",
+      "masa başı ergonomisi"
+    ],
+    "maddeler": [
+      "Otururarak yapılan çalışmalarda çalışma yüksekliği uygun mu?",
+      "Çalışma alanı/boşluğu uygun mu?",
+      "Ekranlı araçlar yükseklik, mesafe, parlaklık olarak rahat çalışmaya imkan verecek uygunlukta mı?",
+      "Çalışma pozisyonu yeterli sıklıkta değişim gösteriyor mu? (ayağa kalkma/oturma/etrafta dolaşma)"
+    ]
+  },
+  "csgb_cephe_iskeleleri": {
+    "ad": "Cephe İskeleleri Kontrol Listesi",
+    "anahtarKelimeler": [
+      "cephe iskelesi",
+      "iskele"
+    ],
+    "maddeler": [
+      "İskele işi alt işverene verilecekse; sözleşmede, kullanılacak olan iskelenin güvenli olması ile ilgili hükümler yer almakta mıdır?",
+      "İş sağlığı ve güvenliği (İSG) ile ilgili karşılaşabilecek eksiklik ve sorunlarda uygulanacak disiplin kriterleri sözleşmede yer almakta mıdır?",
+      "Güvenlik malzemelerinin (Kişisel koruyucu donanımlar, iskele işinde kullanılan ekipmanlar vb.) temin edilmesi, bakımı ve değiştirilmesi ile ilgili hususlar sözleşmede yer almakta mıdır?",
+      "İskele işinde çalışacakların mesleki eğitim ve sağlık durumlarının işe uygunluğu ve aksi bir durumda yapılacaklar sözleşmede yer almakta mıdır?",
+      "İSG Kanunu'nu çerçevesinde İSG profesyonellerinin bulundurulması ile ilgili hükümler sözleşmede yer almakta mıdır?",
+      "İskele işi ve devam etmekte olan diğer inşaat faaliyetleri arasında koordinasyonun sağlanması ve güvenli çalışma ortamının oluşturulması için görevlendirilecek kişiler sözleşmede yer almakta mıdır?",
+      "Kullanılacak olan iskele kiralanacaksa; çalışma şartları ve yapılan iş (ağır iş vb.) düşünülerek kiralanan iskelenin taşıması gerektiği özellikler ilgili firmaya aktarılmış mıdır?",
+      "İskele elemanları ve iskele ile ilgili parça ve bağlantıların temininde (sayı, kapasite vb.) cephe yüzeyinin durumu, iskeleye binen yükler ve hava şartları gibi kriterler göz önüne alınmış mıdır?",
+      "Kiralanan firmadan ankraj noktaları, çapraz takviyelerin yerleştirilme noktaları vb. kurulumla ilgili teknik bilgi alınmış mıdır?",
+      "Kiralanan iskele malzemelerinin yeterliliği dikkate alınarak ilgili firmadan standartlara uygun iskele temin edilmiş midir?",
+      "İskele kendi firmanıza ait ise; kurulumdan önce iskele malzemelerini bozulma ve kusurlara karşı görsel olarak incelediniz mi?",
+      "Aşağıdaki kriterleri dikkate alarak bozulmaya uğramış ve kusurlu malzemeleri kurulumda kullanılacak malzemelerden ayırdınız mı? (Boruların ezik, çatlak, bükülmüş ve paslı olmaması; bağlantı elemanlarının ezik, çatlak, bükülmüş ve paslı olmaması; ahşap malzemelerin normal ağırlığına göre hafif olmaması (kuru çürüklük); çatlak, kesik, yontuk, kurt yeniği vb. ahşap kusurlarının bulunmaması; yamulmuş ahşap veya metal kalasların olmaması; kaplama malzemesinin zarar görmüş (yırtılmış, kesilmiş vb.) olmaması)",
+      "Kişisel koruyucu donanımlarınızın yeterli sayıda olduğunu ve çalışanlarınızın kullanımına (işin mahiyeti, ebat, sağlamlık, standartlara uygunluk vb.) uygun olup olmadığını kontrol ettiniz mi?",
+      "İskele işinde çalışacakların mesleki eğitimi var mı?",
+      "Çalışanlar yüksekte çalışma, elle taşıma vb. konularda İSG eğitimi aldı mı?",
+      "İskele kurma, kullanma ve sökme planınızı ilgili kişilerle hazırladınız mı?",
+      "Kişisel koruyucu donanımların doğru kullanımı ve bakımı hakkında çalışanlar bilgi sahibi mi?",
+      "Çalışma boyunca uyulacaklarla ilgili güvenlik talimatlarınız ve aksi durumda uygulanacak yaptırımlarla ilgili düzenleme yapıp, çalışanları bilgilendirdiniz mi?",
+      "Çalışma ortamını, mevcut tehlike ve riskleri dikkate alarak yeterli sayı ve nitelikte sağlık ve güvenlik işareti temin ettiniz mi?",
+      "Eğer iskele çevresinde yaya ve araç trafiği mevcutsa, iskeleyi kurmadan önce, yaya ve araç trafiğinin güvenliği için düzenleme yaptınız mı?",
+      "Kurulumda kullanılacak olan iskele malzemelerinin yerleştirilmesi için çalışma sahasında uygun bir nokta ayarladınız mı?",
+      "İskele kurulacak yerin yakınından enerji hattı geçiyorsa, elektrik tehlikesinden kaynaklanabilecek risklere karşı ilgili enerji dağıtım firması ile irtibatı geçtiniz mi ya da başka bir korunma yöntemine başvurdunuz mu?",
+      "Kurulum sırasında aşağıdaki hususları da düşünerek güvenli çalışma ve erişim için herhangi bir düzenleme yaptınız mı? (Kurulum sırasında erişim için iş ekipmanlarının kullanılması; tam vücut emniyet kemerlerinin iskele üzerinde takılması gereken yerlerle ilgili eğitim düzenlenmesi; kurulumda kullanılacak tam vücut emniyet kemerleri için ankraj noktalarının belirlenmesi ve yaşam hatlarının uygun konum ve yeterli sayılarda düzenlenmesi)",
+      "Hava şartları iskelenin kurulumuna müsait mi?",
+      "İskele zemininde kot farkı, eğim vb. sebeplerden dolayı düz olmayan zeminler dikkate alınarak, düşeyliği ayarlanabilen taban plakalarının kullanılacağı yerler belirlendi mi ve sayıları yeterli mi?",
+      "Taban plakalarının yükseklik ayarı yeterli kapasitede mi?",
+      "Taban plakasının alanı yeterli mi? (En az 150 cm²)",
+      "Plakada, bindirme uzunluğunun uygun olması için ayar mili üzerinde renklendirme vb. özellik var mı?",
+      "Taban plakalarının standartlara uygun olduğundan emin misiniz? (TS EN 74, TS EN 12811, TS EN 12810)",
+      "Taban plakasının yerleştireceğiniz zemin toprak mı? Toprak ise altlık kullandınız mı?",
+      "Taban plakasını yerleştirdiğiniz zemin stabil mi?",
+      "Toprak zemin üzerinde iskele kurmakta iseniz, kullanılacak olan altlıklarınız hazır mı?",
+      "Altlıklar yükü aktarabilecek şekilde sağlam mı?",
+      "Taban plakalarının altına ortalanacak şekilde yerleştirdiniz mi?",
+      "Yeterli genişlik ve alana sahip mi? (Her bir dikme için bir tane kullanılıyorsa, asgari alan 1000 cm² ve asgari genişlik 220 mm olarak alınabilir. Yumuşak zemin ve ağır iş iskelelerinde daha büyük altlıkların kullanılması gerekir.)",
+      "Altlığı alt tarafında boşluk olmayacak şekilde düz bir zemine yerleştirdiniz mi?",
+      "Birden fazla dikme altı boyunca uzanan uzun altlıklar kullanıyorsanız, altlıklar uçtaki taban plakalarını tam olarak aşacak uzunlukta mı?",
+      "Ara yan koruma için kullanılabilen ara korkulukların takılması için, paslanmaya karşı korumalı dikmelerin üzerinde 50 cm'de bir bağlantı yeri (flanş, fincan vb.) mevcut mu?",
+      "Dikmeleri yapıya mümkün olduğunca yakın olacak şekilde yerleştirdiniz mi?",
+      "İskele platformu boşluk kalmayacak şekilde kapatıldı mı?",
+      "Platform birimleri iskele sistemine sabitlendi mi?",
+      "Platform birimleri enine ara bağlantıları yeterli miktarda aşacak şekilde yerleştirildi mi? (En az 15 cm, en fazla 30 cm gibi)",
+      "Platformda kullanılan malzemeler (metal veya ahşap kalas, kompozit kalas, güverte vb.) kusur ve bozulmalara karşı sağlam ve yeterli kapasitede mi?",
+      "Üst üste binen platform birimlerinin yeterli bindirme uzunluğu olacak şekilde yerleştirilmesini sağladınız mı? (En az 30 cm gibi)",
+      "Platform kenarlarında malzeme düşmesine karşı önlem aldınız mı?",
+      "Topuk levhası kullanacaksanız, yeterli yükseklikte olduğundan emin misiniz? (En az 15 cm)",
+      "Metal, delik veya yarıklı topuk levhası kullanıyorsanız, bu açıklıkların en büyük ölçüsünün 25 mm'yi geçmemesini sağladınız mı?",
+      "Topuk levhalarının kendiliğinden takılma özelliği varsa, bütün topuk levhalarının sisteme uygun şekilde takıldığını kontrol ettiniz mi?",
+      "Topuk levhalarını kelepçe vb. aparatlarla sabitleyecekseniz, yeterli sayıda kelepçeniz var mı? Bütün topuk levhalarının sabitlendiğinden emin misiniz?",
+      "Örgülü veya katı bariyerler kullanacaksanız, bunları sisteme yeterli şekilde sabitlediniz mi?",
+      "İskelenin takviye edilmesi için çapraz bağlantılar kullandınız mı?",
+      "İskelede kullanılması öngörülen çapraz modeline uygun şekilde çapraz bağlantılar yerleştirilmekte mi? (Zikzak model, cephe boyu uzanan model, paralel model vb.)",
+      "Düşey düzlemde takviye için kullanılan boyuna ve enine çaprazların yerleştirilmesini üretici talimatlarını da dikkate alarak uygun aralıklarda yaptınız mı?",
+      "Yanal yönde bozulmaya karşı yatay düzlemde takviye kullanıldı mı?",
+      "Çaprazlara hiçbir şekilde iskeleye erişim amacıyla tırmanılmadığı kontrol edilmekte mi?",
+      "İskelenin yapıya sabitlenmesi için kullanılacak olan ilk bağlamanın (ankraj, pervaz vb.) iskele zemininden yeterli yükseklikte yapılmasına dikkat ettiniz mi? (4 metreyi geçmemesi veya iskele taban genişliğinin 4 katı mesafeyi aşmaması gibi)",
+      "Çevre şartları, yükleme koşulları dikkate alınarak hazırlanan ankraj planı doğrultusunda, iskelenin sabitlenmesi için yeterli sayıda bağlama malzemesi var mı?",
+      "Bağlamalar plana uygun noktalara, yatay ve düşey doğrultuda yeterli aralıklarda olacak şekilde yapıldı mı? İskelede çalışmaya başlamadan önce kontrol ettiniz mi?",
+      "Bağlama yapılması sırasında elektrik çarpma riski olmadığından emin misiniz?",
+      "Bağlama yapıldığı halde iskelede sallanma hareketi var mı? Varsa bağlamaları kontrol edip, iskelenin hareket etmesini engellediniz mi?",
+      "Bağlama yapılacak noktaların dikme, enine ve boyuna ara bağlantı birleşim yerlerine mümkün olduğunca yakın olmasını sağladınız mı?",
+      "İskele kısa kenarları (iskele eni) da dâhil olmak üzere bütün kenarları düşme riskine karşı yan koruma ile kapattınız mı?",
+      "Yan koruma elemanları arasında 47 cm'den daha fazla bir açıklık bulunmadığını kontrol ettiniz mi?",
+      "Korkuluk bağlantılarının sağlam şekilde yapıldığından emin misiniz? Kontrol edildi mi?",
+      "Kurulumun güvenli şekilde yapılabilmesi için uygun erişim araçlarınız var mı?",
+      "Erişim için yapıdan iskeleye ya da başka türlü geçitler kullanıyorsanız, geçitlerin yeterli genişlikte olduğunu kontrol ettiniz mi? (en az 60 cm)",
+      "Geçitlerde düşmeye karşı önlem alındı mı?",
+      "Geçitleri kayma, sağa sola hareket etme vb. duruma karşı sabitlediniz mi?",
+      "Taşınabilir merdiven kullanıyorsanız, merdiveni geçiş ve erişime uygun bir noktaya yerleştirdiniz mi?",
+      "Merdiven uç kısmının erişilecek noktadan yeterli mesafede yükseklikte olmasını sağladınız mı? (en az 90 cm gibi)",
+      "Taşınabilir merdivenler kusur ve bozulmalara karşı kullanılmadan önce incelendi mi?",
+      "Merdivenler uygun açıda yerleştirildi mi? (4 dikey, 1 yatay doğrultuda olacak şekilde)",
+      "Merdivenlerin kayma ihtimaline karşı sabitlenmesine dikkat edildi mi?",
+      "Çalışanlar merdivenleri kullanırken 3 nokta temas kuralına dikkat ediyorlar mı? Bu konuda bilgilendirildiler mi?",
+      "İskele içi entegre merdivenler kullanılacaksa, platforma geçiş kısımlarındaki açıklıklar güvenli geçiş için yeterli mi? (en az 0.45 m genişlik ve 0.60 m uzunluk)",
+      "Merdivenden platforma geçilen ulaşım açıklıklarında çalışan veya malzeme düşmesine karşı sonradan takılabilen kapak, platforma entegre kapak vb. ile önlem alındı mı?",
+      "Erişim için dikey merdiven kullanılacaksa, merdiven iskeleye geçişi güvenli hale getirecek yakın bir noktaya yerleştirilmiş midir?",
+      "Dikey merdivende güvenlik kafesi olmasına dikkat edilmiş midir?",
+      "Dikey merdivenin sabitlenmesinin yeterli olduğundan emin olunmuş mudur?",
+      "Erişimde erişim kuleleri kullanılacaksa, bu kulelerin iskeleye yakın şekilde yerleştirilmesi sağlanmış mıdır?",
+      "Kurulum sırasında yüksekten düşmeye, malzeme düşmesine vb. risklere karşı yeterli sayı ve ölçülerde temin edilen kişisel koruyucu donanımların tüm kurulum çalışanları tarafında kullanıldığını kontrol ettiniz mi?",
+      "Çalışanlar tam vücut emniyet kemerlerini ve ilgili bağlantı aparatlarını aldıkları eğitim doğrultusunda uygun şekilde kullanıyor mu?",
+      "Emniyet kemerleri önceden belirlenen güvenli noktalara (yaşam hattı vb.) takılıyor mu?",
+      "Kişisel koruyucu donanımlarını (KKD) kullanmayanlara uyarı yapılıyor ve önceden belirlenen disiplin kuralları çerçevesinde yaptırım uygulanıyor mu?",
+      "Kurulum boyunca KKD'lerde meydana gelebilecek kopma, yırtılma vb. hasarlara karşı yedek KKD kullanıma hazır mı?",
+      "Kurulum sırasında aniden oluşabilecek fırtına, yağmur vb. durumlarda ara veriliyor ve daha sonra kuruluma devam etmeden önce mevcut bağlantı ve iskele elemanları kontrol ediliyor mu?",
+      "İskele malzemelerin kaldırılıp, taşınması ve üst katlara iletilmesi sırasında, ağır kaldırma, biçimsiz pozisyonlarda malzeme alma ve verme gibi ergonomik olmayan çalışma yöntemleri mevcut mu?",
+      "Çalışanların elle taşıma üzerine aldıkları eğitim doğrultusunda çalışmalarını yürüttükleri kontrol ediliyor ve gerektiğinde uyarı ve hatırlatmalar yapılıyor mu?",
+      "Malzemelerin taşınması için alternatif yöntem ya da iş ekipmanı kullanımı gibi seçenekler göz önünde bulunduruldu mu?",
+      "Yaya trafiğinin güvenliği için kapalı geçit yapılacaksa, aşağıdaki bazı hususlar da dikkate alınarak güvenli bir geçit yapılmış mıdır? (Geçidin yeterli yükseklikte olması; üstünün çarpmaya karşı sağlam şekilde, tamamen kapatılmış olması; yeterli genişlikte olması)",
+      "Araç trafiği yaya trafiğinde ayrılarak hem çalışanların hem de yayaların güvenliği sağlanmış mıdır?",
+      "Yaya ve çalışan güvenliği için cisim tutma platformları kullanılacaksa, bunların yeterli sayıda bağlantı noktaları oluşturularak kelepçe vb. aparatlarla sağlam şekilde sabitlenmesi sağlanmış mıdır?",
+      "İskelede kaplama yapılacaksa, kaplama açılmayacak ve ayrılmayacak şekilde iskele sistemine sabitlenmiş midir?",
+      "Kaplama sonrası çalışma alanının aydınlığı kontrol edilmiş midir? Aydınlık yetersiz ise yapay aydınlatma vb. yöntemlerle çalışanların sağlığı korunmuş mudur?",
+      "İskele yakınında enerjisi kesilmemiş hat varsa, kurulum sırasında malzemeler taşınırken, uzun malzemelerin bu hatta temas etmemesine dikkat edilmiş midir?",
+      "Elektrik hattın yakınında yapılan çalışmalar gözlem altında yapılmakta mıdır?",
+      "Elektrik hattı, ana pano yakınında olma gibi sebeplerden dolayı iskele topraklanacaksa, topraklama uygun malzemelerle yapılmış mıdır? (topraklama levhası ve çubuğu gibi)",
+      "Topraklamada kullanılan bakır tel uygun mudur? (kesit alanı vb.)",
+      "Topraklama işi yetkili elektrikçi tarafından yapıldı mı?",
+      "Cephe yüzeyi vb. sebeplerden dolayı bağımsız olarak kurulmakta olan ayrı iskele sistemlerinin her biri topraklandı mı?",
+      "Topraklama hattı kurulurken, hatta zarar verebilecek çevresel etkiler dikkate alınmış ve hat güvenli olacak şekilde yerleştirilmiş midir?",
+      "İskele platformunda çöp, moloz yığını ya da kayma ve takılmaya sebep olabilecek artık malzemelerin uzaklaştırılması için çöplerin düzenli aralıklarla toplanarak çalışma alanı dışına çıkarılması veya moloz kaydırağı vb. sistemler kullanılıyor mu?",
+      "Çalışma aletlerinin, iş malzemelerinin ve artık parçaların doğrudan aşağıya veya alt katlara atılmaması hususunda çalışanlar uyarıldı mı?",
+      "İskele işinde kullanılacak malzemelerin yığılmak suretiyle tek bir noktada biriktirilerek malzeme düşmesine neden olmaması için çalışanlar uyarıldı mı?",
+      "Çalışanlar iş için gerekli olan malzemeden fazlasını iskeleye yüklememeleri konusunda uyarıldılar mı?",
+      "Malzemeler platforma güvenli geçişi sağlayacak şekilde yerleştirildi mi?",
+      "Yüksekliklerini arttırmak için malzemelerin üzerine çıkmamaları hususunda çalışanları uyardınız mı?",
+      "Çalışanlar çalışma sırasında korkulukların üzerinden aşırı uzanmamaları ve sarkmamaları hususunda uyarıldılar mı?",
+      "Çalışanlar iskeleye erişim sırasında 3 nokta temasına dikkat ediyorlar mı?",
+      "Çalışanlar korkuluk ve çaprazların üzerine basmamaları hususunda uyarıldılar mı?",
+      "Üst katlara malzeme çıkarmak için gırgır vinç vb. kaldırma ekipmanları kullanılıyorsa, yüklenen malzemelerin iskeleye çarpmaması için gerekli önlemler alındı mı?",
+      "Malzemelerin iskeleye alınması sırasında düşme, malzemelerin çarpması vb. riskler söz konusu ise, bu risklere karşı önlem alındı mı?",
+      "Çalışanlar iskele üzerinde bulunan güvenlik ve iskelenin desteklenmesi ile ilgili iskele elemanlarını çıkarmamaları hususunda uyarıldılar mı?",
+      "Çalışma boyunca yapılacak işe bağlı olarak sağlığa zararlı maddeler oluşuyorsa veya sağlığa zararlı maddelerle çalışma yapılıyorsa, çalışanlar güvenlik bilgi formlarını da dikkate alarak güvenli çalışma prosedürlerini uyguluyorlar mı? Çalışanlar KKD'lerini kullanılıyorlar mı?",
+      "Çalışanlar iskele işinde kullanılan tüm alet ve cihazları, kaldırma ve taşıma araçlarını ve makineleri amaçlarına uygun ve güvenli şekilde kullanmakta mıdır?",
+      "Çalışanlar sağlık ve güvenlik yönünden ciddi ve yakın bir tehlike ile karşılaştıklarında, iş araç gereçlerinde ve koruma tedbirlerinde bir eksiklik veya hata gördüklerinde, bu durumu yetkili kişilere bildirmeden ve önlem alınmadan çalışmamaları hususunda uyarıldılar mı?",
+      "Çalışanlar ergonomik olmayan çalışma şekillerine karşı uyarılmakta mıdır?",
+      "Söküme geçmeden önce, iskeleden sökülecek malzemelerin düzenli bir şekilde istiflenebileceği yeterli büyüklükte bir alan hazırladınız mı?",
+      "Belirlenen alan araç giriş ve çıkışı için uygun mu?",
+      "İstifleme alanına erişim yolları; malzeme düşmesi, iş ekipmanları kaynaklı riskler, takılma vb. risklere karşı güvenli mi?",
+      "Söküm işlemi yapıldığına dair uyarı işaretleri asıldı mı?",
+      "Sökümden önce, iskelenin stabil olması açısından kritik olan iskele elemanlarını (bağlama, çapraz, payanda vb.) kontrol ederek bu elemanların sağlam olduğundan emin oldunuz mu?",
+      "Hava şartları söküm işlemi için uygun mu?",
+      "İskele platformundaki diğer malzemeler (işle ilgili yapı malzemeleri, artık malzemeler vb.) sökümden önce iskeleden uzaklaştırıldı mı?",
+      "Söküm sırasında tespit edilen hasar görmüş, kullanılamayacak durumdaki malzemeleri sağlam malzemelerden ayırdınız mı?",
+      "Yüksekten düşme riskine karşı koruma sistemleri kuruldu mu?",
+      "Tüm çalışanlar tam vücut emniyet kemeri ve ilgili bağlantı tertibatlarına sahip mi?",
+      "Çalışanlar tam vücut emniyet kemerlerini aldıkları eğitim doğrultusunda uygun şekilde kullanıyorlar mı?",
+      "Tam vücut emniyet kemeri bağlantılarının çıkarılmaması hususunda çalışanlar uyarıldı ve mevcut disiplin kuralları hatırlatıldı mı?",
+      "Baret, çelik burunlu ayakkabı, eldiven vb. kişisel koruyucu donanımlar kullanılıyor mu?",
+      "İskele malzemeleri sökülürken, çalışanların üzerine malzeme düşmesi ve çarpmasına karşı çalışanlar uygun şekilde konumlandı mı?",
+      "Çalışanlar, sökülmüş olan iskele malzemelerinin doğrudan yere atılmaması ve iskele üzerinde biriktirilmemesi hususunda uyarıldı mı?",
+      "Malzemelerin dengeli şekilde indirilmesi ve belirlenen alana kayma ve devrilmeye neden olmayacak şekilde düzenli bir biçimde koyulmasına dikkat edildi mi?"
+    ]
+  },
+  "csgb_seracilik": {
+    "ad": "Seracılık (Örtü Altı Yetiştiriciliği) İşleri için Kontrol Listesi",
+    "anahtarKelimeler": [
+      "sera",
+      "seracılık",
+      "örtü altı yetiştiricilik"
+    ],
+    "maddeler": [
+      "Zemin; çökme, çukur, tümsek, erime gibi takılıp düşmeye veya kaymaya sebep olabilecek deformasyonları önleyecek şekilde tasarlanmış mı ve iç ve dış zeminler (sera girişi ve içi, diğer binalar, merdivenler vs.) düzenli olarak kontrol ediliyor mu?",
+      "Sera planı yapılan işe uygun olarak tasarlanmış mı?",
+      "Çalışma ortamındaki kapalı alanlar değerlendirilmiş ve belirlenmiş mi? Çalışanların bu alanlara girmesini engelleyecek önlemler alınıyor mu?",
+      "Bütün alanlar iyi aydınlatılmış, pencere alanı yeterince büyük ve doğal aydınlatmadan yeterince faydalanılıyor mu?",
+      "Çalışma alanında ve serada temiz hava akımı bulunuyor ve tüm alanlar düzenli olarak havalandırılıyor mu?",
+      "Mevsimsel koşullara göre çalışma ortamında aşırı sıcak, nem, basınç, düşük sıcaklık, yağmur ve güçlü rüzgâr gibi termal konfor şartları uygun mu?",
+      "Seradaki çalışmalarda güneş ışığından kaynaklı radyasyona maruziyetin önüne geçiliyor mu?",
+      "İnsanlardan, makine veya donanımlardan kaynaklanabilecek veya dış ortam kaynaklı gürültünün rahatsız edici düzeyde olması engelleniyor mu?",
+      "Makine veya donanımlardan kaynaklanabilecek titreşimin rahatsız edici düzeyde olması engelleniyor mu?",
+      "Çalışma ortamında toz maruziyetinin (organik, inorganik) önüne geçiliyor mu?",
+      "İşyerinde alkol, madde kullanımını önleyici tedbirler alınıyor mu?",
+      "Uygun yerlerde yeterli sayıda ve büyüklükte atık kutuları bulunuyor mu?",
+      "Çalışanların yeme-içme, barınma gibi temel ihtiyaçları için uygun donanımlı alanlar ayrılmış mı?",
+      "İşyerinin temizliği düzenli olarak yapılıyor ve çalışma ortamında, hijyen açısından gerekli şartlar sağlanıyor mu?",
+      "Temizlik yapılan alanda gerekli önlemler alınıyor mu?",
+      "Elleri ve vücudu gerektiğinde yıkayabilecek temiz lavabo ve duşlar mevcut mu?",
+      "Çalışanlar, işlerini bitirdikten sonra bütün malzemeleri yerlerine düzenli olarak yerleştiriyor mu?",
+      "Çalışma alanı çalışanların rahat çalışmasını sağlayacak genişlikte ve çalışma ortamı çalışanların faaliyetlerini kısıtlamayacak şekilde tasarlanmış ve düzenli mi?",
+      "Çalışanlar için kolay ulaşılabilir noktalarda temiz içme suyu mevcut mu?",
+      "İşyeri ve sera içerisindeki çalışma alanlarında sigara içilmesi yasaklanmış mı ve çalışanlar bu konuda bilgilendiriliyor mu?",
+      "Yetkisiz kişilerin seraya girişleri engelleniyor mu?",
+      "Sera içerisindeki tehlikelere karşı uyarı işaretleri bulunuyor mu?",
+      "Kullanılan ekipman ve makineler için ayrı bir depolama alanı var mı?",
+      "Yangın ve kazaları önlemek için seraların etrafındaki çöp ve atıklar düzenli olarak uzaklaştırılıyor mu?",
+      "Seradaki kapalı alanların bakım ve temizliği yapılırken dışarıda bir gözlemci bulunduruluyor mu?",
+      "Makine, araç ve gereç tedariğinde CE işaretli olanların alınması sağlanıyor mu?",
+      "Tüm alet veya ekipmanların tasarım amaçlarına uygun yönde kullanılması sağlanıyor mu?",
+      "Makineler için üretici firmadan, Türkçe kullanım kılavuzları temin edilmiş mi ve makineler bu kılavuza uygun olarak kullanılıyor mu?",
+      "Bütün makine ve araç gereçlerde gerekli uyarı işaretleri bulunuyor mu?",
+      "Bütün makinelerin etrafında çalışma için yeterli alan mevcut mu?",
+      "Tüm alet ve gereçlerin kullanımında gerekli hijyen şartları sağlanıyor mu?",
+      "Kullanılan kablolu aletler takılma veya düşmeyi önleyecek şekilde kullanılıyor mu?",
+      "Kesici veya delici alet veya ekipmanlar uygun aralıklarla, kullanım öncesi ve sonrasında kontrol ediliyor mu?",
+      "Özellikle hareketli parçaları olan makineler/aletler, üreticisinin talimatları doğrultusunda makine koruyucular ve koruma panelleri gibi önlemler ile koruma altına alınıyor mu?",
+      "Makine ve iş ekipmanları kullanılırken koruyucularının her zaman yerinde ve iyi durumda olması sağlanıyor mu?",
+      "İçerisinde ve parçalarında dönen aksamları bulunan elektrikli aletler ile yapılan çalışmalar sırasında gerekli önlemler alınıyor mu?",
+      "Makinelerin kazara/istemeden çalıştırılması engelleniyor ve makinelerin acil durdurma düğmeleri bulunuyor mu?",
+      "İşveren makine koruyucularının çalışanlar tarafından uygun olarak kullanılıp kullanılmadığını kontrol ediyor mu?",
+      "İmalatçının talimatları doğrultusunda tüm makine ve ekipmanların düzenli bakımları ve periyodik kontrolleri yapılıyor mu?",
+      "Bakım onarım işleri yetkin ve yetkili kişiler tarafından gerçekleştiriliyor mu?",
+      "Özel cihaz, el aletleri ya da teknik aparatların sadece özel eğitim almış çalışanlar tarafından ve gerekli önlemler alınarak kullanılması sağlanıyor mu?",
+      "Elektrik/sigorta kutuları kilitlenmiş, yetkisiz kişilerin erişimleri önleniyor mu?",
+      "Elektrikle ilgili işler yetkili ve uzman kişilere yaptırılıyor mu?",
+      "Kaçak akım rölesi ana elektrik hattına bağlanmış mı?",
+      "Tüm sigortaların korunaklı yerlerde olması sağlanıyor mu?",
+      "Elektrikle ilgili bağlantılar sürekli kontrol ediliyor mu? Elektrik tesisatı ve kabloların bakımları düzenli olarak yapılıyor mu?",
+      "Elektrikli ekipmanların ıslak ortam, su ve kimyasal içerikli ürünler ile temas ettirilmesi engelleniyor mu?",
+      "Çalışanların uzun süre aynı pozisyonda veya fiziksel anlamda zorlayıcı çalışmaları (ağır yük kaldırma dahil) engelleniyor mu?",
+      "Çalışanların, işlerini yaparken çok uzak mesafelere uzanmak zorunda kalmaları engelleniyor mu?",
+      "Çalışanlara yaptıkları işe, termal koşullara ve fizyolojik özelliklerine uygun iş kıyafetleri sağlanıyor mu?",
+      "Çalışanlara, yaptıkları işe uygun masa, sandalye veya destek ekipman sağlanıyor mu?",
+      "Kas iskelet sistemini zorlayıcı ve tekrarlayan hareketleri önleyici tedbirler alınıyor mu?",
+      "Kullanılan el aletleri ergonomik mi?",
+      "Elle taşınamayacak kadar ağır yüklerin çalışanlarca kaldırılması engelleniyor mu?",
+      "Yüklerin elle taşınmasından doğabilecek kas iskelet sistemi rahatsızlıkları ile yükleri doğru ve güvenli kaldırma konusunda çalışanlar bilgilendiriliyor mu?",
+      "Sırt ve bel incinmesi riski oluşturabilecek yüklerin itilmesini ya da çekilmesini sağlayacak uygun taşıma araçları sağlanıyor mu?",
+      "Tehlikeli kimyasallar yerine tehlikeli olmayan veya daha az tehlikeli olanların kullanılması (ikame) sağlanıyor mu?",
+      "Kimyasal maddelere yetkisiz kişilerin erişimi engelleniyor mu?",
+      "Kimyasallar uygun şartlarda depolanıyor mu?",
+      "Kimyasalların Güvenlik Bilgi Formları (SDS) mevcut mu?",
+      "Kimyasalların hazırlanma prosedürü sağlık ve güvenlik yönünden uygun mu?",
+      "Çalışanların kimyasallara doğrudan maruziyeti engelleniyor mu?",
+      "Kimyasalların üzerinde içeriği, uygulama yöntemi, kullanılacak koruyucu ekipman ve zararlarını gösteren uygun etiketler mevcut mu?",
+      "Çalışanlar, kullanma kılavuzu bulunmayan ya da kullanma talimatı henüz hazırlanmamış tehlikeli kimyasalları kullanmamaları konusunda talimatlandırılıyor mu?",
+      "Kimyasallarla işlem yapılan kapalı çalışma alanlarında uygun ve yeterli havalandırma mevcut mu?",
+      "Pestisit spreyleme sırasında gerekli önlemler alınıyor mu?",
+      "Kimyasal atıklar uygun şekilde imha ediliyor mu?",
+      "Kimyasalların çevreye (su, kanalizasyon, hava, toprak) yayılması engelleniyor mu?",
+      "Kimyasal maddelerin (özellikle içerikleri nedeniyle alevlenebilir olanların) saklama koşullarına uyuluyor, bu malzemeler ısı, ışık ve diğer malzemelerden uzakta muhafaza ediliyor mu?",
+      "Birbirleri ile tepkimeye girerek tehlikeli salımlar oluşturabilecek kimyasal maddelerin ayrı yerlerde muhafaza edilmesi sağlanıyor mu?",
+      "Kimyasalların kullanımı sırasında alerji ve tahrişleri önlemek için cilt, göz veya solunum teması engelleniyor mu?",
+      "Yakıcı veya aşındırıcı maddeler veya yanıcı gazlarla yapılan çalışmalarda gerekli önlemler alınıyor mu?",
+      "İşyerinde, acil durum planı (güneş çarpması, böcek sokması, ilaç zehirlenmesi, kesici alet kazası vb. için) hazırlanmış mı?",
+      "Yeterli sayıda yangın söndürücü mevcut ve son kullanma tarihleri ve basınçları kontrol ediliyor mu?",
+      "Yangın merdivenine açılan acil çıkış kapıları kilitli olmayıp dışa doğru açılacak şekilde tasarlanmış mı?",
+      "Acil çıkış kapılarına ulaşımı engelleyecek faktörler ortadan kaldırılmış ve yangın merdivenlerinin amacı dışında kullanılması engelleniyor mu?",
+      "Acil duruma neden olan olaya ilişkin iletişime geçilecek (yangın, gaz kaçağı, deprem vb.) telefon numaraları görünür yer(ler)e asılmış mı? Acil durumda iletişim telefonları çalışanlar tarafından biliniyor mu?",
+      "Yangın uyarı sisteminin (sesli ve ışıklı uyarı) çalışır durumda olması sağlanıyor mu?",
+      "Kapı ve kaçış yollarını gösteren acil durum levhaları uygun yerlere yerleştirilmiş ve yangın merdiveninde ışıklandırma sağlanıyor mu?",
+      "İlkyardım dolabı mevcut mu ve içeriği uygun mu?",
+      "Çalışma ortamında tehlikeli biyolojik etkenler (bitkiler, hayvanlar ve hayvan orijinli maddeler, organik toz, atık vb.) ile mücadele konusunda önlemler alınıyor mu?",
+      "Biyolojik etkenlere maruz kalan veya kalabilecek çalışan sayısının mümkün olan en az sayıda tutulması için gerekli düzenlemeler yapılıyor mu?",
+      "Çalışma süreçleri ve teknik kontrol önlemleri, biyolojik etkenlerin ortama yayılmasını önleyecek veya ortamda en az düzeyde bulunmasını sağlayacak şekilde düzenleniyor mu?",
+      "Tıbbi ve biyolojik atıkların gerektiğinde uygun işlemlerden geçirildikten sonra çalışanlar tarafından güvenli bir biçimde toplanması, depolanması ve işyerinden uzaklaştırılması, güvenli ve özel kapların kullanılması da dâhil uygun yöntemlerle yapılıyor mu?",
+      "Çalışanların, biyolojik etkenlere maruz kalabileceği alanlarda yiyip içmeleri engelleniyor mu?",
+      "Arı sokmaları, istilası ve hayvan kaynaklı biyolojik risklere karşı yeterli önlem alınıyor mu?",
+      "Çalışanlar ile işveren(ler) arasında iyi bir iletişim sürdürülüyor mu?",
+      "Çalışanlar; yetki, sorumluluk ve çalışma hedeflerini net olarak biliyor mu?",
+      "Çalışanlara, görev ve sorumlulukları haricinde talimat verilmesi engelleniyor mu?",
+      "Çalışma zamanı ile ilgili çalışanlara baskı uygulanıyor mu?",
+      "Çalışanlar için uygun dinlenme alanları mevcut mu?",
+      "Çalışanların işe giriş muayeneleri ve periyodik kontrolleri yaptırılıyor mu?",
+      "İş kazaları ve meslek hastalıkları vakaları Sosyal Güvenlik Kurumuna rapor ediliyor mu?",
+      "Daha önce meydana gelmiş kazalar incelenerek kayıt altına alınıyor, tehlike kaynakları tespit edilerek ileride benzer kazalar ile karşılaşmamak için gerekli önlemler alınıyor mu?",
+      "Yüksekte (binalarda, makinelerde, ekipmanda, depolarda vb.) güvenli çalışma sistemi var mı?",
+      "Bütün taşınabilir merdivenler güvenli ve yapılan işler için uygun mu?",
+      "Merdivenler yükseklikte kullanıldığında sağlam ve dengeli bir şekilde durması sağlanıyor mu?",
+      "Taşınabilir merdivenlerin periyodik bakımları ve kontrolleri düzenli olarak ve her kullanım öncesi yapılıyor mu?",
+      "Yüksekte çalışılan zeminler ve merdiven ayakları kaydırmaz tabanlı mı?",
+      "Yüksek bölümler sabit korkuluklar ve trabzanlar ile çevriliyor mu?",
+      "Merdiven genişlikleri, basamak yükseklikleri ve tırabzanlar uygun mu?",
+      "Yüksek istifleme yapılan bölümlerdeki yükler çalışanların üzerine düşmeyecek şekilde sabitleniyor mu?",
+      "Genel trafik ve yaya yolu birbirinden ayrılmış mı?",
+      "Sera alanında araçların güvenli hareketi konusunda organizasyon yapılıyor mu?",
+      "Eski traktör kabinleri güvenlik kafesi (roll-bar) ile donatılmış mı?",
+      "Araçların ışıklandırma sistemi ve göstergeleri düzgün çalışıyor mu?",
+      "Çalışma alanında iç ve dış alan hız limitlerine uyuluyor mu?",
+      "Tüm nakliye ve hareketli araçlar yetkili kişilerce mi kullanılıyor?",
+      "Araçların aynaları temiz ve kullanılır vaziyette mi?",
+      "Çalışanların büyük araçlar arkasında sıkışmalarını engelleyecek tedbirler alınıyor mu?",
+      "Yükleme boşaltma alanları çalışanların düşmesini engelleyecek şekilde korkuluklarla çevrilmiş mi?",
+      "Konveyörlerde yeterli sıklıkta güvenli durdurma sistemi mevcut mu?",
+      "Çalışma sahası çiftlik içerisindeki elektrik ve yüksek gerilim hatlarına kabul edilebilir uzaklıkta mı?",
+      "Çocukların tehlikeli alanlara (çalışma alanları, hareket eden makinelerin civarı, yükseklik, depolama alanları, hayvanların bulunduğu bölmeler vb.) girişleri engelleniyor mu?",
+      "Çalışanlar yaptıkları işe uygun KKD kullanıyor mu?",
+      "Kimyasal maruziyetine karşı uygun KKD kullanılıyor mu?",
+      "Çalışanlar için yaptıkları işe ve çalışma koşullarına uygun kıyafetler sağlanıyor mu?",
+      "Çalışanlar KKD'lerini gereken çalışma koşullarında sürekli takıyorlar mı?",
+      "Çalışanlar KKD'lerini nasıl muhafaza edecekleri, temizleyecekleri ve ne sıklıkla değiştirmeleri gerektiği ile ilgili bilgi sahibi mi?",
+      "KKD'ler için uygun saklama yerleri mevcut mu?",
+      "Çalışanlar iş sağlığı ve güvenliği konusunda eğitim almışlar mı?",
+      "Çalışanlar yaptıkları işle ilgili olarak gerekli teknik eğitim ve bilgiye sahip mi?",
+      "Tüm çalışanlara enfeksiyon riskini azaltmak için genel hijyen bilgisi veriliyor ve gerekli önlemler alınıyor mu?"
     ]
   }
 };
