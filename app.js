@@ -468,6 +468,18 @@ if (typeof window !== 'undefined') {
 // production servis fonksiyonudur. Sözleşme isg_denetim reposundaki
 // dof_islemleri.py (`dof_disa_aktar`) ve dof_replay_state.py (`baseStateHash`
 // üretimi) salt-okunur incelenerek doğrulanmıştır -- tahmin edilmemiştir.
+//
+// SÖZLEŞME REFERANSI (SUPV-42c M4): Bu paketin KANONİK alan kümeleri
+// artık isg_denetim/dof_takip_contract.py içinde TEK KAYNAKTIR:
+//   - paket üst alanları   -> EXPORT_PAKET_ALANLARI
+//   - tehlikeler[] alanları -> EXPORT_TEHLIKE_ALANLARI
+// Desktop export'una alan eklenir/çıkarılırsa ÖNCE o sabitler değişir
+// (Desktop testleri gerçek dof_disa_aktar çıktısını o sabitlerle birebir
+// eşitler); bu dosyadaki alan erişimleri (aşağıdaki yapısal doğrulayıcı
+// + kayıt eşleme) o listeyle karşılaştırılarak güncellenmelidir. İki
+// repo arasındaki sözleşme sapması en pahalı sapma türüdür -- burada
+// tolere edilen tek fark, PWA'nın yalnız İHTİYACI OLAN alanları
+// okumasıdır (alt küme); listede OLMAYAN bir alana güvenmesi DEĞİL.
 
 class DofImportHatasi extends Error {
   constructor(kod, mesaj) {
