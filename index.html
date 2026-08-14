@@ -282,7 +282,7 @@
             <div class="input-group">
                 <label>Kurum</label>
                 <div style="display:flex; gap:8px;">
-                    <select id="setup-kurum" onchange="birimleriYukle()" style="flex:1">
+                    <select id="setup-kurum" onchange="_kurumSecimDegisti()" style="flex:1">
                         <option value="">Seçiniz...</option>
                     </select>
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniKurumEkle()">+</button>
@@ -303,6 +303,12 @@
                     </select>
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="yeniBirimEkle()">+</button>
                 </div>
+                <!-- SUPV-49 -- Kapsam ipucu (PWA BAĞLAYICI KARAR VERMEZ, yalnız
+                     Desktop'taki "Kapsama Ata" ön-doldurması için bilgi taşır).
+                     Mevcut "Yedekle" modalıyla AYNI checkbox-modal deseni
+                     (yedekModalAc), yeni bir UI kavramı öğretilmez. -->
+                <a href="#" id="setup-tur-birimleri-link" onclick="event.preventDefault(); turBirimleriModalAc()"
+                   style="display:none; font-size:0.8rem; color:var(--accent); margin-top:6px;"></a>
             </div>
 
             <div class="input-group">

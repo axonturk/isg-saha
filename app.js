@@ -65,6 +65,8 @@ let secilenKat        = null;   // Ekran B'de seçili kat
 let secilenAlanTipi   = null;   // Ekran B'de seçili alan tipi (chip veya dropdown)
 let secilenMevcutOdaId = null;  // "Bu kattaki mevcut odalar"dan seçilirse dolu — yeni oda oluşturulmaz
 let secilenTur        = 'saha'; // 'saha' (Saha Denetimi) | 'risk' (Risk Analizi) — masaüstü bu etikete göre yönlendirir
+let secilenTurBirimIdleri = [];  // SUPV-49 -- "bu turda gezdiğim diğer birimler" İPUCU (bağlayıcı değil,
+                                  // Desktop'taki Kapsama Ata ön-doldurması içindir); kurum değişince sıfırlanır
 
 // ─── UUID ────────────────────────────────────────────────────
 function uuid() {
@@ -4939,7 +4941,71 @@ async function birimleriYukle() {
       : '') +
     '<option value="YENI">+ Yeni Birim Ekle</option>';
   if (secili && birimler.some(b => b.id === secili)) sel.value = secili;
+
+  // SUPV-49 -- listeden silinmiş bir birim artık ipucu listesinde
+  // kalmasın (aynı "bayat referans" ilkesi, ZIP export anında da AYRICA
+  // uygulanır -- burası yalnız UI'nın güncel kalmasını sağlar).
+  const mevcutIdler = new Set(birimler.map(b => b.id));
+  secilenTurBirimIdleri = secilenTurBirimIdleri.filter(id => mevcutIdler.has(id));
+  await _turBirimleriLinkGuncelle();
 }
+
+// SUPV-49 -- Kurum değişince "bu turda gezdiğim diğer birimler" ipucu
+// sıfırlanır (yeni kurumun birimleri eskisiyle alakasız); birim listesi
+// yalnızca yenilendiğinde (ör. "Bu Odayı Tamamla", yeni birim eklendi)
+// İSE korunur -- bu yüzden reset burada, birimleriYukle() İÇİNDE DEĞİL.
+async function _kurumSecimDegisti() {
+  secilenTurBirimIdleri = [];
+  await birimleriYukle();
+}
+if (typeof window !== 'undefined') window._kurumSecimDegisti = _kurumSecimDegisti;
+
+async function _turBirimleriLinkGuncelle() {
+  const link = document.getElementById('setup-tur-birimleri-link');
+  if (!link) return;
+  const kurumId = document.getElementById('setup-kurum').value;
+  if (!kurumId) { link.style.display = 'none'; return; }
+  const birimSayisi = (await dbIndexTumu('birimler', 'kurumId', kurumId)).length;
+  if (birimSayisi < 2) { link.style.display = 'none'; return; }
+  link.style.display = 'inline-block';
+  link.textContent = secilenTurBirimIdleri.length
+    ? `Bu turda gezdiğim diğer birimler (${secilenTurBirimIdleri.length} seçili)`
+    : 'Bu turda gezdiğim diğer birimler (opsiyonel)';
+}
+
+// SUPV-49 -- "Bu turda gezdiğim diğer birimler" İPUCU seçimi. yedekModalAc()
+// İLE AYNI checkbox-modal deseni (bkz. o fonksiyon) -- yeni bir UI kavramı
+// öğretilmez. Bu seçim HİÇBİR ŞEYİ BAĞLAMAZ: yalnız ZIP export'una taşınan
+// bir öneri, Desktop'taki "Kapsama Ata" ekranı kullanıcıya AÇIKÇA sorar.
+async function turBirimleriModalAc() {
+  const kurumId = document.getElementById('setup-kurum').value;
+  if (!kurumId) return;
+  const kurum = await dbGetir('kurumlar', kurumId);
+  const suankiBirimId = document.getElementById('setup-birim').value;
+  const birimler = (await dbIndexTumu('birimler', 'kurumId', kurumId))
+    .filter(b => b.id !== suankiBirimId);   // kendi birimi zaten dahil, tekrar sorulmaz
+
+  if (birimler.length === 0) { alert('Bu kurumda başka birim yok.'); return; }
+
+  const satirlar = birimler.map(b => `
+    <label style="display:flex; align-items:center; gap:8px; padding:8px 0; cursor:pointer;">
+      <input type="checkbox" class="tur-birim-cb" value="${b.id}" ${secilenTurBirimIdleri.includes(b.id) ? 'checked' : ''} style="width:auto;">
+      <span>${_esc(b.ad)}</span>
+    </label>`).join('');
+
+  showFormModal(`Bu Turda Gezilen Birimler — ${kurum ? kurum.ad : ''}`, `
+    <p style="font-size:0.85rem; color:#666; margin-top:-6px;">
+      Bilgi amaçlıdır -- Desktop'a aktarınca hangi birimlerin aynı ziyarete
+      ait olduğunu önerir, kesin kararı orada siz verirsiniz.
+    </p>
+    <div>${satirlar}</div>
+  `, async () => {
+    secilenTurBirimIdleri = [...document.querySelectorAll('.tur-birim-cb:checked')].map(cb => cb.value);
+    closeFormModal();
+    await _turBirimleriLinkGuncelle();
+  }, 'Kaydet');
+}
+if (typeof window !== 'undefined') window.turBirimleriModalAc = turBirimleriModalAc;
 
 async function _birimSecimDegisti() {
   const sel = document.getElementById('setup-birim');
@@ -5683,8 +5749,15 @@ async function startInspection() {
   let denetim = eslesenler[0] || null;
   const mevcudaDevamEdildi = !!denetim;
 
+  // SUPV-49 -- ipucu, seçili haliyle YENİ VEYA DEVAM EDİLEN denetime aynen
+  // yazılır (bağlayıcı değil, yalnız ZIP export'una taşınır -- bkz.
+  // _denetimPaketiOlustur). Kendi birimId'si ipucudan HER ZAMAN çıkarılır
+  // (zaten paket.denetim.birimId olarak ayrı taşınıyor, tekrar gerekmez).
+  const turBirimIdleri = secilenTurBirimIdleri.filter(id => id !== birimId);
+
   if (denetim) {
     denetim.guncelleme = new Date().toISOString();
+    denetim.turBirimIdleri = turBirimIdleri;
     await dbGuncelle('denetimler', denetim);
   } else {
     denetim = {
@@ -5699,6 +5772,7 @@ async function startInspection() {
       odaNo: odaKaydi.no,
       tur: secilenTur,
       sorumlu: resp,
+      turBirimIdleri,
       baslangic: new Date().toISOString(),
       guncelleme: new Date().toISOString()
     };
@@ -6617,6 +6691,19 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
   const sesDosyalari = [];
   const ekGirdiler = [];
 
+  // SUPV-49 -- "bu turda gezdiğim diğer birimler" İPUCU'nu ZIP payload'ına
+  // taşır (bağlayıcı DEĞİL, Desktop kendi kaydına göre KARAR VERİR).
+  // PWA'nın KENDİ (her zaman güncel) birimler deposuna göre çözülür --
+  // sonradan silinmiş bir birim id'si burada sessizce ELENİR (payload'a
+  // hiç girmez); Desktop tarafındaki "bayat önbellek" durumu bunun
+  // TERSİDİR (Desktop'un KENDİ kaydı PWA'dan geride kalmışsa), o yüzden
+  // burada kaybolan bir referans Desktop'ta AYRICA sorun değildir.
+  let turBirimleri = [];
+  for (const bid of (denetim.turBirimIdleri || [])) {
+    const b = await dbGetir('birimler', bid);
+    if (b) turBirimleri.push({ birimId: b.id, birimAdi: b.ad });
+  }
+
   const tespitler = bulgular.map(b => {
     const bFotolar = b.fotolar || [];
     const bSesler = b.sesler || [];
@@ -6661,7 +6748,8 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       kat: denetim.kat,
       oda: denetim.oda,
       odaNo: denetim.odaNo || '',
-      sorumlu: denetim.sorumlu
+      sorumlu: denetim.sorumlu,
+      turBirimleri
     },
     tespitler,
     manifest: { dosyalar, fotoSayisi: dosyalar.length, sesDosyalari, sesSayisi: sesDosyalari.length }
