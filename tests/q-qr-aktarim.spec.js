@@ -242,6 +242,65 @@ test.describe('Q. Kurum/Birim QR Aktarımı', () => {
     expect(secimVarMi).toBe(1);
   });
 
+  // --- SUPV-45 madde 3: Mahal QR bu ekrana yanlislikla misroute olmasin ---
+
+  test('mahal tipi QR payload acikca reddedilir, kurum agaci upsert edilmez', async ({ page }) => {
+    // Desktop mahal_qr_aktarim.py'nin GERCEK payload sekli (_mahal_payload):
+    // birimler DIZISI YOK, tip='mahal', kurum alt-nesnesinde 'tur' YOK.
+    await page.goto('/index.html');
+    const kurumId = benzersizAd('qr-mahal-kurum');
+    const oncekiKurumSayisi = (await storeTumu(page, 'kurumlar')).length;
+
+    const mahalPayload = {
+      surum: 1,
+      tip: 'mahal',
+      mahal: { id: benzersizAd('qr-mahal'), ad: '105', kat: '1. Kat', alanTipi: 'Ofis' },
+      birim: { id: benzersizAd('qr-mahal-birim'), ad: 'Rektörlük' },
+      kurum: { id: kurumId, ad: 'Mahal Kurumu' }
+    };
+
+    const hataMesaji = await page.evaluate(async (p) => {
+      try {
+        await window.kurumAgaciUpsertEt(p);
+        return null;
+      } catch (e) { return e.message; }
+    }, mahalPayload);
+
+    expect(hataMesaji).toContain('Mahal');
+    expect(hataMesaji).toContain('desteklenmiyor');
+
+    const sonrakiKurumSayisi = (await storeTumu(page, 'kurumlar')).length;
+    expect(sonrakiKurumSayisi).toBe(oncekiKurumSayisi);
+  });
+
+  test('mahal payload ile mevcut kurumun turu sessizce silinmez (regresyon)', async ({ page }) => {
+    // SUPV-45 madde 3 kok neden: mahal payload'inda kurum.tur hic yok --
+    // eski kod kurumAgaciUpsertEt'i bunun uzerinden calistirip
+    // `payload.kurum.tur || null` ile mevcut kurumun turunu SESSIZCE
+    // null'a dusuruyordu. Reddedilince bu artik olusmamali.
+    await page.goto('/index.html');
+    const kurumId = benzersizAd('qr-mahal-kurum2');
+    await page.evaluate(async (kurumId) => {
+      await window._idb.dbEkle('kurumlar', {
+        id: kurumId, ad: 'Gercek Kurum', tur: 'universite',
+        olusturma: new Date().toISOString()
+      });
+    }, kurumId);
+
+    const mahalPayload = {
+      tip: 'mahal',
+      mahal: { id: benzersizAd('qr-mahal2'), ad: '205', kat: '2. Kat', alanTipi: 'Laboratuvar' },
+      birim: { id: benzersizAd('qr-mahal-birim2'), ad: 'SGDB' },
+      kurum: { id: kurumId, ad: 'Gercek Kurum' }
+    };
+    await page.evaluate(async (p) => {
+      try { await window.kurumAgaciUpsertEt(p); } catch (e) { /* beklenen ret */ }
+    }, mahalPayload);
+
+    const kurumlar = await storeTumu(page, 'kurumlar');
+    expect(kurumlar.find((k) => k.id === kurumId).tur).toBe('universite');
+  });
+
   test('QR butonu tiklaninca kamera acilir (getUserMedia cagrilir)', async ({ page }) => {
     await sahteKameraKur(page);
     await page.goto('/index.html');

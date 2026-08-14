@@ -5217,6 +5217,23 @@ function _qrPayloadDogrula(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('QR verisi geçersiz (payload nesne değil).');
   }
+  // SUPV-45 madde 3: Desktop'ın mahal_qr_aktarim.py'si `tip: "mahal"` ile
+  // TAMAMEN FARKLI bir şekil gönderir (payload.mahal/birim/kurum alt
+  // nesneleri, payload.birimler DİZİSİ YOK). Bu ekranın TEK QR tüketicisi
+  // (kurumAgaciUpsertEt) bunu ayırt etmeden kabul ediyordu: payload.kurum
+  // alanı burada da dolu olduğundan doğrulamadan geçiyor, payload.birimler
+  // undefined olduğundan sessizce "0 birim aktarıldı" ile "başarı"
+  // raporluyordu -- ayrıca kurum.tur mahal payload'ında hiç yok, bu yüzden
+  // kurumAgaciUpsertEt onu `null`'a DÜŞÜRÜYORDU (var olan bir kurumun
+  // türünü sessizce siliyordu). Gerçek bir mahal-içe-aktarma akışı bu
+  // PWA'da HENÜZ YOK (index.html'deki tek QR butonu yalnız Kurum/Birim
+  // ağacını hedefler) -- bu yüzden burada dürüst bir ret ile durduruluyor,
+  // yanlış "başarı" mesajı ÜRETİLMİYOR.
+  if (payload.tip === 'mahal') {
+    throw new Error(
+      'Bu QR bir Mahal kaydı içeriyor. Bu ekran yalnız Kurum/Birim QR\'larını '
+      + 'içe aktarır -- Mahal aktarımı bu sürümde desteklenmiyor.');
+  }
   if (!payload.kurum || !gecerliMetin(payload.kurum.id, 200) || !gecerliMetin(payload.kurum.ad, 300)) {
     throw new Error('QR verisinde kurum bilgisi geçersiz (id/ad).');
   }
