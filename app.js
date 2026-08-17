@@ -39,13 +39,16 @@ const APP_VERSION = 'v0.11.2';
 const APP_BUILD = '4R-PKG-3K';
 const APP_CACHE = 'isg-saha-v31';
 const DB_NAME = 'isgSahaDB';
-const DB_VERSION = 5;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
+const DB_VERSION = 6;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
                         // kanonik değildi); v4: 'dofler' deposu + birimId/
                         // dofUuid index'leri (PWA Commit 3A, replay-v2
                         // temeli -- bkz. AI/knowledge veya commit mesajı);
                         // v5: 'dofKanitlari' deposu (PWA Commit 4P, DÖF
-                        // yerel kanıt medyası -- bkz. openDB upgrade bloğu)
+                        // yerel kanıt medyası -- bkz. openDB upgrade bloğu);
+                        // v6: 'mahaller'/'ekipmanlar' depoları (SUPV-65 --
+                        // Desktop'un sabit kimlik kısa kod sistemini
+                        // (SUPV-62/63/64) tüketir, bkz. kurumAgaciUpsertEt)
 
 // ─── STATE ───────────────────────────────────────────────────
 let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
@@ -396,6 +399,49 @@ function openDB() {
       }
       if (!dofKanitStore.indexNames.contains('dofUuid')) {
         dofKanitStore.createIndex('dofUuid', 'dofUuid', { unique: false });
+      }
+
+      // v6 (SUPV-65): 'mahaller'/'ekipmanlar' depoları -- Desktop'un
+      // kurum_qr_aktarim.py payload'ına eklediği (SUPV-65 Aşama A) mahal/
+      // ekipman ağacını yerel-offline barındırır. `kisaKod` index'i
+      // BİLEREK unique:false -- Desktop tarafında zaten UNIQUE index'li
+      // (32^5 gövde uzayı, çakışma astronomik derecede düşük), burada
+      // sıkı bir kısıt koyup senkron sırasında beklenmeyen bir hata
+      // fırlatma riskini almaya değmez (dbGuncelle/dbEkle'nin idempotent
+      // upsert deseni zaten `id` alanı üzerinden çalışır).
+      let mahalStore;
+      if (!db.objectStoreNames.contains('mahaller')) {
+        mahalStore = db.createObjectStore('mahaller', { keyPath: 'id' });
+      } else {
+        mahalStore = e.target.transaction.objectStore('mahaller');
+      }
+      if (!mahalStore.indexNames.contains('birimId')) {
+        mahalStore.createIndex('birimId', 'birimId', { unique: false });
+      }
+      if (!mahalStore.indexNames.contains('kisaKod')) {
+        mahalStore.createIndex('kisaKod', 'kisaKod', { unique: false });
+      }
+
+      let ekipmanStore;
+      if (!db.objectStoreNames.contains('ekipmanlar')) {
+        ekipmanStore = db.createObjectStore('ekipmanlar', { keyPath: 'id' });
+      } else {
+        ekipmanStore = e.target.transaction.objectStore('ekipmanlar');
+      }
+      if (!ekipmanStore.indexNames.contains('mahalId')) {
+        ekipmanStore.createIndex('mahalId', 'mahalId', { unique: false });
+      }
+      if (!ekipmanStore.indexNames.contains('kisaKod')) {
+        ekipmanStore.createIndex('kisaKod', 'kisaKod', { unique: false });
+      }
+
+      // 'askidaKayitlar' -- format GEÇERLİ ama henüz kisaKoduCoz() ile
+      // eşleşmeyen (kurum PWA'ya hiç senkron edilmemiş) kodlar (bkz.
+      // Aşama D). keyPath ayrı bir 'id' (uuid()) -- aynı kod birden
+      // fazla kez taranabilir/girilebilir, PRIMARY KEY olarak `kod`
+      // kullanmak ikinci taramayı sessizce EZERdi.
+      if (!db.objectStoreNames.contains('askidaKayitlar')) {
+        db.createObjectStore('askidaKayitlar', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -5216,6 +5262,137 @@ function _birimFormAdOnerisiSec(el) {
 }
 if (typeof window !== 'undefined') window._birimFormAdOnerisiSec = _birimFormAdOnerisiSec;
 
+// ─── SABİT KİMLİK KISA KOD (SUPV-65, 2026-08-17) ────────────────────────
+// Desktop'un veritabani.py::kisa_kod_uret/kisa_kod_gecerli_mi ile BİREBİR
+// AYNI alfabe/checksum formülü, JS'e port edildi. Format+checksum
+// doğrulaması TAMAMEN yerel/deterministik -- sunucuya SORULMAZ, offline-
+// first ilkesi bozulmaz. Desktop tarafı gibi kod BÜYÜK HARFE normalize
+// EDİLMEDEN doğrulanır -- normalize etme sorumluluğu çağırana (bkz.
+// kisaKoduCoz) aittir, tıpkı Desktop'un kisa_kod_gecerli_mi/kisa_kod_coz
+// katmanlaşmasında olduğu gibi.
+const KISA_KOD_ALFABE = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const KISA_KOD_GOVDE_UZUNLUGU = 5;
+
+function _kisaKodChecksum(govde) {
+  let toplam = 0;
+  for (const c of govde) toplam += KISA_KOD_ALFABE.indexOf(c);
+  return KISA_KOD_ALFABE[toplam % KISA_KOD_ALFABE.length];
+}
+
+/** Format+checksum doğrulaması -- DB'ye/IndexedDB'ye HİÇ gitmeden bariz
+ * yazım hatalarını (yanlış uzunluk, alfabe dışı karakter, bozuk checksum)
+ * eler. Kısa kod her zaman 7 karakter (1 önek + 5 gövde + 1 checksum),
+ * '|' KARAKTERİ İÇERMEZ -- bu yüzden mevcut "SIRA|TOPLAM|<base64>" QR
+ * ayrıştırmasıyla (bkz. _qrKareyiIsle) hiçbir zaman ÇAKIŞMAZ. */
+function kisaKodGecerliMi(kod) {
+  if (typeof kod !== 'string' || kod.length !== 1 + KISA_KOD_GOVDE_UZUNLUGU + 1) return false;
+  const onek = kod[0];
+  const govde = kod.slice(1, -1);
+  const check = kod[kod.length - 1];
+  if (onek !== 'M' && onek !== 'E') return false;
+  for (const c of govde) if (!KISA_KOD_ALFABE.includes(c)) return false;
+  return _kisaKodChecksum(govde) === check;
+}
+if (typeof window !== 'undefined') window.kisaKodGecerliMi = kisaKodGecerliMi;
+
+/** "M" -> 'mahal', "E" -> 'ekipman'. Geçersiz kod için null (kisaKodGecerliMi
+ * ile AYNI ret koşulu -- önce format doğrulanmadan önek anlamlandırılmaz). */
+function kisaKodOnekTuru(kod) {
+  if (!kisaKodGecerliMi(kod)) return null;
+  return kod[0] === 'M' ? 'mahal' : 'ekipman';
+}
+if (typeof window !== 'undefined') window.kisaKodOnekTuru = kisaKodOnekTuru;
+
+/** Yerel, TAMAMEN OFFLINE çözümleyici -- Desktop'un veritabani.py::
+ * kisa_kod_coz() ile AYNI sözleşme: bulamazsa hata FIRLATMAZ, `null`
+ * döner (çağıran "bu kod tanınmıyor" durumunu kendi ele alır, bkz.
+ * Aşama D "askıda kayıt" akışı). Girdi büyük harfe normalize edilir
+ * (Desktop'un kisa_kod_coz'unun kendi .strip().upper() adımıyla AYNI). */
+async function kisaKoduCoz(kod) {
+  const normalize = (kod || '').trim().toUpperCase();
+  if (!kisaKodGecerliMi(normalize)) return null;
+
+  if (normalize[0] === 'M') {
+    const eslesenler = await dbIndexTumu('mahaller', 'kisaKod', normalize);
+    if (!eslesenler.length) return null;
+    const mahal = eslesenler[0];
+    const birim = await dbGetir('birimler', mahal.birimId);
+    const kurum = birim ? await dbGetir('kurumlar', birim.kurumId) : null;
+    return {
+      tur: 'mahal',
+      id: mahal.id,
+      ad: mahal.ad,
+      kat: mahal.kat || null,
+      etiketler: mahal.etiketler || [],
+      birimId: birim ? birim.id : null,
+      birimAd: birim ? birim.ad : null,
+      kurumId: kurum ? kurum.id : null,
+      kurumAd: kurum ? kurum.ad : null,
+    };
+  }
+
+  if (normalize[0] === 'E') {
+    const eslesenler = await dbIndexTumu('ekipmanlar', 'kisaKod', normalize);
+    if (!eslesenler.length) return null;
+    const ekipman = eslesenler[0];
+    const mahal = await dbGetir('mahaller', ekipman.mahalId);
+    const birim = mahal ? await dbGetir('birimler', mahal.birimId) : null;
+    const kurum = birim ? await dbGetir('kurumlar', birim.kurumId) : null;
+    return {
+      tur: 'ekipman',
+      id: ekipman.id,
+      ad: ekipman.ad,
+      ekipmanTuru: ekipman.tur || null,
+      mahalId: mahal ? mahal.id : null,
+      mahalAd: mahal ? mahal.ad : null,
+      birimId: birim ? birim.id : null,
+      birimAd: birim ? birim.ad : null,
+      kurumId: kurum ? kurum.id : null,
+      kurumAd: kurum ? kurum.ad : null,
+    };
+  }
+
+  return null;
+}
+if (typeof window !== 'undefined') window.kisaKoduCoz = kisaKoduCoz;
+
+/** SUPV-65 Aşama D -- "askıda kayıt": format GEÇERLİ ama kisaKoduCoz()
+ * henüz eşleştiremediği (kurum bu cihaza hiç senkron edilmemiş) bir kod
+ * ham hâliyle + o anki serbest-metin ile saklanır. Akışı DURDURMAZ --
+ * çağıran kısa bir bilgi gösterip serbest-metinle devam eder. */
+async function askidaKaydiEkle(kod, serbestMetin) {
+  const kayit = {
+    id: uuid(),
+    kod,
+    serbestMetin: serbestMetin || null,
+    zaman: new Date().toISOString(),
+  };
+  await dbEkle('askidaKayitlar', kayit);
+  return kayit;
+}
+if (typeof window !== 'undefined') window.askidaKaydiEkle = askidaKaydiEkle;
+
+/** Bekleyen TÜM askıda kayıtları YENİ senkron edilen kısa kodlarla
+ * eşleşiyor mu diye dener -- her `kurumAgaciUpsertEt()` çağrısı SONUNDA
+ * otomatik (arka planda, kullanıcıya sormadan) çalışır. Eşleşen kayıt
+ * store'dan SİLİNİR (çözüldü); eşleşmeyenler bir sonraki senkrona kadar
+ * aynen kalır. Dönen sayı -- kaç kaydın çözüldüğü; tam bir "N kayıt
+ * eşleşti" bildirim UI'ı bu paketin KAPSAMI DIŞI (bkz. SUPV-65 kapanış
+ * raporu "bilinen sınırlama") -- ileride eklenirse bu sayı hazır. */
+async function askidaKayitlariCozmeyeCalis() {
+  const bekleyenler = await dbTumu('askidaKayitlar');
+  let cozulen = 0;
+  for (const kayit of bekleyenler) {
+    const baglam = await kisaKoduCoz(kayit.kod);
+    if (baglam) {
+      await dbSil('askidaKayitlar', kayit.id);
+      cozulen += 1;
+    }
+  }
+  return cozulen;
+}
+if (typeof window !== 'undefined') window.askidaKayitlariCozmeyeCalis = askidaKayitlariCozmeyeCalis;
+
 // ─── KURUM/BİRİM QR AKTARIMI (2026-08-02, Faz 2 Commit 5) ──────────────
 // Desktop'un ürettiği QR kare(ler)ini tarar, kurum/birim ağacını yerel
 // IndexedDB'ye upsert eder. Wire-format Desktop'un kurum_qr_aktarim.py'si
@@ -5307,6 +5484,43 @@ function _qrPayloadDogrula(payload) {
     throw new Error('QR verisinde kurum türü geçersiz.');
   }
 
+  // SUPV-65 -- mahal/ekipman şekli AYNI güven-sınırı disipliniyle
+  // doğrulanır (id/ad zorunlu metin, opsiyonel alanlar tip kontrolü).
+  // kisaKod BURADA `kisaKodGecerliMi()` ile DOĞRULANMAZ -- format hatası
+  // olsa bile mahal/ekipman kaydının KENDİSİ (ad/kat/tür) hâlâ değerli,
+  // yalnız o kayıt kısa-kod-eşleşmesinde hiç bulunamaz (sessizce, hata
+  // fırlatmadan) -- reddetmek yerine bu daha yıkıcı-olmayan bir seçim.
+  function ekipmanDogrula(ekipman) {
+    if (!ekipman || !gecerliMetin(ekipman.id, 200) || !gecerliMetin(ekipman.ad, 300)) {
+      throw new Error('QR verisinde ekipman bilgisi geçersiz (id/ad).');
+    }
+    if (ekipman.tur != null && typeof ekipman.tur !== 'string') {
+      throw new Error('QR verisinde ekipman türü geçersiz.');
+    }
+    if (ekipman.kisaKod != null && typeof ekipman.kisaKod !== 'string') {
+      throw new Error('QR verisinde ekipman kısa kodu geçersiz.');
+    }
+  }
+
+  function mahalDogrula(mahal) {
+    if (!mahal || !gecerliMetin(mahal.id, 200) || !gecerliMetin(mahal.ad, 300)) {
+      throw new Error('QR verisinde mahal bilgisi geçersiz (id/ad).');
+    }
+    if (mahal.kat != null && typeof mahal.kat !== 'string') {
+      throw new Error('QR verisinde mahal katı geçersiz.');
+    }
+    if (mahal.kisaKod != null && typeof mahal.kisaKod !== 'string') {
+      throw new Error('QR verisinde mahal kısa kodu geçersiz.');
+    }
+    if (mahal.etiketler !== undefined && !Array.isArray(mahal.etiketler)) {
+      throw new Error('QR verisinde mahal etiketleri geçersiz.');
+    }
+    if (mahal.ekipmanlar !== undefined && !Array.isArray(mahal.ekipmanlar)) {
+      throw new Error('QR verisinde mahal ekipmanları geçersiz.');
+    }
+    for (const ekipman of (mahal.ekipmanlar || [])) ekipmanDogrula(ekipman);
+  }
+
   function dugumuDogrula(dugum, derinlik) {
     if (derinlik > 20) throw new Error('QR verisinde birim ağacı çok derin.');
     if (!dugum || !gecerliMetin(dugum.id, 200) || !gecerliMetin(dugum.ad, 300)) {
@@ -5315,6 +5529,10 @@ function _qrPayloadDogrula(payload) {
     if (dugum.children !== undefined && !Array.isArray(dugum.children)) {
       throw new Error('QR verisinde birim alt-ağacı geçersiz.');
     }
+    if (dugum.mahaller !== undefined && !Array.isArray(dugum.mahaller)) {
+      throw new Error('QR verisinde birim mahalleri geçersiz.');
+    }
+    for (const mahal of (dugum.mahaller || [])) mahalDogrula(mahal);
     for (const cocuk of (dugum.children || [])) dugumuDogrula(cocuk, derinlik + 1);
   }
   if (payload.birimler !== undefined && !Array.isArray(payload.birimler)) {
@@ -5342,6 +5560,40 @@ async function kurumAgaciUpsertEt(payload) {
   };
   if (mevcutKurum) await dbGuncelle('kurumlar', kurum); else await dbEkle('kurumlar', kurum);
 
+  // SUPV-65 -- mahal/ekipman UPSERT'i birim/kurumla AYNI idempotent
+  // desen (dbGetir/dbEkle/dbGuncelle); ad/kat/tür/etiketler HER ZAMAN
+  // Desktop'tan gelen değerle güncellenir (birimin katlar/odalar/
+  // ozelAlanlar'ının AKSİNE, mahal/ekipman'ın sahada PWA'nın kendi
+  // doldurduğu bir alanı YOK -- "gerçek veri şablonun önüne geçer"
+  // ilkesi burada çakışmıyor, korunacak yerel bir alan yok).
+  async function _ekipmaniIsle(ekipman, mahalId) {
+    const mevcutEkipman = await dbGetir('ekipmanlar', ekipman.id);
+    const kayit = {
+      id: ekipman.id,
+      mahalId,
+      ad: ekipman.ad,
+      tur: ekipman.tur || null,
+      kisaKod: ekipman.kisaKod || null,
+      olusturma: (mevcutEkipman && mevcutEkipman.olusturma) || new Date().toISOString()
+    };
+    if (mevcutEkipman) await dbGuncelle('ekipmanlar', kayit); else await dbEkle('ekipmanlar', kayit);
+  }
+
+  async function _mahaliIsle(mahal, birimId) {
+    const mevcutMahal = await dbGetir('mahaller', mahal.id);
+    const kayit = {
+      id: mahal.id,
+      birimId,
+      ad: mahal.ad,
+      kat: mahal.kat || null,
+      kisaKod: mahal.kisaKod || null,
+      etiketler: mahal.etiketler || [],
+      olusturma: (mevcutMahal && mevcutMahal.olusturma) || new Date().toISOString()
+    };
+    if (mevcutMahal) await dbGuncelle('mahaller', kayit); else await dbEkle('mahaller', kayit);
+    for (const ekipman of (mahal.ekipmanlar || [])) await _ekipmaniIsle(ekipman, mahal.id);
+  }
+
   async function _dugumuIsle(dugum, parentBirimId) {
     const mevcutBirim = await dbGetir('birimler', dugum.id);
     const birim = {
@@ -5358,6 +5610,7 @@ async function kurumAgaciUpsertEt(payload) {
       olusturma: (mevcutBirim && mevcutBirim.olusturma) || new Date().toISOString()
     };
     if (mevcutBirim) await dbGuncelle('birimler', birim); else await dbEkle('birimler', birim);
+    for (const mahal of (dugum.mahaller || [])) await _mahaliIsle(mahal, dugum.id);
     for (const cocuk of (dugum.children || [])) await _dugumuIsle(cocuk, dugum.id);
   }
   for (const dugum of (payload.birimler || [])) await _dugumuIsle(dugum, null);
@@ -5365,7 +5618,21 @@ async function kurumAgaciUpsertEt(payload) {
   await kurumlariYukle();
   document.getElementById('setup-kurum').value = payload.kurum.id;
   await birimleriYukle();
-  return { kurumAdi: payload.kurum.ad, birimSayisi: _agacDugumSayisi(payload.birimler || []) };
+  // SUPV-65 Aşama D -- yeni senkron edilen kısa kodlarla bekleyen "askıda
+  // kayıt"ları otomatik çözmeyi dener (bkz. fonksiyon docstring'i).
+  // kurumAgaciUpsertEt'in KENDİ dönüş sözleşmesini BOZMAZ -- best-effort,
+  // hata fırlatırsa yutulur (senkron başarısı bu adıma bağlı DEĞİLDİR).
+  let askidaCozulen = 0;
+  try {
+    askidaCozulen = await askidaKayitlariCozmeyeCalis();
+  } catch (e) {
+    console.error('Askıda kayıt otomatik çözme başarısız:', e);
+  }
+  return {
+    kurumAdi: payload.kurum.ad,
+    birimSayisi: _agacDugumSayisi(payload.birimler || []),
+    askidaCozulen,
+  };
 }
 if (typeof window !== 'undefined') window.kurumAgaciUpsertEt = kurumAgaciUpsertEt;
 
@@ -5405,6 +5672,14 @@ function _qrTaramaDongusu() {
     const goruntu = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const kod = jsQR(goruntu.data, goruntu.width, goruntu.height);
     if (kod && kod.data) {
+      // SUPV-65 Aşama C -- kısa kod formatı (7 karakter, '|' İÇERMEZ)
+      // MEVCUT "SIRA|TOPLAM|<base64>" ayrıştırmasından ÖNCE denenir --
+      // hiçbir format çakışması yok, kısa kod zaten `_qrKareyiIsle`'ın
+      // ilk `split('|', 2).length < 2` kontrolünde sessizce elenirdi.
+      if (kisaKodGecerliMi(kod.data)) {
+        _kisaKodTaramaTamamlandi(kod.data);
+        return;
+      }
       const durum = _qrKareyiIsle(kod.data);
       if (durum) {
         document.getElementById('qr-durum').textContent =
@@ -5418,6 +5693,21 @@ function _qrTaramaDongusu() {
   }
   _qrKareId = requestAnimationFrame(_qrTaramaDongusu);
 }
+
+/** _qrTamamlandi() ile AYNI try/catch/yeniden-tara deseni -- kısa kod
+ * akışı (Aşama D/E/F) MEVCUT kurum/birim QR akışından TAMAMEN AYRI bir
+ * dal, ikisi ARTIK aynı taramada karışmaz. */
+async function _kisaKodTaramaTamamlandi(kod) {
+  try {
+    await kisaKodIsle(kod);
+    qrTaramayiKapat();
+  } catch (e) {
+    document.getElementById('qr-durum').textContent = `Hata: ${e.message}`;
+    _qrDurumSifirla();
+    _qrKareId = requestAnimationFrame(_qrTaramaDongusu);
+  }
+}
+if (typeof window !== 'undefined') window._kisaKodTaramaTamamlandi = _kisaKodTaramaTamamlandi;
 
 async function _qrTamamlandi() {
   try {
@@ -5443,6 +5733,118 @@ function qrTaramayiKapat() {
   _qrDurumSifirla();
 }
 if (typeof window !== 'undefined') window.qrTaramayiKapat = qrTaramayiKapat;
+
+// ─── SABİT KİMLİK KISA KOD -- ÇÖZÜMLEME + OTURUM YÖNLENDİRME ───────────
+// (SUPV-65 Aşama C/D/E/F, 2026-08-17)
+
+/** Sıfır-tıklama, kısa NET, birkaç saniye sonra kendiliğinden kaybolan
+ * bir bilgi mesajı -- mevcut UI'da genel bir "toast" bileşeni YOKTU,
+ * burada TAMAMEN self-contained (hiçbir mevcut ekran/markup'a dokunmaz)
+ * bir tane eklendi. showModal()/showFormModal() KULLANILMADI -- onlar
+ * kullanıcı onayı/etkileşimi BEKLER, bu bildirim tam tersi: akışı hiç
+ * DURDURMAMASI gerekiyor (bkz. Aşama D/E gerekçesi). */
+function _kisaKodBildirimGoster(metin, sureMs = 3000) {
+  if (typeof document === 'undefined') return;
+  const el = document.createElement('div');
+  el.textContent = metin;
+  el.style.cssText = 'position:fixed; left:50%; bottom:90px; transform:translateX(-50%); ' +
+    'background:#1a1a1a; color:#fff; padding:10px 16px; border-radius:8px; ' +
+    'font-size:0.85rem; max-width:88vw; text-align:center; z-index:99999; ' +
+    'box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), sureMs);
+}
+if (typeof window !== 'undefined') window._kisaKodBildirimGoster = _kisaKodBildirimGoster;
+
+/** SUPV-65 Aşama E/F -- çözülen kısa kod bağlamını (mahal VEYA ekipman)
+ * bir denetim oturumuna UYGULAR. Kullanıcıya HİÇBİR SEÇİM SORULMAZ --
+ * startInspection()'ın KENDİ mevcut bul-veya-oluştur/devam-et mantığı
+ * (kurum/birim/oda/tur eşleşmesi, dosya başında satır ~5981) YENİDEN
+ * KULLANILIR -- ikinci bir oturum yönetim mekanizması İCAT EDİLMEDİ.
+ *
+ * ALAN EŞLEMESİ (kesin, sessizce geçilmedi):
+ *   denetim.bina = birim.ad     -- mevcut startInspection() deseniyle AYNI
+ *   denetim.kat  = mahal.kat
+ *   denetim.oda  = mahal.ad                          (mahal QR'ı ise)
+ *              = `${mahal.ad} — ${ekipman.ad}`        (ekipman QR'ı ise --
+ *     AÇIK KARAR: yalnız ekipman.ad kullanmak HANGİ ODADA olduğu bilgisini
+ *     kaybederdi -- "oda" alanı fiziksel konumu temsil eder, mahal adı
+ *     ÖNCE gelir, ekipman adı ayırt edicilik için eklenir)
+ *   secilenAlanTipi = mahal.etiketler[0] || 'Genel'  -- mahalin kendi
+ *     etiketi yoksa startInspection()'ın ZORUNLU kıldığı alan tipini
+ *     dolduracak makul bir varsayılan; kullanıcı ekranda GÖRÜR/isterse
+ *     elle değiştirir, gizli bir varsayım değil. */
+async function kisaKodBaglamiUygula(baglam) {
+  const oncekiKurumId = currentSession ? currentSession.kurumId : null;
+
+  let mahal, ekipman = null;
+  if (baglam.tur === 'mahal') {
+    mahal = baglam;
+  } else {
+    ekipman = baglam;
+    mahal = await dbGetir('mahaller', baglam.mahalId);
+    if (!mahal) return;   // tutarsız/yarım senkron veri -- sessizce vazgeç, akış BOZULMAZ
+  }
+  const birim = await dbGetir('birimler', mahal.birimId);
+  if (!birim) return;
+
+  await kurumlariYukle();
+  const kurumSel = document.getElementById('setup-kurum');
+  if (kurumSel) kurumSel.value = baglam.kurumId;
+  await birimleriYukle();
+  const birimSel = document.getElementById('setup-birim');
+  if (birimSel) birimSel.value = mahal.birimId;
+
+  secilenKat = mahal.kat || 'Zemin';
+  secilenAlanTipi = (mahal.etiketler && mahal.etiketler[0]) || 'Genel';
+  const odaAdi = ekipman ? `${mahal.ad} — ${ekipman.ad}` : mahal.ad;
+
+  // startInspection()'ın kendi "yeni oda" dalı `ad`'i `${alanTipi} ${odaNo}`
+  // olarak KURAR (bkz. o fonksiyon, satır ~6011) -- bu paket için o ÖNEK
+  // İSTENMİYOR, denetim.oda TAM OLARAK yukarıdaki `odaAdi` olmalı (kesin
+  // karar, bkz. modül docstring'i). Bu yüzden odaKaydi'yi startInspection()'a
+  // yeniden kurdurmak YERİNE, doğru `ad` ile burada find-or-create edip
+  // `secilenMevcutOdaId` ile işaret ediyoruz -- startInspection()'ın "mevcut
+  // oda" dalı (id eşleşmesi, `ad`'ı YENİDEN KURMAZ) devreye girer.
+  if (!birim.odalar) birim.odalar = [];
+  let odaKaydi = birim.odalar.find((o) =>
+    o.kat === secilenKat && o.alanTipi === secilenAlanTipi && o.ad === odaAdi);
+  if (!odaKaydi) {
+    odaKaydi = { id: uuid(), kat: secilenKat, alanTipi: secilenAlanTipi, no: '', ad: odaAdi };
+    birim.odalar.push(odaKaydi);
+    await dbGuncelle('birimler', birim);
+  }
+  secilenMevcutOdaId = odaKaydi.id;
+  const odaNoAlani = document.getElementById('kat-alan-oda-no');
+  if (odaNoAlani) odaNoAlani.value = '';
+
+  await startInspection();
+
+  if (oncekiKurumId && oncekiKurumId !== baglam.kurumId) {
+    const yeniKurum = await dbGetir('kurumlar', baglam.kurumId);
+    _kisaKodBildirimGoster(`Kurum değişti: "${yeniKurum ? yeniKurum.ad : ''}"'e geçildi.`);
+  }
+}
+if (typeof window !== 'undefined') window.kisaKodBaglamiUygula = kisaKodBaglamiUygula;
+
+/** QR tarama VE elle giriş'in PAYLAŞTIĞI TEK çözümleme girişi. Kısa kod
+ * FORMATINA uymayan girdi için `false` döner -- çağıran mevcut davranışına
+ * (serbest metin / kurum-birim QR ayrıştırma) AYNEN devam eder, hiç
+ * dokunulmaz. Format geçerli girdi İÇİN (bulunsun/bulunmasın) `true`
+ * döner -- akışı bu fonksiyon üstlenir (bulunamazsa askıda kayıt, bkz.
+ * Aşama D). */
+async function kisaKodIsle(kod, serbestMetin) {
+  if (!kisaKodGecerliMi(kod)) return false;
+  const baglam = await kisaKoduCoz(kod);
+  if (!baglam) {
+    await askidaKaydiEkle(kod, serbestMetin || null);
+    _kisaKodBildirimGoster('Bu kod henüz tanınmıyor -- kurum senkron edilince otomatik eşleşecek.', 4000);
+    return true;
+  }
+  await kisaKodBaglamiUygula(baglam);
+  return true;
+}
+if (typeof window !== 'undefined') window.kisaKodIsle = kisaKodIsle;
 
 function _birimOdalari(birim, kat) {
   return (birim && Array.isArray(birim.odalar)) ? birim.odalar.filter(o => o.kat === kat) : [];
@@ -5702,6 +6104,17 @@ if (typeof window !== 'undefined') window._ozelAlanSil = _ozelAlanSil;
 function _katAlanOdaNoDegisti() {
   secilenMevcutOdaId = null;
   document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
+
+  // SUPV-65 Aşama C -- AYNI metin kutusuna kısa kodun ELLE yazılabilmesi.
+  // Yalnız TAM 7 karakterlik, geçerli format eşleşince tetiklenir --
+  // kullanıcı "203" gibi normal bir oda no'su yazarken (kısa kod
+  // alfabesiyle/uzunluğuyla asla çakışmaz) HİÇBİR ŞEY olmaz, mevcut
+  // serbest-metin akışı bozulmaz. Fire-and-forget (oninput sync) --
+  // _qrTamamlandi()'nin de izlediği AYNI desen.
+  const deger = document.getElementById('kat-alan-oda-no').value.trim().toUpperCase();
+  if (kisaKodGecerliMi(deger)) {
+    kisaKodIsle(deger, deger).catch((e) => console.error('kısa kod işleme hatası:', e));
+  }
 }
 if (typeof window !== 'undefined') window._katAlanOdaNoDegisti = _katAlanOdaNoDegisti;
 

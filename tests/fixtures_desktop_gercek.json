@@ -1,0 +1,86 @@
+{
+  "kisaKodlar": [
+    "M43FPCH",
+    "MR9UFDJ",
+    "MPTGNR9",
+    "MCE2LRZ",
+    "MJEJQUW",
+    "EGW7YQ5",
+    "E7GLXEG",
+    "ETSYUJT",
+    "E2LRK2U",
+    "E2YG9RC"
+  ],
+  "payload": {
+    "surum": 1,
+    "kurum": {
+      "id": "b21ba577-a947-4b9f-a638-acbb763b1b75",
+      "ad": "MKÜ Test Kurumu",
+      "tur": "universite",
+      "sgkNo": "K-SGK-1",
+      "adres": "Antakya"
+    },
+    "birimler": [
+      {
+        "id": "42f36da7-5e4a-4e8b-8da0-721b8df2eae8",
+        "ad": "Rektörlük",
+        "sgkNo": "B-SGK-1",
+        "adres": null,
+        "mahaller": [
+          {
+            "id": "13eed6aa-480b-458c-af8a-226075e122b6",
+            "ad": "105",
+            "kat": "1. Kat",
+            "kisaKod": "M84PHKX",
+            "etiketler": [
+              "Arşiv",
+              "Ofis"
+            ],
+            "ekipmanlar": [
+              {
+                "id": "ENFTG3B",
+                "ad": "Yangın Tüpü 1",
+                "tur": "yangın tüpü",
+                "kisaKod": "ENFTG3B"
+              }
+            ]
+          }
+        ],
+        "children": [
+          {
+            "id": "2de247b2-2cd7-416d-9f9d-4ec0a9795087",
+            "ad": "Strateji Geliştirme Daire Başkanlığı",
+            "sgkNo": null,
+            "adres": null,
+            "mahaller": [
+              {
+                "id": "249ded57-13a5-402e-a877-8ad8d5164ceb",
+                "ad": "205",
+                "kat": "2. Kat",
+                "kisaKod": "M6LAW7Z",
+                "etiketler": [],
+                "ekipmanlar": []
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "gercekDegerler": {
+    "mahal1Ad": "105",
+    "mahal1Kat": "1. Kat",
+    "mahal1Etiketler": [
+      "Arşiv",
+      "Ofis"
+    ],
+    "ekipman1Ad": "Yangın Tüpü 1",
+    "ekipman1Tur": "yangın tüpü",
+    "mahal2Ad": "205",
+    "mahal2Kat": "2. Kat",
+    "kurumAd": "MKÜ Test Kurumu",
+    "birim1Ad": "Rektörlük",
+    "birim2Ad": "Strateji Geliştirme Daire Başkanlığı"
+  }
+}

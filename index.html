@@ -659,9 +659,14 @@
             <div class="input-group" style="margin-top:15px;">
                 <label>Oda No (opsiyonel — örn: 203)</label>
                 <div style="display:flex; gap:8px;">
-                    <input type="text" id="kat-alan-oda-no" placeholder="Örn: 203" oninput="_katAlanOdaNoDegisti()">
+                    <input type="text" id="kat-alan-oda-no" placeholder="Örn: 203 veya kısa kod (M4F7K9Q)" oninput="_katAlanOdaNoDegisti()">
                     <button class="btn btn-outline" style="width:auto; padding:0 14px;" onclick="openOCR('etiket')">📷</button>
                     <button class="btn btn-outline" id="kat-alan-sesle-yaz-btn" style="width:auto; padding:0 14px;" onclick="_odaSesleYazTikla()">🎤</button>
+                    <!-- SUPV-65 Aşama C -- AYNI kurum/birim QR aktarım modalı (qrTaramayiAc/
+                         modal-qr-tarama) yeniden kullanılır, ikinci bir kamera-tarama UI'ı
+                         icat edilmedi; taranan kod formatı kısa-koda uyarsa _qrTaramaDongusu
+                         (app.js) otomatik ayırt eder. -->
+                    <button class="btn btn-outline" style="width:auto; padding:0 14px;" title="Mahal/Ekipman Etiketi Tara" onclick="qrTaramayiAc()">▦</button>
                 </div>
                 <div id="kat-alan-sesle-yaz-durum" style="font-size:0.8rem; color:#666; margin-top:4px;"></div>
                 <div id="kat-alan-oda-adaylar" class="chip-group" style="margin-top:8px"></div>
