@@ -260,6 +260,39 @@
 </head>
 <body>
 
+    <!-- CİHAZ EŞLEŞTİRME (Faz 5g, 2026-08-31) -- ilk açılışta gösterilir;
+         henüz eşleşmemiş bir telefonda başka HİÇBİR ekrana geçilmez.
+         Eşleşme SADECE bu ekranda (QR ya da elle kod) internete çıkar
+         (bkz. app.js::eslesmeKoduGonder) -- başarılı olunca localStorage
+         bayrağı yazılır ve sayfa yenilenir, bu ekran bir daha görünmez.
+         Varsayılan `active` DEĞİL -- app.js `load` listener'ı localStorage
+         bayrağına göre hangi ekranın açılacağına karar verir. -->
+    <div id="screen-cihaz-eslesme" class="screen">
+        <div class="card">
+            <h2>Cihaz Eşleştirme</h2>
+            <p>Bu telefonu kullanmaya başlamadan önce Desktop uygulamasında üretilen 8 haneli eşleştirme kodunu okutun ya da elle girin.</p>
+
+            <!-- `onclick` bilinçli olarak `qrTaramayiAc()`'in DOĞRUDAN kendisi
+                 DEĞİL -- mevcut testler (ör. tests/q-qr-aktarim.spec.js)
+                 `button[onclick="qrTaramayiAc()"]` seçicisiyle screen-setup'taki
+                 TEK butonu hedefliyor; aynı attribute metni burada da
+                 kullanılsaydı seçici artık 2 eşleşme bulur, mevcut testler
+                 kırılırdı. `_eslesmeQrTaramayiAc()` yalnız İNCE bir sarmalayıcı
+                 -- qrTaramayiAc()'in KENDİSİ (app.js) hiç değişmedi. -->
+            <button class="btn btn-primary" style="margin-bottom:20px;" onclick="_eslesmeQrTaramayiAc()">
+                <i class="fas fa-qrcode"></i> QR Tara
+            </button>
+
+            <div class="input-group">
+                <label>Eşleştirme Kodu (8 hane)</label>
+                <input type="text" id="eslesme-kod-girdi" maxlength="8" placeholder="Örn. A1B2C3D4" style="text-transform:uppercase;">
+            </div>
+            <button class="btn btn-outline" onclick="eslesmeManuelGonder()">Eşleştir</button>
+
+            <p id="eslesme-durum" style="margin-top:15px; min-height:1.2em;"></p>
+        </div>
+    </div>
+
     <!-- GİRİŞ / KURULUM EKRANI -->
     <div id="screen-setup" class="screen active">
         <!-- ANA EKRAN (4R-PKG-3F) -- yalnız #home rotasında görünür; DÖF

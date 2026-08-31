@@ -19,6 +19,35 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
+    // Faz 5g (2026-08-31): app.js artık ilk açılışta "Cihaz Eşleştirme"
+    // ekranını gösterir (localStorage'da ISG_ESLESME bayrağı yoksa) --
+    // bu SUITE'teki ~165 mevcut test `page.goto('/index.html')` sonrası
+    // doğrudan screen-setup varsayıyor (zaten eşleşmiş bir cihazı temsil
+    // ediyorlar). Her dosyayı tek tek localStorage seed etmek yerine
+    // context başlangıcında (herhangi bir sayfa kodu çalışmadan ÖNCE)
+    // varsayılan storageState ile bayrağı önceden yazıyoruz -- yalnız
+    // ESLEŞTIRME akışını test eden dosya (tests/ba-cihaz-eslesme.spec.js)
+    // kendi test.use({storageState:...}) ile bunu BOŞ localStorage'a
+    // override eder.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: 'http://127.0.0.1:4173',
+          localStorage: [
+            {
+              name: 'ISG_ESLESME',
+              value: JSON.stringify({
+                paired: true,
+                license_id: 'test-onceden-eslesmis',
+                kapsam: 'test',
+                cihaz_id: 'test-cihaz-varsayilan',
+              }),
+            },
+          ],
+        },
+      ],
+    },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

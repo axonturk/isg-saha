@@ -4780,6 +4780,19 @@ if (typeof window !== 'undefined') window._dofKanitMedyaSilTikla = _dofKanitMedy
 // ─── BAŞLANGIÇ ───────────────────────────────────────────────
 window.addEventListener('load', () => {
   console.log(`İSG Saha Asistanı ${APP_VERSION} başlatıldı`);
+  // Faz 5g -- cihaz henüz Desktop/Supabase lisansına eşleştirilmediyse
+  // (localStorage'da ISG_ESLESME bayrağı yoksa) YALNIZ eşleştirme ekranı
+  // gösterilir, geri kalan init (kurumlariYukle vb., hiçbiri ağa çıkmaz
+  // ama henüz eşleşmemiş bir cihazda anlamsız) hiç ÇALIŞTIRILMAZ. Başarılı
+  // eşleşme sonrası `location.reload()` bu listener'ı bayrak artık set
+  // edilmiş halde yeniden tetikler -- çift-init riski yok.
+  if (!_cihazEslestirilmisMi()) {
+    showScreen('cihaz-eslesme');
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState({ ekran: 'cihaz-eslesme' }, '');
+    }
+    return;
+  }
   showScreen('setup');
   kurumlariYukle();
   loadInspectionsList();
@@ -5642,6 +5655,181 @@ function _agacDugumSayisi(dugumler) {
   return sayi;
 }
 
+// ─── CİHAZ EŞLEŞTİRME (Faz 5g, 2026-08-31) ─────────────────────────────
+// İlk açılışta bu telefon Desktop/Supabase lisansına eşleştirilmeden
+// (bkz. aşağıdaki BAŞLANGIÇ bölümündeki load listener) hiçbir ağ çağrısı
+// yapılmaz -- offline-first ilkesi korunur. Eşleşme SADECE bu bölümdeki
+// fonksiyonlar üzerinden, tek seferlik, gerçekleşir.
+//
+// isg_denetim/isg_supabase.py::_rpc_gonder (header şekli) ve
+// ::pwa_aktive_et (yanıt sınıflandırması) ile AYNI ruhta -- Python
+// fonksiyonu buradan çağrılamaz, PWA ayrı bir runtime, bu yüzden KENDİ
+// JS'e port edilmiş kopyası.
+const SUPABASE_URL = 'https://YOUR-PROJECT-REF.supabase.co'; // TODO: gercek deger sonra girilecek (isg_denetim/config.py::SUPABASE_URL ile AYNI olmali)
+const SUPABASE_ANON_KEY = 'YOUR-ANON-OR-PUBLISHABLE-KEY'; // TODO: gercek deger sonra girilecek (isg_denetim/config.py::SUPABASE_KEY ile AYNI olmali)
+
+const ISG_ESLESME_KEY = 'ISG_ESLESME';
+const ISG_CIHAZ_ID_KEY = 'ISG_CIHAZ_ID';
+
+/** isg_denetim/isg_supabase.py::ISG_LISANS_MESAJLARI ile BİREBİR/VERBATİM
+ * kopyalanmıştır (yalnız pwa_aktive_et'in fiilen dönebileceği kısa hata
+ * kodları taşınır) -- metin kaynağı TEK, iki taraf tutarlı konuşsun diye
+ * kendi ifademiz İCAT EDİLMEDİ. */
+const ISG_LISANS_MESAJLARI_JS = {
+  lisans_suresi_doldu: 'Bu lisansın süresi doldu. Yenileme için yöneticinizle ya da destek ekibiyle iletişime geçebilirsiniz.',
+  lisans_gecersiz: 'Lisansınız saha (telefon) eşleştirmesi için geçerli görünmüyor. Lisans durumunuzu yöneticinizle kontrol edin ya da destek ekibiyle iletişime geçin.',
+  pwa_limiti_doldu: 'Bu lisansın saha (telefon) cihaz hakkı doldu. Ek saha koltuğu için kurumsal pakete geçebilir ya da mevcut bir telefonu admin panelinden kaldırarak yerini açabilirsiniz.',
+  kod_bulunamadi: 'Girilen kod bulunamadı. Kodu doğru girdiğinizden emin olun; gerekirse masaüstünden yeni bir kod üretip tekrar okutun.',
+  kod_kullanilmis: 'Bu kod daha önce kullanılmış. Masaüstünden yeni bir kod üreterek tekrar deneyin.',
+  kod_suresi_doldu: 'Kodun 10 dakikalık geçerlilik süresi doldu. Masaüstünden yeni bir kod üretip hemen ardından tekrar okutun.',
+  _bilinmeyen: 'Lisans doğrulanamadı. Lütfen tekrar deneyin; sorun sürerse destek ekibiyle iletişime geçin.',
+};
+if (typeof window !== 'undefined') window.ISG_LISANS_MESAJLARI_JS = ISG_LISANS_MESAJLARI_JS;
+
+const _ESLESME_AG_HATASI_MESAJI = 'İnternet bağlantısı kurulamadı ya da eşleştirme yapılamadı. Lütfen bağlantınızı kontrol edip tekrar deneyin.';
+
+/** Eşleştirme kodu 8 haneli hex (Desktop'un isg_pwa_kod_uret() RPC'sinin
+ * `upper(substr(replace(gen_random_uuid()::text,'-',''),1,8))` üretimiyle
+ * AYNI alfabe) -- kisaKodGecerliMi (7 karakter, M/E önekli) ile uzunluk
+ * farkından dolayı ASLA çakışmaz. Girdi kisaKoduCoz'daki normalize
+ * deseniyle AYNI şekilde (.trim().toUpperCase()) önce normalize edilmeli;
+ * bu fonksiyon zaten-normalize edilmiş girdi bekler. */
+function eslesmeKoduGecerliMi(kod) {
+  return typeof kod === 'string' && /^[0-9A-F]{8}$/.test(kod);
+}
+if (typeof window !== 'undefined') window.eslesmeKoduGecerliMi = eslesmeKoduGecerliMi;
+
+/** Bu cihaz için kalıcı, benzersiz bir kimlik -- BilDesk Saha'nın
+ * "telefonda üretilen rastgele kimlik" ilkesiyle AYNI: yalnız İLK
+ * eşleştirme denemesinde üretilir, ağ isteğinden ÖNCE hemen localStorage'a
+ * yazılır; deneme başarısız olup tekrarlansa bile ASLA yeniden üretilmez. */
+function _cihazIdAl() {
+  let id = localStorage.getItem(ISG_CIHAZ_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(ISG_CIHAZ_ID_KEY, id);
+  }
+  return id;
+}
+if (typeof window !== 'undefined') window._cihazIdAl = _cihazIdAl;
+
+function _eslesmeCihazAdi() {
+  try {
+    return (navigator.userAgent || 'Telefon').slice(0, 60);
+  } catch (e) {
+    return 'Telefon';
+  }
+}
+
+/** isg_supabase.py::pwa_aktive_et ile AYNI ruhta RPC çağrısı + yanıt
+ * sınıflandırması: ağ hatası/non-200 + gövdedeki `message` içinde bilinen
+ * bir hata kodu varsa -> o koda karşılık gelen Türkçe metin; diğer ağ
+ * hataları -> genel mesaj; başarı (200, obje ya da tek elemanlı liste,
+ * license_id/kapsam alanları) -> localStorage'a ISG_ESLESME bayrağı YAZILIR.
+ * Fırlatmaz -- sonucu {basarili, mesaj?} olarak DÖNER, çağıran ekrana basar. */
+async function eslesmeKoduGonder(kod, cihazAdi) {
+  const cihazId = _cihazIdAl();
+  let yanit;
+  try {
+    yanit = await fetch(`${SUPABASE_URL}/rest/v1/rpc/isg_pwa_aktive_et`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_kod: kod, p_cihaz_id: cihazId, p_cihaz_adi: cihazAdi || null }),
+    });
+  } catch (e) {
+    return { basarili: false, mesaj: _ESLESME_AG_HATASI_MESAJI };
+  }
+
+  let govde = null;
+  try {
+    govde = await yanit.json();
+  } catch (e) {
+    govde = null;
+  }
+
+  if (!yanit.ok) {
+    const detayMesaj = (govde && typeof govde.message === 'string') ? govde.message : '';
+    for (const hataKodu of Object.keys(ISG_LISANS_MESAJLARI_JS)) {
+      if (hataKodu !== '_bilinmeyen' && detayMesaj.includes(hataKodu)) {
+        return { basarili: false, hata: hataKodu, mesaj: ISG_LISANS_MESAJLARI_JS[hataKodu] };
+      }
+    }
+    return { basarili: false, mesaj: _ESLESME_AG_HATASI_MESAJI };
+  }
+
+  const satir = Array.isArray(govde) ? govde[0] : govde;
+  if (!satir || typeof satir !== 'object') {
+    return { basarili: false, mesaj: ISG_LISANS_MESAJLARI_JS._bilinmeyen };
+  }
+
+  localStorage.setItem(ISG_ESLESME_KEY, JSON.stringify({
+    paired: true,
+    license_id: satir.license_id,
+    kapsam: satir.kapsam,
+    cihaz_id: cihazId,
+  }));
+  return { basarili: true };
+}
+if (typeof window !== 'undefined') window.eslesmeKoduGonder = eslesmeKoduGonder;
+
+/** QR tarama VE manuel form girişinin PAYLAŞTIĞI TEK gönderim girişi --
+ * format hatasında/ağ hatasında/sunucu reddinde FIRLATIR (çağıran mesajı
+ * ekrana basar), başarıda sayfayı YENİLER (load listener bayrağı görüp
+ * normal init'i çalıştırır, çift-init riski yok). */
+async function _eslesmeIsle(kod, cihazAdi) {
+  const normalize = (kod || '').trim().toUpperCase();
+  if (!eslesmeKoduGecerliMi(normalize)) {
+    throw new Error('Kod 8 haneli olmalı (rakam + A-F arası harf).');
+  }
+  const sonuc = await eslesmeKoduGonder(normalize, cihazAdi);
+  if (!sonuc.basarili) {
+    throw new Error(sonuc.mesaj);
+  }
+  location.reload();
+}
+
+/** Manuel form -- "Eşleştir" butonuna basınca çağrılır (screen-cihaz-eslesme). */
+async function eslesmeManuelGonder() {
+  const girdi = document.getElementById('eslesme-kod-girdi');
+  const kod = girdi ? girdi.value : '';
+  const durumEl = document.getElementById('eslesme-durum');
+  if (durumEl) durumEl.textContent = 'Eşleştiriliyor...';
+  try {
+    await _eslesmeIsle(kod, _eslesmeCihazAdi());
+  } catch (e) {
+    if (durumEl) durumEl.textContent = e.message;
+  }
+}
+if (typeof window !== 'undefined') window.eslesmeManuelGonder = eslesmeManuelGonder;
+
+/** localStorage'daki ISG_ESLESME bayrağını okur -- bozuk/eksik veri
+ * (JSON.parse hatası dahil) sessizce "eşleşmemiş" sayılır, hiçbir zaman
+ * fırlatmaz (load listener'ın kritik yolu, hata burada akışı KESMEMELİ). */
+function _cihazEslestirilmisMi() {
+  try {
+    const ham = localStorage.getItem(ISG_ESLESME_KEY);
+    if (!ham) return false;
+    const veri = JSON.parse(ham);
+    return !!(veri && veri.paired === true);
+  } catch (e) {
+    return false;
+  }
+}
+if (typeof window !== 'undefined') window._cihazEslestirilmisMi = _cihazEslestirilmisMi;
+
+/** screen-cihaz-eslesme'nin "QR Tara" butonu bunu çağırır (index.html'de
+ * neden `qrTaramayiAc()` DEĞİL de bu sarmalayıcı kullanıldığı için o
+ * dosyadaki yorum). `qrTaramayiAc()`'in KENDİSİ değişmedi -- AYNEN
+ * yeniden kullanılır, yalnız DOM'daki `onclick` metni tekilleştirilir. */
+function _eslesmeQrTaramayiAc() {
+  qrTaramayiAc();
+}
+if (typeof window !== 'undefined') window._eslesmeQrTaramayiAc = _eslesmeQrTaramayiAc;
+
 async function qrTaramayiAc() {
   _qrDurumSifirla();
   document.getElementById('qr-durum').textContent = "Kamerayı Desktop'taki QR koda doğrultun...";
@@ -5672,6 +5860,14 @@ function _qrTaramaDongusu() {
     const goruntu = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const kod = jsQR(goruntu.data, goruntu.width, goruntu.height);
     if (kod && kod.data) {
+      // Faz 5g -- cihaz eşleştirme kodu (8 haneli hex) MEVCUT kısa kod
+      // (7 karakter, M/E önekli) ve "SIRA|TOPLAM|<base64>" ayrıştırmasından
+      // ÖNCE denenir; uzunlukları farklı olduğundan hiçbir format
+      // çakışması yok -- her üç dal birbirini ASLA yanlış yorumlamaz.
+      if (eslesmeKoduGecerliMi(kod.data)) {
+        _eslesmeKoduTaramaTamamlandi(kod.data);
+        return;
+      }
       // SUPV-65 Aşama C -- kısa kod formatı (7 karakter, '|' İÇERMEZ)
       // MEVCUT "SIRA|TOPLAM|<base64>" ayrıştırmasından ÖNCE denenir --
       // hiçbir format çakışması yok, kısa kod zaten `_qrKareyiIsle`'ın
@@ -5708,6 +5904,24 @@ async function _kisaKodTaramaTamamlandi(kod) {
   }
 }
 if (typeof window !== 'undefined') window._kisaKodTaramaTamamlandi = _kisaKodTaramaTamamlandi;
+
+/** `_kisaKodTaramaTamamlandi` ile AYNI try/catch/yeniden-tara deseni --
+ * Faz 5g cihaz eşleştirme akışı MEVCUT kurum/birim QR ve kısa kod
+ * akışlarından TAMAMEN AYRI bir dal, hiçbiriyle karışmaz. Başarıda
+ * `_eslesmeIsle` zaten `location.reload()` çağırır -- modalı burada da
+ * kapatmak (kamerayı durdurmak) sayfa gerçekten yenilenene kadar geçen
+ * kısa süre için zararsız bir ek güvenlik. */
+async function _eslesmeKoduTaramaTamamlandi(kod) {
+  try {
+    await _eslesmeIsle(kod, _eslesmeCihazAdi());
+    qrTaramayiKapat();
+  } catch (e) {
+    document.getElementById('qr-durum').textContent = `Hata: ${e.message}`;
+    _qrDurumSifirla();
+    _qrKareId = requestAnimationFrame(_qrTaramaDongusu);
+  }
+}
+if (typeof window !== 'undefined') window._eslesmeKoduTaramaTamamlandi = _eslesmeKoduTaramaTamamlandi;
 
 async function _qrTamamlandi() {
   try {
