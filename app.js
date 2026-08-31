@@ -5665,8 +5665,13 @@ function _agacDugumSayisi(dugumler) {
 // ::pwa_aktive_et (yanıt sınıflandırması) ile AYNI ruhta -- Python
 // fonksiyonu buradan çağrılamaz, PWA ayrı bir runtime, bu yüzden KENDİ
 // JS'e port edilmiş kopyası.
-const SUPABASE_URL = 'https://YOUR-PROJECT-REF.supabase.co'; // TODO: gercek deger sonra girilecek (isg_denetim/config.py::SUPABASE_URL ile AYNI olmali)
-const SUPABASE_ANON_KEY = 'YOUR-ANON-OR-PUBLISHABLE-KEY'; // TODO: gercek deger sonra girilecek (isg_denetim/config.py::SUPABASE_KEY ile AYNI olmali)
+// 2026-08-31: isg_denetim/config.py::SUPABASE_URL/SUPABASE_KEY ile AYNI
+// deger (Faz 5e'de kullanici tarafindan Supabase panelinden girildi) --
+// Publishable key gizli degil (Supabase'in kendi tanimiyla istemci
+// kodunda guvenle kullanilabilir), RLS + SECURITY DEFINER RPC'ler
+// (supabase_lisans_sistemi.sql) gercek erisim kontrolunu sagliyor.
+const SUPABASE_URL = 'https://incdakmztzticyjqmsbr.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_SoaFuHy595Dc0hHagq5hGg_68wz0bO6';
 
 const ISG_ESLESME_KEY = 'ISG_ESLESME';
 const ISG_CIHAZ_ID_KEY = 'ISG_CIHAZ_ID';
