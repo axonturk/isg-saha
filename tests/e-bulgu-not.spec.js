@@ -1,6 +1,10 @@
 // PWA Commit 2 / Bölüm E -- yazılı bulgu kaydı karakterizasyonu.
 // Gerçek alanlar app.js:1179'daki `const bulgu = {...}` satırından çıkarıldı:
 // id, denetimId, metin, fotolar, sesler, hayatiRisk, zaman.
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const AdmZip = require('adm-zip');
 const { test, expect } = require('@playwright/test');
 const { benzersizAd, gercekKurumEkle, gercekBirimEkle, storeTumu } = require('./helpers');
 
@@ -192,5 +196,77 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
 
     const tamamlamalar = await storeTumu(page, 'kritikKontrolTamamlama');
     expect(tamamlamalar.length).toBe(1);
+  });
+
+  test('ZIP export -- kritikKontrol[] gercekten yaziliyor, sorun_var bulgusu tespitler[]e KARISMAZ (PWA plani madde 9)', async ({ page }) => {
+    await sahteKameraKur(page);
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+
+    const satirlar = page.locator('#kritik-kontrol-liste .kritik-kontrol-satir');
+    // İlk madde -- Sorun Var (foto ile).
+    await satirlar.first().locator('.kk-var').click();
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
+    });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#findings-list .finding-item')).toHaveCount(1);
+    // İkinci madde -- Sorun Yok.
+    await satirlar.nth(1).locator('.kk-yok').click();
+
+    // Setup ekranına dön (yedekModalAc oradan erişilir -- _odaSecimineDon
+    // ile AYNI navigasyon, bkz. ab-location-chip-room-complete.spec.js --
+    // o dosya hasTouch:true ile page.tap() kullanıyor, bu dosyada hasTouch
+    // YOK, bu yüzden click() kullanılıyor).
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    for (let i = 0; i < 3; i++) {
+      if (await page.locator('#screen-setup').evaluate((el) => el.classList.contains('active'))) break;
+      await page.click('button[onclick="katAlanGeri()"]');
+      await page.waitForTimeout(300);
+    }
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+
+    await page.click('button[onclick="yedekModalAc()"]');
+    await expect(page.locator('#modal-form')).toBeVisible();
+    const kutular = page.locator('.yedek-birim-cb');
+    await kutular.first().waitFor({ state: 'attached' });
+    const adet = await kutular.count();
+    for (let i = 0; i < adet; i++) await kutular.nth(i).check();
+    const [indirme] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('#form-action-btn'),
+    ]);
+    const zipYolu = path.join(os.tmpdir(), `pwa-test-e-kk-zip-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+    await indirme.saveAs(zipYolu);
+    try {
+      const zip = new AdmZip(zipYolu);
+      const jsonGirdi = zip.getEntries().find((e) => e.entryName === 'denetimler.json');
+      expect(jsonGirdi).toBeTruthy();
+      const paketler = JSON.parse(jsonGirdi.getData().toString('utf-8'));
+      const paket = paketler[0];
+
+      expect(paket.kritikKontrol).toBeTruthy();
+      expect(paket.kritikKontrol.length).toBe(2);
+      const sorunVarGirdi = paket.kritikKontrol.find((k) => k.durum === 'sorun_var');
+      const sorunYokGirdi = paket.kritikKontrol.find((k) => k.durum === 'sorun_yok');
+      expect(sorunVarGirdi).toBeTruthy();
+      expect(sorunYokGirdi).toBeTruthy();
+      expect(sorunVarGirdi.kaynakKod).toBe('csgb_ofisler');
+      expect(sorunVarGirdi.odaId).toBeTruthy();
+      expect(sorunVarGirdi.fotolar.length).toBe(1);
+      expect(typeof sorunVarGirdi.soru).toBe('string');
+
+      // Fotoğraf dosyası ZIP'te GERÇEKTEN var mı.
+      const fotoGirdi = zip.getEntries().find((e) => e.entryName === `fotolar/${sorunVarGirdi.fotolar[0]}`);
+      expect(fotoGirdi).toBeTruthy();
+
+      // kritikKontrol kaynaklı bulgu tespitler[]e KARIŞMAMALI (aksi halde
+      // desktop zip_import.py AYNI gözlem için İKİ bulgu oluştururdu).
+      expect(paket.tespitler.length).toBe(0);
+    } finally {
+      fs.rmSync(zipYolu, { force: true });
+    }
   });
 });
