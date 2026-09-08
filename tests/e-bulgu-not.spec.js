@@ -270,6 +270,32 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     expect(paket.tamamlama[0].zaman).toBe(tamamlamalar[0].zaman);
   });
 
+  test('B11 -- ayni birimde/gunde ikinci odaya gecince AYNI ziyaretId kullanilir', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const denetimlerIlk = await storeTumu(page, 'denetimler');
+    expect(denetimlerIlk.length).toBe(1);
+    const ilkZiyaretId = denetimlerIlk[0].ziyaretId;
+    expect(ilkZiyaretId).toBeTruthy();
+    expect(ilkZiyaretId).toBe(`${denetimlerIlk[0].birimId}|${denetimlerIlk[0].baslangic.slice(0, 10)}`);
+
+    // Ayni birimde IKINCI bir odaya gec (farkli alan tipi) -- gercek
+    // sahada ayni fiziksel ziyarette birden fazla oda gezme senaryosu.
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    await page.locator('#kat-alan-hizli-chips .chip', { hasText: 'Toplantı salonu' }).click();
+    await page.locator('#kat-alan-oda-no').fill('102');
+    await page.click('button[onclick="startInspection()"]');
+    await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+
+    const denetimlerSonra = await storeTumu(page, 'denetimler');
+    expect(denetimlerSonra.length).toBe(2);
+    const ikinciDenetim = denetimlerSonra.find((d) => d.id !== denetimlerIlk[0].id);
+    expect(ikinciDenetim.ziyaretId).toBe(ilkZiyaretId);
+
+    const { paket } = await _zipPaketiniAl(page);
+    expect(paket.denetim.ziyaretId).toBe(ilkZiyaretId);
+  });
+
   test('ZIP export -- kritikKontrol[] gercekten yaziliyor, sorun_var bulgusu tespitler[]e KARISMAZ (PWA plani madde 9)', async ({ page }) => {
     await sahteKameraKur(page);
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');

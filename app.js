@@ -6455,6 +6455,7 @@ async function startInspection() {
     denetim.turBirimIdleri = turBirimIdleri;
     await dbGuncelle('denetimler', denetim);
   } else {
+    const baslangic = new Date().toISOString();
     denetim = {
       id: uuid(),
       kurumId,
@@ -6468,7 +6469,17 @@ async function startInspection() {
       tur: secilenTur,
       sorumlu: resp,
       turBirimIdleri,
-      baslangic: new Date().toISOString(),
+      // 2026-09-08 dis inceleme B11 duzeltmesi -- ayni fiziksel ziyarette
+      // gezilen N oda (bu PWA modelinde N ayri denetim) Desktop'ta
+      // "tesis geneli" sorularin HER odada TEKRAR sorulmasina yol
+      // aciyordu (dedup denetim_id'ye, yani TEK odaya, scope'luydu).
+      // Deterministik bir anahtar (rastgele uuid DEGIL -- ayni birime,
+      // ayni takvim gununde donulen HER "yeni oda" akisi dogal olarak
+      // AYNI degeri uretir, yeni bir "ziyaret baslat" ekrani/state'i
+      // ICAT EDILMEDI) -- Desktop bunu paylasan denetimleri tek bir
+      // ziyaret grubu sayar (bkz. veritabani.denetim_ziyaret_grubu).
+      ziyaretId: `${birimId}|${baslangic.slice(0, 10)}`,
+      baslangic,
       guncelleme: new Date().toISOString()
     };
     await dbEkle('denetimler', denetim);
@@ -7757,6 +7768,13 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       // etiketi hep bos kaliyordu (kritik kontrol madde uretimi bu
       // etiketi okuyor, bkz. kritik_kontrol.mahal_icin_kritik_maddeler).
       alanTipi: denetim.alanTipi || null,
+      // 2026-09-08 dis inceleme B11 duzeltmesi -- ayni fiziksel ziyarette
+      // gezilen odalari Desktop'ta tek bir "tesis geneli" dedup grubuna
+      // baglamak icin (bkz. startInspection(), denetim.ziyaretId
+      // olusturulma yeri). Eski (bu alan hic olmayan) denetimlerde
+      // undefined -- Desktop tarafi bunu null/NULL olarak GORUR, eski
+      // (denetim-basina) davranisa GERI DUSER.
+      ziyaretId: denetim.ziyaretId || null,
       turBirimleri
     },
     tespitler,
