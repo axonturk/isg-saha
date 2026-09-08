@@ -6728,6 +6728,20 @@ async function _kritikKontrolKaynaklariBul() {
     .filter(x => x.kaynak && x.kaynak.kritik_maddeler && x.kaynak.kritik_maddeler.length);
 }
 
+// 2026-09-08 dis inceleme B11 duzeltmesi (canli-UX tamamlama) -- Desktop
+// tarafinin denetim_ziyaret_grubu() ILE AYNI ilke: currentSession.ziyaretId
+// paylasan TUM denetimlerin id'lerini doner (kendisi dahil). ziyaretId
+// YOKSA (eski/PWA-oncesi veri) yalniz [currentSession.id] doner -- eski
+// (tek-oda-kapsamli) davranis AYNEN korunur.
+async function _ziyaretDenetimGrubu() {
+  if (!currentSession) return [];
+  if (!currentSession.ziyaretId) return [currentSession.id];
+  const tumDenetimler = await dbTumu('denetimler');
+  return tumDenetimler
+    .filter(d => d.ziyaretId === currentSession.ziyaretId)
+    .map(d => d.id);
+}
+
 async function _kritikKontrolMaddeleriGetir() {
   const kaynaklar = await _kritikKontrolKaynaklariBul();
   if (!kaynaklar.length) return [];
@@ -6737,12 +6751,15 @@ async function _kritikKontrolMaddeleriGetir() {
   // Desktop'un mahal_yanitlari/denetim_capinda_cevaplanmis AYRIMIYLA AYNI
   // ilke (2026-09-08 P1 düzeltmesi, bkz. kritik_kontrol.py) -- A odasındaki
   // cevap B odasında GÖRÜNMEMELİ, yalnız tesis_geneli maddelerin "bu
-  // denetimde herhangi bir odada zaten soruldu mu" kontrolü denetim
-  // çapında bakar. Anahtar artık `kaynakKod|maddeSira` (COKLU kaynak
-  // olduğu için tek başına maddeSira yetmez, farklı kaynaklarda aynı
-  // sıra numarası tekrar edebilir).
-  const denetimYanitlari = await dbIndexTumu(
-    'kritikKontrolYanitlari', 'denetimId', currentSession.id);
+  // ZİYARETTE (aynı fiziksel ziyarette gezilen TÜM odalarda -- 2026-09-08
+  // B11 canlı-UX tamamlaması, bkz. _ziyaretDenetimGrubu) herhangi bir
+  // odada zaten soruldu mu" kontrolü ziyaret çapında bakar. Anahtar artık
+  // `kaynakKod|maddeSira` (COKLU kaynak olduğu için tek başına maddeSira
+  // yetmez, farklı kaynaklarda aynı sıra numarası tekrar edebilir).
+  const ziyaretDenetimIdleri = await _ziyaretDenetimGrubu();
+  const denetimYanitlari = (await Promise.all(
+    ziyaretDenetimIdleri.map(did => dbIndexTumu('kritikKontrolYanitlari', 'denetimId', did))
+  )).flat();
   const odaYanitHaritasi = new Map();
   const denetimCapindaCevaplanmis = new Set();
   for (const y of denetimYanitlari) {

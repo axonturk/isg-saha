@@ -296,6 +296,38 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     expect(paket.denetim.ziyaretId).toBe(ilkZiyaretId);
   });
 
+  test('B11 -- canli ekran: ayni ziyarette farkli odada tesis geneli soru tekrar CIKMAZ', async ({ page }) => {
+    // "Kaçak akım rölesi ana elektrik hattına bağlanmış mı?" -- csgb_ofisler
+    // kaynağının tesis_geneli:true tek maddesi (bkz. kritik-kontrol-
+    // kutuphanesi.js). Ayni chip ('Ofis / idari oda') IKI FARKLI oda
+    // numarasiyla kullanilarak, ikisi de AYNI kaynaga (csgb_ofisler)
+    // cozulur -- yalniz oda NUMARASI farkli, boylece ziyaret-kapsamli
+    // dedup'in GERCEKTEN devrede oldugu (kaynak farkliligindan degil)
+    // izole ediliyor.
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const tesisGeneliSatiri = page.locator(
+      '.kritik-kontrol-satir', { hasText: 'Kaçak akım rölesi' });
+    await expect(tesisGeneliSatiri).toBeVisible();
+    await tesisGeneliSatiri.locator('.kk-yok').click();
+    await expect(page.locator('#kritik-kontrol-liste')).not.toContainText('Kaçak akım rölesi');
+
+    // Ayni birimde IKINCI bir odaya (farkli oda no, AYNI alan tipi) gec --
+    // gercek sahada ayni fiziksel ziyarette birden fazla oda gezme
+    // senaryosu.
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    await page.locator('#kat-alan-hizli-chips .chip', { hasText: 'Ofis / idari oda' }).click();
+    await page.locator('#kat-alan-oda-no').fill('205');
+    await page.click('button[onclick="startInspection()"]');
+    await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+
+    // Ikinci (farkli) odada: kritik kontrol basligi hala gorunur (o odaya
+    // ozel/evrensel baska maddeler var), AMA tesis-geneli soru bir daha
+    // ADAY OLARAK CIKMAMALI.
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    await expect(page.locator('#kritik-kontrol-liste')).not.toContainText('Kaçak akım rölesi');
+  });
+
   test('ZIP export -- kritikKontrol[] gercekten yaziliyor, sorun_var bulgusu tespitler[]e KARISMAZ (PWA plani madde 9)', async ({ page }) => {
     await sahteKameraKur(page);
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
