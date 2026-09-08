@@ -1,6 +1,14 @@
-const CACHE = 'isg-saha-v31';
+// v32 (2026-09-08 dis inceleme B08 duzeltmesi): checklist-kutuphanesi.js/
+// kritik-kontrol-kutuphanesi.js/vendor/jsqr.min.js index.html'den <script
+// src> ile yukleniyordu ama DOSYALAR'da YOKTU -- cevrimdisi ilk/yeniden
+// acilista bu dosyalar `undefined` kaliyor, Hizli Kritik Kontrol ve QR
+// tarama tamamen devre disi kaliyordu. Surum artirimi ZORUNLU: mevcut
+// kurulumlarin yeni service worker'i alip onbellegi yenilemesi icin.
+const CACHE = 'isg-saha-v32';
 const RUNTIME = 'isg-saha-runtime-v1';
-const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png',
+  './icon-512.png', './checklist-kutuphanesi.js', './kritik-kontrol-kutuphanesi.js',
+  './vendor/jsqr.min.js'];
 // OCR bağımlılıkları (tesseract.js) + ikon fontu ilk kullanımda buradan iner, sonra offline çalışır
 const RUNTIME_HOSTLAR = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com', 'unpkg.com', 'cdnjs.cloudflare.com'];
 

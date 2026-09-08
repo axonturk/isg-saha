@@ -5,9 +5,14 @@ const path = require('node:path');
 const swMetni = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
 
 test.describe('Z. Service Worker cache upgrade', () => {
-  test('app-shell cache surumu v31 olarak yenilenmistir', () => {
-    expect(swMetni).toContain("const CACHE = 'isg-saha-v31';");
-    expect(swMetni).not.toContain("const CACHE = 'isg-saha-v30';");
+  test('app-shell cache surumu v32 olarak yenilenmistir', () => {
+    expect(swMetni).toContain("const CACHE = 'isg-saha-v32';");
+    expect(swMetni).not.toContain("const CACHE = 'isg-saha-v31';");
+  });
+
+  test('kritik kontrol kutuphaneleri artik DOSYALAR onbellek listesinde (2026-09-08 B08 duzeltmesi)', () => {
+    expect(swMetni).toContain("'./checklist-kutuphanesi.js'");
+    expect(swMetni).toContain("'./kritik-kontrol-kutuphanesi.js'");
   });
 
   test('yeni cache temel app-shell dosyalarini install asamasinda doldurur', () => {

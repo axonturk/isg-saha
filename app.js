@@ -37,7 +37,7 @@ const APP_VERSION = 'v0.11.2';
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
 const APP_BUILD = '4R-PKG-3K';
-const APP_CACHE = 'isg-saha-v31';
+const APP_CACHE = 'isg-saha-v32';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 7;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -7014,7 +7014,28 @@ function askDeleteFinding(id) {
     'Bulguyu Sil',
     'Bu bulgu (ve varsa fotoğrafı) kalıcı olarak silinecek. Emin misiniz?',
     async () => {
+      // 2026-09-08 dis inceleme B04/B10 duzeltmesi -- eskiden yalniz
+      // `bulgular`dan siliniyordu, ilgili `kritikKontrolYanitlari` kaydi
+      // (durum='sorun_var', bulguId=<silinen id>) dokunulmadan kaliyordu.
+      // Export sonra fotografsiz bir 'sorun_var' uretiyor, Desktop bunu
+      // `ValueError` ile reddedip TUM ZIP'i (yalniz bu bulguyu degil)
+      // rollback ediyordu (bkz. veritabani.kritik_kontrol_sorun_var_
+      // kaydet_conn). Simdi silinen bulgu kritikKontrol ise ilgili yanit
+      // 'sorun_yok'a cekilir -- export artik fotografsiz sorun_var
+      // uretmez.
+      const bulgu = await dbGetir('bulgular', id);
       await dbSil('bulgular', id);
+      if (bulgu && bulgu.kritikKontrol && currentSession) {
+        const yanitlar = await dbIndexTumu(
+          'kritikKontrolYanitlari', 'denetimId', currentSession.id);
+        for (const y of yanitlar) {
+          if (y.bulguId === id) {
+            await dbGuncelle('kritikKontrolYanitlari',
+              { ...y, durum: 'sorun_yok', bulguId: null });
+          }
+        }
+        await _kritikKontrolListesiGoster();
+      }
       await renderFindings();
     },
     'Evet, Sil',
@@ -7547,14 +7568,24 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
     if (b) turBirimleri.push({ birimId: b.id, birimAdi: b.ad });
   }
 
-  // Faz 11 PWA planı madde 7 (2026-09-08) -- kritikKontrol kaynaklı
-  // bulgular (b.kritikKontrol===true, bkz. _kritikKontrolFotoKaydet)
-  // normal tespitler[] listesine GİRMEZ: bunlar aşağıda AYRI bir
-  // `kritikKontrol[]` girdisi olarak taşınır, desktop'un zip_import.py'si
-  // onları `kritik_kontrol_sorun_var_kaydet_conn` ile KENDİ bulgusunu
-  // oluşturarak işler -- ikisine BİRDEN girerse AYNI gözlem için İKİ
-  // AYRI bulgu oluşurdu.
-  const tespitler = bulgular.filter(b => !b.kritikKontrol).map(b => {
+  // 2026-09-08 dis inceleme B01 duzeltmesi -- eskiden TUM kritikKontrol
+  // bulgular (durumu ne olursa olsun) tespitler[]'den disleniyordu.
+  // Ama yanit 'sorun_var'dan baska bir duruma cevrilince (_kritikKontrolYanitVer)
+  // eski bulgu (fotograflariyla) `bulgular` store'unda SILINMEDEN kalir,
+  // sadece kritikKontrolYanitlari'ndaki bulguId baglantisi kopar -- o
+  // zaman bu bulgu ne kritikKontrol[]'e (bulguId kopuk) ne tespitler[]'e
+  // (kritikKontrol bayragi yuzunden) giriyordu, ZIP'te SESSIZCE
+  // kayboluyordu. Eski kaniti OTOMATIK SILMEK yerine (kabul edilemez):
+  // yalniz HALA AKTIF bir 'sorun_var' yanitina bagli kritikKontrol
+  // bulgular disarida tutulur (asagida kritikKontrol[] uzerinden AYRI
+  // tasinacaklar icin); baglantisi kopmus/artik gecerli olmayan
+  // kritikKontrol bulgular sessizce kaybolmak yerine SIRADAN bir tespit
+  // olarak (normal tespitler[] yoluyla, Desktop'un zaten guvendigi
+  // yoldan) aktarilir.
+  const kkYanitlariOnceden = await dbIndexTumu('kritikKontrolYanitlari', 'denetimId', denetim.id);
+  const aktifKritikBulguIdler = new Set(
+    kkYanitlariOnceden.filter(y => y.durum === 'sorun_var' && y.bulguId).map(y => y.bulguId));
+  const tespitler = bulgular.filter(b => !b.kritikKontrol || !aktifKritikBulguIdler.has(b.id)).map(b => {
     const bFotolar = b.fotolar || [];
     const bSesler = b.sesler || [];
     const fotoAdlari = bFotolar.map((foto, i) => {
@@ -7590,12 +7621,14 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
   // İLGİLİ bulgudan (b.kritikKontrol===true) çekilir -- bulgunun kendisi
   // tespitler[]'e GİRMEDİĞİ için buradaki foto adlandırması ('_kk_')
   // yukarıdaki normal foto adlarıyla ÇAKIŞMAZ.
-  const kkYanitlari = await dbIndexTumu('kritikKontrolYanitlari', 'denetimId', denetim.id);
   const kritikKontrol = [];
-  for (const y of kkYanitlari) {
+  for (const y of kkYanitlariOnceden) {
     const girdi = {
       odaId: denetim.odaId, odaAdi: denetim.oda, kat: denetim.kat,
       kaynakKod: y.kaynakKod, maddeSira: y.maddeSira, durum: y.durum,
+      // 2026-09-08 dis inceleme B13 duzeltmesi -- saha yaniti ne zaman
+      // verildi bilgisi eskiden hic export edilmiyordu.
+      sahaZamani: y.zaman,
     };
     if (y.durum === 'sorun_var' && y.bulguId) {
       const bulgu = await dbGetir('bulgular', y.bulguId);

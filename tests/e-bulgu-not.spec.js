@@ -269,4 +269,137 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
       fs.rmSync(zipYolu, { force: true });
     }
   });
+
+  // 2026-09-08 dis inceleme B01/B04/B13 duzeltmeleri.
+  async function _zipPaketiniAl(page) {
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    for (let i = 0; i < 3; i++) {
+      if (await page.locator('#screen-setup').evaluate((el) => el.classList.contains('active'))) break;
+      await page.click('button[onclick="katAlanGeri()"]');
+      await page.waitForTimeout(300);
+    }
+    await expect(page.locator('#screen-setup')).toHaveClass(/active/);
+    await page.click('button[onclick="yedekModalAc()"]');
+    await expect(page.locator('#modal-form')).toBeVisible();
+    const kutular = page.locator('.yedek-birim-cb');
+    await kutular.first().waitFor({ state: 'attached' });
+    const adet = await kutular.count();
+    for (let i = 0; i < adet; i++) await kutular.nth(i).check();
+    const [indirme] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('#form-action-btn'),
+    ]);
+    const zipYolu = path.join(os.tmpdir(),
+      `pwa-test-e-kk-zip-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+    await indirme.saveAs(zipYolu);
+    const zip = new AdmZip(zipYolu);
+    const jsonGirdi = zip.getEntries().find((e) => e.entryName === 'denetimler.json');
+    const paketler = JSON.parse(jsonGirdi.getData().toString('utf-8'));
+    fs.rmSync(zipYolu, { force: true });
+    return { paket: paketler[0], zip };
+  }
+
+  test('B01 -- yanit Sorun Var dan Sorun Yoka cevrilince eski fotoflu bulgu ZIPte kaybolmaz, tespit olarak tasinir', async ({ page }) => {
+    await sahteKameraKur(page);
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+
+    // "raflar" sorusu (madde_sira 3, tesis_geneli:false, alan_tipleri
+    // Ofis'i kapsar) BİLEREK seçildi -- satirlar.first() bu kaynağın İLK
+    // tesis_geneli maddesine (madde_sira 18) denk geliyor, ve tesis-geneli
+    // bir madde cevaplanınca `_kritikKontrolMaddeleriGetir`in "cevaplanmamış
+    // adaylar" filtresi (denetimCapindaCevaplanmis) yüzünden bir SONRAKİ
+    // render'da LİSTEDEN TAMAMEN DÜŞÜYOR -- aynı satırı ikinci kez
+    // tıklamaya çalışmak yanlış (kaybolmuş) bir satırı hedefler. Alan-tipi
+    // maddeler böyle filtrelenmiyor (her zaman görünür kalır, sadece
+    // rengi/durumu güncellenir) -- bu yüzden metin eşleşmesiyle, POZİSYON
+    // yerine, AYNI satır güvenle iki kez bulunabiliyor.
+    const raflarSatiri = page.locator('.kritik-kontrol-satir', { hasText: 'raflar' });
+    await raflarSatiri.locator('.kk-var').click();
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
+    });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#findings-list .finding-item')).toHaveCount(1);
+
+    const bulgularOnce = await storeTumu(page, 'bulgular');
+    const eskiBulguId = bulgularOnce[0].id;
+
+    // Fikir degistirir -- ayni maddeyi Sorun Yok'a cevirir. Asenkron
+    // onclick (_kritikKontrolYanitVer) -- ham storeTumu okumasindan ONCE
+    // otomatik TEKRAR-DENEYEN expect ile isin bittigi kanitlanir
+    // (yukaridaki "Sorun Var" testinin AYNI gerekcesi).
+    await raflarSatiri.locator('.kk-yok').click();
+    await expect(raflarSatiri.locator('.kk-yok')).toHaveCSS('background-color', 'rgb(39, 174, 96)');
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar.length).toBe(1);
+    expect(yanitlar[0].durum).toBe('sorun_yok');
+    expect(yanitlar[0].bulguId).toBeNull();
+
+    // Eski bulgu IndexedDB'de SILINMEDEN kalir (otomatik silme YASAK).
+    const bulgularSonra = await storeTumu(page, 'bulgular');
+    expect(bulgularSonra.length).toBe(1);
+    expect(bulgularSonra[0].id).toBe(eskiBulguId);
+
+    const { paket, zip } = await _zipPaketiniAl(page);
+    try {
+      // Guncel yanit sorun_yok -- kritikKontrol[] icinde foto/soru TASIMAZ.
+      expect(paket.kritikKontrol.length).toBe(1);
+      expect(paket.kritikKontrol[0].durum).toBe('sorun_yok');
+      expect(paket.kritikKontrol[0].fotolar).toBeUndefined();
+
+      // Eski fotografli bulgu artik SESSIZCE KAYBOLMAZ -- normal tespitler[]
+      // yoluyla tasinir.
+      expect(paket.tespitler.length).toBe(1);
+      expect(paket.tespitler[0].fotolar.length).toBe(1);
+      const fotoGirdi = zip.getEntries().find(
+        (e) => e.entryName === `fotolar/${paket.tespitler[0].fotolar[0]}`);
+      expect(fotoGirdi).toBeTruthy();
+    } finally {
+      // zip nesnesi zaten dosyadan okundu, ek temizlik gerekmiyor.
+    }
+  });
+
+  test('B04/B10 -- kritik bulgu silinince ZIP fotografsiz sorun_var uretmez', async ({ page }) => {
+    await sahteKameraKur(page);
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+
+    const satirlar = page.locator('#kritik-kontrol-liste .kritik-kontrol-satir');
+    await satirlar.first().locator('.kk-var').click();
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
+    });
+    await page.click('button[onclick="capturePhoto()"]');
+    await expect(page.locator('#findings-list .finding-item')).toHaveCount(1);
+
+    await page.locator('.finding-item button').first().click();
+    await page.click('#modal-action-btn');
+    await expect(page.locator('#findings-list .finding-item')).toHaveCount(0);
+
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar[0].durum).toBe('sorun_yok');
+    expect(yanitlar[0].bulguId).toBeNull();
+
+    const { paket } = await _zipPaketiniAl(page);
+    expect(paket.kritikKontrol.length).toBe(1);
+    expect(paket.kritikKontrol[0].durum).toBe('sorun_yok');
+    expect(paket.kritikKontrol[0].fotolar).toBeUndefined();
+    expect(paket.tespitler.length).toBe(0);
+  });
+
+  test('B13 -- saha yanit zamani ZIPe export edilir', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first()
+      .locator('.kk-yok').click();
+
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(typeof yanitlar[0].zaman).toBe('string');
+
+    const { paket } = await _zipPaketiniAl(page);
+    expect(paket.kritikKontrol[0].sahaZamani).toBe(yanitlar[0].zaman);
+  });
 });
