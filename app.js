@@ -6066,14 +6066,32 @@ async function kisaKodBaglamiUygula(baglam) {
   // yeniden kurdurmak YERİNE, doğru `ad` ile burada find-or-create edip
   // `secilenMevcutOdaId` ile işaret ediyoruz -- startInspection()'ın "mevcut
   // oda" dalı (id eşleşmesi, `ad`'ı YENİDEN KURMAZ) devreye girer.
+  //
+  // 2026-09-08 dis inceleme B02/B03 duzeltmesi -- ESKIDEN burada HER ZAMAN
+  // yeni bir rastgele uuid() uretiliyordu, `mahal.id` (Desktop'un QR ile
+  // claim ettigi KALICI kimlik, `mahaller.pwa_oda_id`'ye karsilik gelir)
+  // HIC KULLANILMIYORDU -- ZIP'e giden `denetim.odaId` bu yuzden Desktop'un
+  // orijinal kimligiyle ASLA eslesmiyordu, her ZIP'te mukerrer mahal
+  // olusuyordu. Simdi `mahal.id` DOGRUDAN kullaniliyor -- QR/kisa-kod
+  // baglami HER ZAMAN gercek bir Desktop-senkronlu mahal cozer (bu
+  // fonksiyonun tek giris noktasi), rastgele bir kimlik uretmeye GEREK YOK.
   if (!birim.odalar) birim.odalar = [];
-  let odaKaydi = birim.odalar.find((o) =>
-    o.kat === secilenKat && o.alanTipi === secilenAlanTipi && o.ad === odaAdi);
+  let odaKaydi = birim.odalar.find((o) => o.id === mahal.id);
   if (!odaKaydi) {
-    odaKaydi = { id: uuid(), kat: secilenKat, alanTipi: secilenAlanTipi, no: '', ad: odaAdi };
-    birim.odalar.push(odaKaydi);
-    await dbGuncelle('birimler', birim);
+    odaKaydi = birim.odalar.find((o) =>
+      o.kat === secilenKat && o.alanTipi === secilenAlanTipi && o.ad === odaAdi);
   }
+  if (odaKaydi) {
+    // Onceki (hatali) surumde rastgele bir id ile olusturulmus BAYAT bir
+    // eslesme -- kendiliginden kalici kimlige gecirilir (yalniz BUNDAN
+    // SONRAKI kullanim icin, zaten olusmus gecmis denetimlerin odaId'sine
+    // DOKUNULMAZ).
+    if (odaKaydi.id !== mahal.id) odaKaydi.id = mahal.id;
+  } else {
+    odaKaydi = { id: mahal.id, kat: secilenKat, alanTipi: secilenAlanTipi, no: '', ad: odaAdi };
+    birim.odalar.push(odaKaydi);
+  }
+  await dbGuncelle('birimler', birim);
   secilenMevcutOdaId = odaKaydi.id;
   const odaNoAlani = document.getElementById('kat-alan-oda-no');
   if (odaNoAlani) odaNoAlani.value = '';
@@ -7663,6 +7681,11 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       oda: denetim.oda,
       odaNo: denetim.odaNo || '',
       sorumlu: denetim.sorumlu,
+      // 2026-09-08 dis inceleme B05 duzeltmesi -- eskiden HIC export
+      // edilmiyordu, Desktop tarafinda yeni olusan mahalin alan
+      // etiketi hep bos kaliyordu (kritik kontrol madde uretimi bu
+      // etiketi okuyor, bkz. kritik_kontrol.mahal_icin_kritik_maddeler).
+      alanTipi: denetim.alanTipi || null,
       turBirimleri
     },
     tespitler,

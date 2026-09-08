@@ -402,4 +402,13 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     const { paket } = await _zipPaketiniAl(page);
     expect(paket.kritikKontrol[0].sahaZamani).toBe(yanitlar[0].zaman);
   });
+
+  test('B05 -- denetim.alanTipi ZIPe export edilir', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const denetimler = await storeTumu(page, 'denetimler');
+    expect(denetimler[0].alanTipi).toBeTruthy();
+
+    const { paket } = await _zipPaketiniAl(page);
+    expect(paket.denetim.alanTipi).toBe(denetimler[0].alanTipi);
+  });
 });

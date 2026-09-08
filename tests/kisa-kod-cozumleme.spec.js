@@ -230,6 +230,53 @@ test.describe('SUPV-65 Aşama F -- alan eşlemesi (bina/kat/oda)', () => {
     expect(denetim.oda).toBe(fixture.gercekDegerler.mahal1Ad);
   });
 
+  // 2026-09-08 dis inceleme B02/B03 duzeltmesi -- ESKIDEN kisaKodBaglamiUygula
+  // `denetim.odaId`'yi HER ZAMAN rastgele bir uuid() ile dolduruyordu, mahal'in
+  // KENDI (Desktop'un QR ile claim ettigi kalici) `id`'si HIC KULLANILMIYORDU.
+  // Bu yuzden ZIP'e giden `denetim.odaId` Desktop'un orijinal `pwa_oda_id`'siyle
+  // ASLA eslesmiyordu -- her ZIP'te mukerrer mahal olusuyordu.
+  test('mahal kisa kodu cozulunce denetim.odaId mahalin KENDI kalici kimligini tasir (rastgele uuid degil)', async ({ page }) => {
+    await page.goto('/index.html');
+    const onEk = benzersizAd('odaid');
+    const payload = await _senkronEt(page, onEk);
+    const mahalKisaKodu = fixture.payload.birimler[0].mahaller[0].kisaKod;
+
+    await page.evaluate(async (kod) => {
+      const baglam = await window.kisaKoduCoz(kod);
+      await window.kisaKodBaglamiUygula(baglam);
+    }, mahalKisaKodu);
+
+    const mahalId = payload.birimler[0].mahaller[0].id;
+    const denetim = await _sonDenetimiBul(page, payload.kurum.id);
+    expect(denetim.odaId).toBe(mahalId);
+  });
+
+  test('AYNI mahal iki farkli ziyarette AYNI odaId ile denetim uretir (tekrar bagliliginin temeli)', async ({ page }) => {
+    await page.goto('/index.html');
+    const onEk = benzersizAd('odaidtekrar');
+    const payload = await _senkronEt(page, onEk);
+    const mahalKisaKodu = fixture.payload.birimler[0].mahaller[0].kisaKod;
+
+    await page.evaluate(async (kod) => {
+      const baglam = await window.kisaKoduCoz(kod);
+      await window.kisaKodBaglamiUygula(baglam);
+    }, mahalKisaKodu);
+    const ilkDenetim = await _sonDenetimiBul(page, payload.kurum.id);
+
+    // Aynı mahale ikinci kez -- setup'a geri dönmeden doğrudan tekrar
+    // çözümleme (gerçek akışta kullanıcı geçmişten devam eder/yeniden
+    // QR okutur, burada yalnız odaKaydi/mahal eşleşmesinin STABIL
+    // kaldığı doğrulanıyor).
+    await page.evaluate(async (kod) => {
+      const baglam = await window.kisaKoduCoz(kod);
+      await window.kisaKodBaglamiUygula(baglam);
+    }, mahalKisaKodu);
+    const ikinciDenetim = await _sonDenetimiBul(page, payload.kurum.id);
+
+    expect(ikinciDenetim.odaId).toBe(ilkDenetim.odaId);
+    expect(ikinciDenetim.odaId).toBe(payload.birimler[0].mahaller[0].id);
+  });
+
   test('ekipman kisa kodu cozulunce oda alani mahal+ekipman adini tasir', async ({ page }) => {
     await page.goto('/index.html');
     const onEk = benzersizAd('esleme2');
