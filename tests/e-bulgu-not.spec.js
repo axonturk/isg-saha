@@ -88,7 +88,53 @@ async function _denetimBaslatAlanTipiIle(page, alanTipiChipMetni) {
   await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
 }
 
+// 2026-09-08 dis inceleme B06 duzeltmesi -- sektoru olan bir kurum, ilgili
+// alan tipinde SEKTOR_KAYNAKLARI'ndan gelen coklu-kaynak (MEB + evrensel)
+// icerigi gormeli. `gercekKurumEkle`'nin gercek UI formu sektor alani
+// SUNMUYOR (sektor yalniz QR/Desktop senkronundan gelir, bu duzeltmeyle
+// eklendi) -- bu yuzden kurum kaydi olusturulduktan SONRA IndexedDB'de
+// dogrudan guncellenir (gercek QR akisinin YAPACAGI seyin kisa yolu).
+async function _denetimBaslatSektorIle(page, { sektor, profil, alanTipiChipMetni }) {
+  const kurumAdi = benzersizAd('Kurum');
+  const birimAdi = benzersizAd('Birim');
+  await page.goto('/index.html');
+  await gercekKurumEkle(page, kurumAdi);
+  await page.evaluate(async ({ kurumAdi, sektor }) => {
+    const kurumlar = await window._idb.dbTumu('kurumlar');
+    const kurum = kurumlar.find((k) => k.ad === kurumAdi);
+    kurum.sektor = sektor;
+    await window._idb.dbGuncelle('kurumlar', kurum);
+  }, { kurumAdi, sektor });
+  await gercekBirimEkle(page, { ad: birimAdi, profil, katSayisi: 1 });
+  await page.click('button[onclick="ekranKatAlanaGec()"]');
+  await page.locator('#kat-alan-hizli-chips .chip', { hasText: alanTipiChipMetni }).click();
+  await page.locator('#kat-alan-oda-no').fill('101');
+  await page.click('button[onclick="startInspection()"]');
+  await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+}
+
 test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)', () => {
+  test('B06 -- egitim_kurumu sektorlu kurumda MEB kaynaklarindan madde gorunur (raporun kapsam disi dedigi alan tipi)', async ({ page }) => {
+    await _denetimBaslatSektorIle(page, {
+      sektor: 'egitim_kurumu', profil: 'egitim', alanTipiChipMetni: 'Derslik / amfi',
+    });
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    const yanitlar = await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').count();
+    expect(yanitlar).toBeGreaterThan(0);
+    // Alt yazıda birden fazla farklı kaynak adı (MEB + varsa evrensel)
+    // görünmeli -- eski tek-kaynak sürümünde her zaman TEK bir ad vardı.
+    const altYazi = await page.locator('#kritik-kontrol-alt-yazi').textContent();
+    expect(altYazi).toContain(',');
+  });
+
+  test('B06 -- sektoru olmayan (eski/senkronsuz) kurumda eski tek-kaynak davranisi kademeli olarak korunur', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    const maddeler = await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').count();
+    expect(maddeler).toBeGreaterThan(0);
+  });
+
+
   test('eslesen alan tipinde kritik kontrol basligi ve madde satiri gorunur', async ({ page }) => {
     // HIZLI_ALANLAR.genel[0] === 'Ofis / idari oda' -- "ofis" anahtar
     // kelimesi csgb_ofisler'e eşleşir, o kaynağın kritik maddeleri vardır.
@@ -103,10 +149,21 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     await expect(page.locator('#checklist-chip-grup')).toHaveCount(0);
   });
 
-  test('eslesmeyen alan tipinde kritik kontrol basligi gizli kalir', async ({ page }) => {
-    // "Toplantı salonu" hiçbir kaynağın anahtarKelimeler listesiyle eşleşmez.
+  test('eslesmeyen alan tipinde sektore ozel kaynak gorunmez, ama evrensel tesis-geneli sorular gorunur (B06)', async ({ page }) => {
+    // "Toplantı salonu" hiçbir sektöre-özel kaynağın anahtarKelimeler
+    // listesiyle eşleşmez -- ESKİDEN bu durumda başlık TAMAMEN gizli
+    // kalıyordu. 2026-09-08 dış inceleme B06 düzeltmesi: evrensel
+    // kaynaklardaki (`csgb_kanal_kazisi` vb.) TÜM maddeler tesis_geneli
+    // olduğu için (Desktop'un kendi algoritmasıyla AYNI) her alan
+    // tipinde -- eşleşen/eşleşmeyen fark etmeksizin -- aday olurlar.
     await _denetimBaslatAlanTipiIle(page, 'Toplantı salonu');
-    await expect(page.locator('#kritik-kontrol-baslik')).toBeHidden();
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    const yanitlar = await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').count();
+    expect(yanitlar).toBeGreaterThan(0);
+    // Sektöre-özel (Ofis'e özgü) kaynak GÖRÜNMEMELİ -- yalnız evrensel.
+    await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first().locator('.kk-yok').click();
+    const kaydedilen = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(kaydedilen[0].kaynakKod).not.toBe('csgb_ofisler');
   });
 
   test('Sorun Yok basilinca IndexedDBde durum=sorun_yok kaydedilir, bulgu OLUSMAZ', async ({ page }) => {

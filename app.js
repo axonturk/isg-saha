@@ -5610,6 +5610,10 @@ async function kurumAgaciUpsertEt(payload) {
     id: payload.kurum.id,
     ad: payload.kurum.ad,
     tur: payload.kurum.tur || null,
+    // 2026-09-08 dis inceleme B06 duzeltmesi -- kritik kontrol kaynak
+    // secimi icin gerekli (bkz. _kritikKontrolKaynakBul), `tur` ILE AYNI
+    // ALAN DEGIL.
+    sektor: payload.kurum.sektor || null,
     olusturma: (mevcutKurum && mevcutKurum.olusturma) || new Date().toISOString()
   };
   if (mevcutKurum) await dbGuncelle('kurumlar', kurum); else await dbEkle('kurumlar', kurum);
@@ -6675,69 +6679,124 @@ function _taslakTemizle() {
 // desktop'taki `mahaller` store'u (SUPV-65, QR-senkron kısa kod sistemi)
 // İLE KARIŞTIRILMASIN, BAMBAŞKA bir kavram (bkz. DB_VERSION=7 yorumu).
 
-function _kritikKontrolKaynakBul() {
-  const alanTipi = currentSession && currentSession.alanTipi;
-  if (!alanTipi || typeof checklistKaynagiBul !== 'function' ||
-      typeof KRITIK_KONTROL_KUTUPHANESI === 'undefined') return null;
-  const kod = checklistKaynagiBul(alanTipi, null);
-  const kaynak = kod && KRITIK_KONTROL_KUTUPHANESI[kod];
-  return (kaynak && kaynak.kritik_maddeler.length) ? { kod, kaynak } : null;
+function _altDizeEslesiyorMu(a, b) {
+  const aKucuk = String(a).toLocaleLowerCase('tr-TR');
+  const bKucuk = String(b).toLocaleLowerCase('tr-TR');
+  return aKucuk.includes(bKucuk) || bKucuk.includes(aKucuk);
+}
+
+// 2026-09-08 dis inceleme B06 duzeltmesi -- ESKIDEN `checklistKaynagiBul`
+// (tek-kaynak, sektorden bagimsiz anahtar-kelime eslesmesi) kullaniliyordu;
+// kurumun sektorunu HIC gormuyordu, MEB'in 19 kaynagi/evrensel kaynaklar/
+// coklu-sektor-kaynagi durumlari (ör. santiye_insaat) hic gorulmuyordu.
+// Simdi Desktop'un ONCEDEN hesaplayip JSON'a gomdugu (tools/kritik_json_
+// disa_aktar.py::sektor_kaynaklari, kritik_kontrol.tum_kaynaklar_sektor_
+// icin ILE AYNI birlestirme) coklu-kaynak listesi kullaniliyor -- JS'te
+// Desktop'un birlestirme mantigi YENIDEN YAZILMIYOR, hazir liste tuketiliyor.
+async function _kritikKontrolKaynaklariBul() {
+  if (!currentSession || typeof KRITIK_KONTROL_KUTUPHANESI === 'undefined') return [];
+  const evrensel = (typeof SEKTOR_KAYNAKLARI !== 'undefined' && SEKTOR_KAYNAKLARI._evrensel) || [];
+  const kurum = currentSession.kurumId ? await dbGetir('kurumlar', currentSession.kurumId) : null;
+  const sektor = kurum && kurum.sektor;
+
+  let kodlar;
+  if (sektor && typeof SEKTOR_KAYNAKLARI !== 'undefined' && SEKTOR_KAYNAKLARI[sektor]) {
+    kodlar = SEKTOR_KAYNAKLARI[sektor];
+  } else {
+    // Kademeli geçiş -- sektörü HENÜZ senkronlanmamış (eski QR/kurum
+    // verisi, `sektor` alanı bu düzeltmeden ÖNCE hiç taşınmıyordu)
+    // kurumlar için eski tek-kaynak (alan tipi anahtar-kelime)
+    // davranışına GERİ DÜŞÜLÜR, üstüne evrensel kaynaklar EKLENİR --
+    // mevcut kurulumlar KIRILMAZ, yalnız zenginleşir.
+    const eskiKod = (currentSession.alanTipi && typeof checklistKaynagiBul === 'function')
+      ? checklistKaynagiBul(currentSession.alanTipi, null) : null;
+    kodlar = eskiKod ? [eskiKod, ...evrensel] : evrensel;
+  }
+  return kodlar
+    .map(kod => ({ kod, kaynak: KRITIK_KONTROL_KUTUPHANESI[kod] }))
+    .filter(x => x.kaynak && x.kaynak.kritik_maddeler && x.kaynak.kritik_maddeler.length);
 }
 
 async function _kritikKontrolMaddeleriGetir() {
-  const bulunan = _kritikKontrolKaynakBul();
-  if (!bulunan) return [];
-  const { kod, kaynak } = bulunan;
+  const kaynaklar = await _kritikKontrolKaynaklariBul();
+  if (!kaynaklar.length) return [];
   const alanTipi = currentSession.alanTipi;
   const odaId = currentSession.odaId;
 
-  // Desktop'un mahal_yanitlari/denetim_capinda_cevaplanmis AYRIMIYLA
-  // AYNI ilke (2026-09-08 P1 düzeltmesi, bkz. kritik_kontrol.py) -- A
-  // odasındaki cevap B odasında GÖRÜNMEMELİ, yalnız tesis_geneli
-  // maddelerin "bu denetimde herhangi bir odada zaten soruldu mu"
-  // kontrolü denetim çapında bakar.
+  // Desktop'un mahal_yanitlari/denetim_capinda_cevaplanmis AYRIMIYLA AYNI
+  // ilke (2026-09-08 P1 düzeltmesi, bkz. kritik_kontrol.py) -- A odasındaki
+  // cevap B odasında GÖRÜNMEMELİ, yalnız tesis_geneli maddelerin "bu
+  // denetimde herhangi bir odada zaten soruldu mu" kontrolü denetim
+  // çapında bakar. Anahtar artık `kaynakKod|maddeSira` (COKLU kaynak
+  // olduğu için tek başına maddeSira yetmez, farklı kaynaklarda aynı
+  // sıra numarası tekrar edebilir).
   const denetimYanitlari = await dbIndexTumu(
     'kritikKontrolYanitlari', 'denetimId', currentSession.id);
   const odaYanitHaritasi = new Map();
   const denetimCapindaCevaplanmis = new Set();
   for (const y of denetimYanitlari) {
-    if (y.kaynakKod !== kod) continue;
-    denetimCapindaCevaplanmis.add(y.maddeSira);
-    if (y.odaId === odaId) odaYanitHaritasi.set(y.maddeSira, y);
+    const anahtar = `${y.kaynakKod}|${y.maddeSira}`;
+    denetimCapindaCevaplanmis.add(anahtar);
+    if (y.odaId === odaId) odaYanitHaritasi.set(anahtar, y);
   }
 
-  const tesisGeneliAdaylari = kaynak.kritik_maddeler.filter(
-    m => m.tesis_geneli && !denetimCapindaCevaplanmis.has(m.madde_sira));
   // BİLİNÇLİ BASİTLEŞTİRME: PWA'nın `alanTipi` etiketleri (ORTAK_ALANLAR/
   // HIZLI_ALANLAR, ör. "Ofis / idari oda") Desktop'un `alan_tipleri`
   // sözlüğüyle (GENEL_ALAN_TIPLERI, ör. "Ofis") BİREBİR AYNI DEĞİL --
-  // PWA'nın FK'siz/serbest-metin modelinde (checklistKaynagiBul'un KENDİ
-  // "basit anahtar-kelime eşleşmesi" ilkesiyle AYNI ruhta) tam eşitlik
-  // yerine iki-yönlü alt-dize eşleşmesi kullanılır.
-  const alanTipiKucuk = String(alanTipi).toLocaleLowerCase('tr-TR');
-  const alanTipiAdaylari = kaynak.kritik_maddeler.filter(m => {
-    if (m.tesis_geneli) return false;
-    return (m.alan_tipleri || []).some(dt => {
-      const dtKucuk = String(dt).toLocaleLowerCase('tr-TR');
-      return alanTipiKucuk.includes(dtKucuk) || dtKucuk.includes(alanTipiKucuk);
+  // PWA'nın FK'siz/serbest-metin modelinde iki-yönlü alt-dize eşleşmesi
+  // kullanılır (_altDizeEslesiyorMu, checklistKaynagiBul'un KENDİ "basit
+  // anahtar-kelime eşleşmesi" ilkesiyle AYNI ruhta).
+  let secilenler = [];
+  let alanTipiEslesmesiVarMi = false;
+  for (const { kod, kaynak } of kaynaklar) {
+    const tesisGeneliAdaylari = kaynak.kritik_maddeler.filter(
+      m => m.tesis_geneli && !denetimCapindaCevaplanmis.has(`${kod}|${m.madde_sira}`));
+    const alanTipiAdaylari = kaynak.kritik_maddeler.filter(m => {
+      if (m.tesis_geneli) return false;
+      return (m.alan_tipleri || []).some(dt => _altDizeEslesiyorMu(alanTipi, dt));
     });
-  });
-
-  let secilenler;
-  if (alanTipiAdaylari.length) {
-    secilenler = tesisGeneliAdaylari.concat(alanTipiAdaylari);
-  } else {
-    const genelFallback = kaynak.kritik_maddeler.filter(
-      m => !m.tesis_geneli && (!m.alan_tipleri || m.alan_tipleri.length === 0));
-    secilenler = tesisGeneliAdaylari.concat(genelFallback);
+    if (alanTipiAdaylari.length) alanTipiEslesmesiVarMi = true;
+    // Desktop'un mahal_icin_kritik_maddeler'indeki 3. kademe (Genel
+    // fallback) İLE AYNI: bu KAYNAK ne tesis_geneli ne alan-tipi eşleşmesi
+    // sağlamadıysa, o kaynağın kendi "alan_tipleri boş" maddeleri devreye
+    // girer (kaynak-içi fallback -- aşağıdaki GENEL_KRITIK_MADDELER
+    // havuzuyla KARIŞTIRILMASIN, o kaynaklar-arası bir fallback).
+    let buKaynaktanSecilenler = tesisGeneliAdaylari.concat(alanTipiAdaylari);
+    if (!tesisGeneliAdaylari.length && !alanTipiAdaylari.length) {
+      buKaynaktanSecilenler = kaynak.kritik_maddeler.filter(
+        m => !m.tesis_geneli && (!m.alan_tipleri || m.alan_tipleri.length === 0));
+    }
+    for (const m of buKaynaktanSecilenler) {
+      secilenler.push({ ...m, kaynakKod: kod, kaynakAd: kaynak.ad });
+    }
   }
 
-  return secilenler.map(m => ({
-    ...m,
-    kaynakKod: kod,
-    kaynakAd: kaynak.ad,
-    durum: odaYanitHaritasi.has(m.madde_sira) ? odaYanitHaritasi.get(m.madde_sira).durum : null,
-  }));
+  // Desktop'un mahal_icin_kritik_maddeler_coklu'sundaki cross-kaynak Genel
+  // havuz İLE AYNI: HİÇBİR kaynak bu alan tipine ÖZEL bir madde
+  // sağlamadıysa (yalnız kaynak-içi fallback'ler devreye girmiş olabilir),
+  // GENEL_KRITIK_MADDELER'daki sektörler-arası-paylaşımlı sete bakılır.
+  if (!alanTipiEslesmesiVarMi && typeof GENEL_KRITIK_MADDELER !== 'undefined') {
+    const eslesenAnahtar = Object.keys(GENEL_KRITIK_MADDELER).find(
+      dt => _altDizeEslesiyorMu(alanTipi, dt));
+    const genelMaddeler = eslesenAnahtar && GENEL_KRITIK_MADDELER[eslesenAnahtar];
+    if (genelMaddeler && genelMaddeler.length) {
+      const genelKaynakKod = `genel:${eslesenAnahtar}`;
+      for (const m of genelMaddeler) {
+        secilenler.push({
+          soru: m.soru, madde_sira: m.madde_sira, alan_tipleri: [eslesenAnahtar],
+          tesis_geneli: false, kaynakKod: genelKaynakKod, kaynakAd: `Genel — ${eslesenAnahtar}`,
+        });
+      }
+    }
+  }
+
+  return secilenler.map(m => {
+    const anahtar = `${m.kaynakKod}|${m.madde_sira}`;
+    return {
+      ...m,
+      durum: odaYanitHaritasi.has(anahtar) ? odaYanitHaritasi.get(anahtar).durum : null,
+    };
+  });
 }
 
 async function _kritikKontrolTamamlandiMi() {
@@ -6754,13 +6813,17 @@ async function _kritikKontrolListesiGoster() {
   if (!baslik || !liste) return;
   liste.innerHTML = '';
 
-  const bulunan = _kritikKontrolKaynakBul();
-  if (!bulunan) { baslik.style.display = 'none'; return; }
   const maddeler = await _kritikKontrolMaddeleriGetir();
   if (!maddeler.length) { baslik.style.display = 'none'; return; }
 
   baslik.style.display = '';
-  if (altYazi) altYazi.textContent = bulunan.kaynak.ad || '';
+  // 2026-09-08 dis inceleme B06 duzeltmesi -- artik COKLU kaynaktan madde
+  // gelebiliyor, tek bir "kaynak.ad" alt yazisi anlamli degil; benzersiz
+  // kaynak adlarini virgulle birlestir.
+  if (altYazi) {
+    const kaynakAdlari = [...new Set(maddeler.map(m => m.kaynakAd).filter(Boolean))];
+    altYazi.textContent = kaynakAdlari.join(', ');
+  }
 
   const _DURUM_RENK = { sorun_yok: '#27ae60', sorun_var: '#e74c3c', kapsam_disi: '#999' };
   for (const m of maddeler) {

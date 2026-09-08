@@ -1,23 +1,30 @@
 /**
  * kritik-kontrol-kutuphanesi.js -- Hizli Kritik Kontrol veri kutuphanesi
- * (Faz 11, PWA plani madde 2, 2026-09-08).
+ * (Faz 11, PWA plani madde 2, 2026-09-08; sektor_kaynaklari/genel_kritik_
+ * maddeler 2026-09-08 dis inceleme B06 duzeltmesiyle eklendi).
  *
  * Desktop'un tools/kritik_json_disa_aktar.py scripti ile URETILDI --
  * checklist-kutuphanesi.js'nin (30 kaynak, TUM maddeler, chip sistemi
- * icin) AKSINE bu dosya YALNIZ kritik-etiketli maddeleri tasir (59
- * kaynak, 566 kritik madde) + her maddenin alan_tipleri/tesis_geneli
- * etiketini. Chip sistemi KALDIRILDI (plan madde 1) -- bu kutuphane
- * onun yerini alan 2-buton (Sorun Yok / Sorun Var) ekraninin veri
- * kaynagidir.
+ * icin) AKSINE bu dosya YALNIZ kritik-etiketli maddeleri tasir + her
+ * maddenin alan_tipleri/tesis_geneli etiketini. Chip sistemi KALDIRILDI
+ * (plan madde 1) -- bu kutuphane onun yerini alan 2-buton (Sorun Yok /
+ * Sorun Var) ekraninin veri kaynagidir.
+ *
+ * SEKTOR_KAYNAKLARI: kurumun sektorune (veya sektor bilinmiyorsa
+ * "_evrensel"e) gore hangi kaynaklarin (COKLU, sirali) kullanilacagini
+ * belirler -- Desktop'un kritik_kontrol.tum_kaynaklar_sektor_icin() ile
+ * AYNI birlestirme, JS'te YENIDEN YAZILMADI.
+ * GENEL_KRITIK_MADDELER: kurumun kendi kaynaklari bir alan tipini HIC
+ * kapsamiyorsa devreye giren sektorler-arasi-paylasimli fallback havuzu.
  *
  * GUNCELLEME: bu dosya ELLE DUZENLENMEZ -- masaustunde
  *   python tools/kritik_json_disa_aktar.py
- * calistirilip ciktisi bu dosyaya (const atamasi olarak) YENIDEN
+ * calistirilip ciktisi bu dosyaya (const atamalari olarak) YENIDEN
  * yapistirilir. surumTarihi asagida, uretim aninin damgasidir --
  * ileride kullaniciya "kritik kontrol listesi X tarihinden kalma"
  * gibi bir uyari icin kullanilabilir.
  */
-const KRITIK_KONTROL_SURUM_TARIHI = "2026-09-08T17:55:20+03:00";
+const KRITIK_KONTROL_SURUM_TARIHI = "2026-09-08T21:55:15+03:00";
 const KRITIK_KONTROL_KUTUPHANESI = {
   "csgb_eczaneler": {
     "ad": "Eczaneler için Kontrol Listesi",
@@ -4762,4 +4769,569 @@ const KRITIK_KONTROL_KUTUPHANESI = {
       }
     ]
   }
+};
+const SEKTOR_KAYNAKLARI = {
+  "_evrensel": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "eczane": [
+    "csgb_eczaneler",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "dis_klinik": [
+    "csgb_dis_klinik",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "ofis": [
+    "csgb_ofisler",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "cagri_merkezi": [
+    "csgb_cagri_merkezleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "bakkal_market": [
+    "csgb_bakkal_market",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kasap": [
+    "csgb_kasaplar",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "sebze_meyve": [
+    "csgb_sebze_meyve",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kirmizi_et_kanatli": [
+    "csgb_kirmizi_et_kanatli",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "sut_urunleri": [
+    "csgb_sut_urunleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "mutfak_lokanta": [
+    "csgb_mutfak_lokanta",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "tekstil": [
+    "csgb_tekstil",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "deri_tabaklama": [
+    "csgb_deri_tabaklama",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "ahsap_mobilya": [
+    "csgb_ahsap_mobilya",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "basim_matbaa": [
+    "csgb_basim_matbaa",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "boya_isleri": [
+    "csgb_boya_isleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "genel_imalat": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "santiye_insaat": [
+    "csgb_kucuk_insaatlar",
+    "csgb_cephe_iskeleleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "duvarcilik_siva": [
+    "csgb_duvarcilik_siva",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kule_vinc": [
+    "csgb_kule_vincler",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "arac_tamirhane": [
+    "csgb_arac_tamirhaneleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "ayakkabi_tamirhane": [
+    "csgb_ayakkabi_tamirhaneleri",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kuafor": [
+    "csgb_kuaforler",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kuru_temizleme": [
+    "csgb_kuru_temizlemeciler",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "gozlukcu_optisyen": [
+    "csgb_gozlukcu_optisyen",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "ozel_guvenlik": [
+    "csgb_ozel_guvenlik",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "konaklama": [
+    "csgb_konaklama",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "havuz_spor": [
+    "csgb_havuz_spor",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "genel_yolcu_tasimaciligi": [
+    "csgb_genel_yolcu_tasimaciligi",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "taksi": [
+    "csgb_taksi",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kargo_transfer": [
+    "csgb_kargo_transfer",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "havalimani_hangar": [
+    "csgb_havalimani_hangar",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "tarim": [
+    "csgb_tarim",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "seracilik": [
+    "csgb_seracilik",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "hayvansal_uretim": [
+    "csgb_hayvansal_uretim",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "odun_uretimi": [
+    "csgb_odun_uretimi",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "laboratuvar": [
+    "csgb_laboratuvarlar",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "apartman_bina_site": [
+    "csgb_apartmanlar",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "egitim_kurumu": [
+    "meb_kl01_okul_ortak_alanlar",
+    "meb_kl02_acil_plan",
+    "meb_kl03_atolyeler",
+    "meb_kl04_laboratuar",
+    "meb_kl05_kantin_kafeterya",
+    "meb_kl06_genel_temizlik",
+    "meb_kl07_siniflar",
+    "meb_kl08_koridorlar",
+    "meb_kl09_okul_araclari_servisler",
+    "meb_kl10_toplanti_salonu",
+    "meb_kl11_okul_disi_aktiviteler",
+    "meb_kl12_muzik_odasi",
+    "meb_kl13_sanat_odasi",
+    "meb_kl14_islak_hacimler",
+    "meb_kl15_spor_salonlari",
+    "meb_kl16_yuzme_havuzu",
+    "meb_kl17_kazan_daireleri",
+    "meb_kl18_ergonomi_bedensel",
+    "meb_kl19_ergonomi_buro",
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "hastane": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "kamu_idare": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "itfaiye": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "cezaevi": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "adliye_mahkeme": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ],
+  "diger": [
+    "csgb_kanal_kazisi",
+    "isg_fiziksel_altyapi_mevzuat_ek",
+    "ziyaretci_oryantasyon"
+  ]
+};
+const GENEL_KRITIK_MADDELER = {
+  "Koridor": [
+    {
+      "soru": "Yangın merdiveni kapıları/acil çıkışlar kilitli olmayıp her an dışarı doğru açılabilir durumda tutuluyor mu?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Yangın merdiveni kapıları/acil çıkışların önünde ve tüm yol boyunca kaçışı engelleyecek bir malzeme bulunmaması sağlanıyor mu?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Kapı ve kaçış yollarını gösteren acil durum levhaları uygun yerlere yerleştirildi mi?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Acil durum alarmı var mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Zemin kaymaya veya düşmeye karşı uygun malzemeden yapılmış mı?",
+      "madde_sira": 4
+    },
+    {
+      "soru": "Aydınlatma ve ısıtma sistemi yeterli mi?",
+      "madde_sira": 5
+    },
+    {
+      "soru": "Koridorlarda yangın için özel önlemler alınmış mı?",
+      "madde_sira": 6
+    }
+  ],
+  "WC/Islak Hacim": [
+    {
+      "soru": "Zeminlerde kaymaya engel olmak için gerekli tedbir alınmış mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Islak zeminden dolayı, elektrik tesisatı ile ilgili kaçak akım rölesi vs gibi önlemler alınmış mı?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Prizler ve elektrikli aletler ıslanma ihtimali olmayan yerlerde mi bulunuyor?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Duş içinde herhangi bir düşme sırasında tutunabilecek sağlam bir tutunma aparatı takılmış mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Islak hacim kapıları, herhangi bir düşme sırasında, tehlike yaratmaması için uygun bir malzemeden yapılmış mı?",
+      "madde_sira": 4
+    },
+    {
+      "soru": "Saç ve el kurutucusu, elektrikli ısıtıcısı gibi elektrikli aletlerin kullanım talimatı uygun yerlere asılmış mı?",
+      "madde_sira": 5
+    },
+    {
+      "soru": "Islak hacimler engellilerin kullanımına uygun olarak tasarlanmış mı?",
+      "madde_sira": 6
+    }
+  ],
+  "Merdiven/Asansör": [
+    {
+      "soru": "Yangın merdiveni kapıları/acil çıkışlar kilitli olmayıp her an dışarı doğru açılabilir durumda tutuluyor mu?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Acil çıkışların önünde ve tüm yol boyunca kaçışı engelleyecek bir malzeme bulunmaması sağlanıyor mu?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Asansörler düzenli olarak kontrol ediliyor ve periyodik bakımları yapılıyor mu?",
+      "madde_sira": 2
+    }
+  ],
+  "Kantin/Yemekhane": [
+    {
+      "soru": "Yangın için özel önlemler alınmış mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Havalandırma ve baca her türlü kokuyu önleyecek şekilde mi?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Zemin kaymaya, düşmeye karşı uygun malzemelerden yapılmış mı?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "WC'ler gıda üretim, satış ve tüketim yapılan yerlerden uygun uzaklıkta mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Çalışan personel için tüberküloz, portör muayenesi yapıldı mı?",
+      "madde_sira": 4
+    }
+  ],
+  "Mescit": [],
+  "Toplantı Salonu": [
+    {
+      "soru": "Mevzuata uygun olarak acil çıkış kapısı var mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Acil çıkış yönlendirme levhaları asılmış mı?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Acil durum alarmı var mı?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Uzatma kablosu kullanımını gerektirmeyecek kadar sabit tesisat var mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Tüm elektrik anahtarları ve prizleri düzgün çalışıyor mu?",
+      "madde_sira": 4
+    },
+    {
+      "soru": "Zemin, kaymaya ve düşmeye karşı uygun malzemeden yapılmış mı?",
+      "madde_sira": 5
+    }
+  ],
+  "Kazan Dairesi": [
+    {
+      "soru": "Fuel-oil, doğal gaz, LPG vb. yakıtlı kazan dairesinde ve dışında acil yakıt kesme vanası mevcut mu?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Doğal gazlı yakıtın kullanıldığı kazan dairesinde, gaz kaçağına karşı dedektör ve alarm gibi sinyal vericiler mevcut mu?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Sıvı yakıtlı kazan dairelerinde yakıt tankları ve yakıt tesisatlarından kaynaklanan kaçaklar var mı?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Sıvı yakıtlı ve doğalgazlı sistemlerde yangın, deprem ve statik elektrik ile ilgili güvenlik sistemleri var mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Yangın algılama ve bildirme tesisatı yapılmış mı?",
+      "madde_sira": 4
+    },
+    {
+      "soru": "Elektrik panoları, aydınlatma ve diğer kablo tesisatları exproof malzemelerden yapılmış mı?",
+      "madde_sira": 5
+    },
+    {
+      "soru": "Kazanın bakımı ile bacaların temizliği ve kontrolü yetkili kişi/kuruluşlara periyodik olarak yaptırılıyor mu?",
+      "madde_sira": 6
+    },
+    {
+      "soru": "Sorumlu haricindeki kişilerin girmesini engelleyici tedbirler alınıyor mu?",
+      "madde_sira": 7
+    },
+    {
+      "soru": "Kaloriferci “Yetkili Kaloriferci Ateşçi Belgesine sahip mi?",
+      "madde_sira": 8
+    }
+  ],
+  "Elektrik Odası/Pano": [
+    {
+      "soru": "Kaçak akım rölesi ana elektrik hattına bağlanmış mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Elektrik/sigorta kutuları kilitlenmiş, yetkisiz kişilerin erişimleri önlenmiş mi?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Elektrik tesisatında uygun topraklama yapılmış mı?",
+      "madde_sira": 2
+    }
+  ],
+  "Depo/Arşiv": [
+    {
+      "soru": "Raflar; duvarlara ve birbirlerine monte edilmiş, uygun bağlantı elemanlarıyla devrilmeleri engelleniyor ve tüm dolaplar duvarlara uygun şekilde sabitleniyor mu?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Yüksek istifleme yapılan bölümlerdeki yükler çalışanların üzerine düşmeyecek şekilde sabitlenmiş mi?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Kimyasal içerikleri nedeniyle alevlenebilir ürünler; ısı, ışık ve diğer malzemelerden uzakta ve malzeme güvenlik formuna/ talimatlara uygun şekilde muhafaza ediliyor mu?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Kimyasal maddeler ve haşere ilaçları, yetkisiz kişilerin erişemeyeceği ve satıcıların talimatlarına uygun yerlerde muhafaza ediliyor mu?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Kimyasalların kullanıldığı ve bulunduğu alanlarda yeterli havalandırma sağlanıyor mu?",
+      "madde_sira": 4
+    },
+    {
+      "soru": "Birbirleri ile tepkimeye girerek tehlikeli salımlar oluşturabilecek maddeleri içeren kargoların ayrı yerlerde muhafaza edilmesi ve taşınması sağlanıyor mu?",
+      "madde_sira": 5
+    },
+    {
+      "soru": "Gaz tüpleri bina içinde muhafaza ediliyorsa bu tüpler güvenli bağlantı parçaları ile sabitlenmiş mi?",
+      "madde_sira": 6
+    },
+    {
+      "soru": "Elle taşınamayacak kadar ağır yüklerin çalışanlarca kaldırılması engelleniyor mu?",
+      "madde_sira": 7
+    },
+    {
+      "soru": "Yük platformu, trans palet, forklift gibi ekipmanların periyodik kontrol ve bakımları düzenli olarak yaptırılıyor mu?",
+      "madde_sira": 8
+    },
+    {
+      "soru": "Yangın merdiveni kapıları/acil çıkışların önünde ve tüm yol boyunca kaçışı engelleyecek bir malzeme bulunmaması sağlanıyor mu?",
+      "madde_sira": 9
+    }
+  ],
+  "Otopark": [
+    {
+      "soru": "Genel trafik ve yaya yolu birbirinden ayrılmış mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "LPG yakıtlı araçlar güvenli ortamlarda bulundurulmaktadır.",
+      "madde_sira": 1
+    }
+  ],
+  "Bahçe/Dış Alan": [
+    {
+      "soru": "Genel trafik ve yaya yolu birbirinden ayrılmış mı?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Gerektiğinde çalışanların toplanabileceği ve sığınabileceği kaçış alanları var mı?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Çatıda yapılan çalışmalar sırasında çalışanların, yüksekten düşmeye karşı gerekli önleyici ve koruyucu (emniyet kemeri vb.) tedbirleri almaları sağlanıyor mu?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Çalışanların iskele, merdiven, kaldırma platformları gibi yüksek yerlerde çalışırken düşme riskine karşı gerekli tedbirler alınıyor mu?",
+      "madde_sira": 3
+    }
+  ],
+  "Ofis": [
+    {
+      "soru": "Ofis içerisinde duvarlara monte edilmiş raflar, TV üniteleri veya diğer malzemeler çalışanların üzerine düşmeyecek şekilde sabitlenmiş mi?",
+      "madde_sira": 0
+    },
+    {
+      "soru": "Açıkta kablo bulunmamakta, prizlerin sağlamlığı düzenli olarak kontrol edilmekte mi?",
+      "madde_sira": 1
+    },
+    {
+      "soru": "Elektrikli ısıtıcı vb. cihazlar kullanılıyorsa, devrilme ihtimaline karşı gerekli tedbirler alınmış ve yanıcı malzemelerle temas etmeyecek şekilde yerleştirilmiş mi?",
+      "madde_sira": 2
+    },
+    {
+      "soru": "Ekranlı araçlar yükseklik, mesafe, parlaklık olarak rahat çalışmaya imkan verecek uygunlukta mı?",
+      "madde_sira": 3
+    },
+    {
+      "soru": "Otururarak yapılan çalışmalarda çalışma yüksekliği uygun mu?",
+      "madde_sira": 4
+    }
+  ],
+  "Soyunma Yeri": [
+    {
+      "soru": "Prizler ve elektrikli aletler ıslanma ihtimali olmayan yerlerde mi bulunuyor?",
+      "madde_sira": 0
+    }
+  ],
+  "İlkyardım Odası": [
+    {
+      "soru": "Acil durumlar için kapsamlı ilk yardım çantası, sedye ve kurtarma araçları mevcut mu?",
+      "madde_sira": 0
+    }
+  ],
+  "Dinlenme Yeri": []
 };
