@@ -7729,6 +7729,14 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
     kritikKontrol.push(girdi);
   }
 
+  // 2026-09-08 dis inceleme B07 duzeltmesi -- "Kalanları Onayla" beyanı
+  // (`kritikKontrolTamamlama` store'u) ESKİDEN export'a HİÇ girmiyordu --
+  // Desktop'un Faz 11 madde 8 uyarısı ("N mahalde kritik kontrol
+  // tamamlanmadı") bu yüzden kullanıcı gerçekten onaylamış olsa bile
+  // hep "tamamlanmadı" diyordu.
+  const tamamlamalar = (await dbIndexTumu('kritikKontrolTamamlama', 'denetimId', denetim.id))
+    .map(t => ({ odaId: t.odaId, zaman: t.zaman }));
+
   const paket = {
     denetim: {
       id: denetim.id,
@@ -7753,6 +7761,7 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
     },
     tespitler,
     kritikKontrol,
+    tamamlama: tamamlamalar,
     manifest: { dosyalar, fotoSayisi: dosyalar.length, sesDosyalari, sesSayisi: sesDosyalari.length }
   };
   return { paket, fotoGirdileri: ekGirdiler };

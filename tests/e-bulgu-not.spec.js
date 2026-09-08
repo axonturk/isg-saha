@@ -255,6 +255,21 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     expect(tamamlamalar.length).toBe(1);
   });
 
+  test('B07 -- Kalanlari Onayla sonrasi tamamlama beyani ZIPe export edilir', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    await page.click('#kk-kalanlari-onayla-btn');
+    await expect(page.locator('#kritik-kontrol-liste')).toContainText('tamamlandı');
+
+    const tamamlamalar = await storeTumu(page, 'kritikKontrolTamamlama');
+    expect(tamamlamalar.length).toBe(1);
+
+    const { paket } = await _zipPaketiniAl(page);
+    expect(paket.tamamlama).toBeTruthy();
+    expect(paket.tamamlama.length).toBe(1);
+    expect(paket.tamamlama[0].odaId).toBe(tamamlamalar[0].odaId);
+    expect(paket.tamamlama[0].zaman).toBe(tamamlamalar[0].zaman);
+  });
+
   test('ZIP export -- kritikKontrol[] gercekten yaziliyor, sorun_var bulgusu tespitler[]e KARISMAZ (PWA plani madde 9)', async ({ page }) => {
     await sahteKameraKur(page);
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
