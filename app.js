@@ -39,7 +39,7 @@ const APP_VERSION = 'v0.11.2';
 const APP_BUILD = '4R-PKG-3K';
 const APP_CACHE = 'isg-saha-v31';
 const DB_NAME = 'isgSahaDB';
-const DB_VERSION = 6;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
+const DB_VERSION = 7;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
                         // kanonik değildi); v4: 'dofler' deposu + birimId/
                         // dofUuid index'leri (PWA Commit 3A, replay-v2
@@ -48,7 +48,19 @@ const DB_VERSION = 6;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // yerel kanıt medyası -- bkz. openDB upgrade bloğu);
                         // v6: 'mahaller'/'ekipmanlar' depoları (SUPV-65 --
                         // Desktop'un sabit kimlik kısa kod sistemini
-                        // (SUPV-62/63/64) tüketir, bkz. kurumAgaciUpsertEt)
+                        // (SUPV-62/63/64) tüketir, bkz. kurumAgaciUpsertEt);
+                        // v7: 'kritikKontrolYanitlari'/'kritikKontrolTamamlama'
+                        // depoları (Faz 11 PWA planı madde 5, 2026-09-08) --
+                        // Desktop'un kritik_kontrol_yanitlari/kritik_kontrol_
+                        // tamamlama tablolarıyla AYNI alan isimleri/anlamı,
+                        // yalnız mahal_id yerine yerel odaId (currentSession.
+                        // odaId, bkz. startInspection) kullanılır -- bu
+                        // MAHALLER STORE'undaki (SUPV-65, QR-senkron) desktop
+                        // mahal id'siyle KARIŞTIRILMASIN, bambaşka bir kavram
+                        // (kritik kontrol Kurum→Birim→Oda akışının KENDİ
+                        // yerel oda kimliğini kullanır, ZIP export'ta
+                        // `odaId` olarak taşınır, zip_import.py::
+                        // mahal_getir_veya_olustur bunu ÇÖZER/YARATIR).
 
 // ─── STATE ───────────────────────────────────────────────────
 let currentSession    = null;   // aktif denetim kaydı (IndexedDB 'denetimler' satırı)
@@ -57,11 +69,17 @@ let sessionTimer      = null;
 let modalCallback     = null;
 let formConfirmCallback = null;
 let ocrStream         = null;
-let kameraModu        = 'kanit';  // 'kanit' (bulgu fotoğrafı) | 'etiket' (oda etiketi okuma)
+let kameraModu        = 'kanit';  // 'kanit' (bulgu fotoğrafı) | 'etiket' (oda etiketi okuma) |
+                                  // 'dof-kanit' (DÖF kanıt medyası) | 'kritik-kontrol' (Sorun Var kanıtı)
 let aktifFotolarTaslak = [];    // capturePhoto()'dan gelen, kayda hazır sıkıştırılmış fotolar (sınırsız)
 let aktifSeslerTaslak  = [];    // ses kayıtlarından gelen [{blob, sure}, ...] (sınırsız)
 let hayatiRiskAktif   = false;
-let checklistTaslak   = [];     // SUPV-22 -- tıklanan checklist chip metinleri (audit izi, Evet/Hayır YOK)
+// Faz 11 PWA planı madde 5 -- "Sorun Var" basılınca kamera açılırken bu
+// maddenin (kaynakKod+maddeSira) HANGİSİ olduğu burada tutulur; capturePhoto()
+// kameraModu==='kritik-kontrol' dalında bunu okuyup _kritikKontrolFotoKaydet'e
+// yönlendirir (dof-kanit'in kendi ayrı draft'ıyla AYNI ilke, aktifFotolarTaslak'a
+// HİÇ karışmaz).
+let kritikKontrolAktifMadde = null;
 let sesRecorder       = null;
 let sesChunks         = [];
 let secilenKat        = null;   // Ekran B'de seçili kat
@@ -442,6 +460,29 @@ function openDB() {
       // kullanmak ikinci taramayı sessizce EZERdi.
       if (!db.objectStoreNames.contains('askidaKayitlar')) {
         db.createObjectStore('askidaKayitlar', { keyPath: 'id' });
+      }
+
+      // v7 -- Hızlı Kritik Kontrol (Faz 11, PWA planı madde 5). keyPath
+      // sentetik bir dize (`${denetimId}|${odaId}|${kaynakKod}|${maddeSira}`)
+      // -- Desktop'un UNIQUE(denetim_id, mahal_id, kaynak_kod, madde_sira)
+      // kısıtının IndexedDB karşılığı, aynı maddeye tekrar cevap `put()`
+      // ile ÜZERİNE YAZAR (yeni satır AÇILMAZ) -- kritik_kontrol_yanit_
+      // kaydet'in "ikinci cevap günceller" davranışıyla AYNI.
+      let kkYanitStore;
+      if (!db.objectStoreNames.contains('kritikKontrolYanitlari')) {
+        kkYanitStore = db.createObjectStore('kritikKontrolYanitlari', { keyPath: 'key' });
+      } else {
+        kkYanitStore = e.target.transaction.objectStore('kritikKontrolYanitlari');
+      }
+      if (!kkYanitStore.indexNames.contains('denetimId')) {
+        kkYanitStore.createIndex('denetimId', 'denetimId', { unique: false });
+      }
+
+      // "Kalanları Onayla" beyanı -- (denetimId, odaId) başına TEK kayıt,
+      // Desktop'un kritik_kontrol_tamamlama tablosuyla AYNI ilke.
+      if (!db.objectStoreNames.contains('kritikKontrolTamamlama')) {
+        const s = db.createObjectStore('kritikKontrolTamamlama', { keyPath: 'key' });
+        s.createIndex('denetimId', 'denetimId', { unique: false });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -6548,9 +6589,12 @@ async function saveFinding() {
       })),
       sesler: aktifSeslerTaslak.map(s => ({ blob: s.blob, sure: s.sure })),
       hayatiRisk: hayatiRiskAktif,
-      // SUPV-22 -- tıklanan checklist chip metinleri (audit izi -- Evet/
-      // Hayır durumu TUTULMAZ, yalnız hangi hatırlatmaların kullanıldığı).
-      checklist: checklistTaslak.length ? checklistTaslak.slice() : null,
+      // SUPV-22 chip sistemi kaldırıldı (Faz 11 PWA planı madde 1,
+      // 2026-09-08) -- checklist alanı artık hiçbir zaman doldurulmuyor,
+      // ama alan adı/anlamı zip_import.py::_checklist_seri ile UYUMLU
+      // kalması için SİLİNMEDİ (bkz. `checklist_item` -- desktop tarafında
+      // ayrıca kritikKontrol akışıyla da doldurulabilir, bkz. _kritikKontrolFotoKaydet).
+      checklist: null,
       zaman: new Date().toISOString()
     };
     await dbEkle('bulgular', bulgu);
@@ -6579,81 +6623,240 @@ function _taslakTemizle() {
   aktifFotolarTaslak = [];
   aktifSeslerTaslak = [];
   hayatiRiskAktif = false;
-  checklistTaslak = [];
   _hayatiRiskButonGuncelle();
   _sesButonSifirla();
   _fotoOnizlemeGoster();
   _sesOnizlemeGoster();
   const metin = document.getElementById('finding-manual');
   if (metin) metin.value = '';
-  // SUPV-22 -- her yeni oda/oturuma girişte (startInspection/resumeSession,
-  // bu fonksiyonun kendi "HER giriş noktasında çağrılmalı" ilkesiyle AYNI)
-  // checklist chip'leri currentSession.alanTipi'ne göre yeniden kurulur.
-  _checklistChipleriGoster();
+  // Faz 11 PWA planı madde 1/3/5 (2026-09-08) -- SUPV-22'nin chip
+  // sistemi KALDIRILDI, yerini Hızlı Kritik Kontrol aldı. Her yeni
+  // oda/oturuma girişte (startInspection/resumeSession, bu fonksiyonun
+  // kendi "HER giriş noktasında çağrılmalı" ilkesiyle AYNI) liste
+  // currentSession.alanTipi/odaId'ye göre yeniden kurulur.
+  _kritikKontrolListesiGoster();
 }
 
-// ─── CHECKLIST KÜTÜPHANESİ CHIP'LERİ (SUPV-22, 2026-08-10) ──────────────
-// Desktop'un TAM yapılandırılmış formunun (Evet/Hayır/Gerekli Değil)
-// AKSİNE burada HAFİF chip UI -- dokununca metin nota EKLENİR, zorunlu
-// tamamlama/Evet-Hayır durumu TUTULMAZ (plan §7 "pasif hatırlatma"
-// kararı, 2026-08-10). checklistKaynagiBul (checklist-kutuphanesi.js)
-// yalnız basit anahtar-kelime eşleşmesi yapar -- eşleşme yoksa satır HİÇ
-// gösterilmez (zorunlu değil).
-function _checklistChipleriGoster() {
-  const baslik = document.getElementById('checklist-chip-baslik');
-  const grup = document.getElementById('checklist-chip-grup');
-  if (!baslik || !grup) return;
-  grup.innerHTML = '';
+// ─── HIZLI KRİTİK KONTROL (Faz 11, PWA planı madde 1/3/5, 2026-09-08) ───
+// SUPV-22'nin "chip -> nota metin ekle" (pasif hatırlatma) modelinin
+// YERİNİ ALIR -- Desktop'un kritik_kontrol_paneli.py/kritik_kontrol.py
+// ile AYNI 3-kademeli eşleşme (tesis_geneli + alan-tipi-özel + Genel
+// fallback) ve AYNI yapılandırılmış cevap modeli (Sorun Yok/Sorun Var/
+// Kapsam Dışı), PWA'nın daha basit veri modeline (tek `alanTipi` string,
+// FK yok -- bkz. checklist-kutuphanesi.js docstring'i) uyarlanmış:
+// `checklistKaynagiBul` (SUPV-22'den kalan anahtar-kelime eşleştirici,
+// checklist-kutuphanesi.js) hangi kaynak_kod'un uygulanacağını bulur,
+// `KRITIK_KONTROL_KUTUPHANESI` (kritik-kontrol-kutuphanesi.js, Desktop'un
+// tools/kritik_json_disa_aktar.py'sinden üretilir) o kaynağın kritik
+// maddelerini taşır. "Sorun Var" -> mevcut kamera akışı (openOCR/
+// capturePhoto, kameraModu='kritik-kontrol') yeniden kullanılır, doğrudan
+// bir bulgu oluşturur -- yeni bir kamera entegrasyonu YAZILMADI.
+//
+// Bir denetim = bir oda (bu PWA'nın basit modeli) olduğu için
+// `currentSession.odaId` doğrudan "mahal" kimliği olarak kullanılır --
+// desktop'taki `mahaller` store'u (SUPV-65, QR-senkron kısa kod sistemi)
+// İLE KARIŞTIRILMASIN, BAMBAŞKA bir kavram (bkz. DB_VERSION=7 yorumu).
+
+function _kritikKontrolKaynakBul() {
   const alanTipi = currentSession && currentSession.alanTipi;
-  if (!alanTipi || typeof checklistKaynagiBul !== 'function') {
-    baslik.style.display = 'none';
-    return;
-  }
+  if (!alanTipi || typeof checklistKaynagiBul !== 'function' ||
+      typeof KRITIK_KONTROL_KUTUPHANESI === 'undefined') return null;
   const kod = checklistKaynagiBul(alanTipi, null);
-  const kaynak = kod && CHECKLIST_KUTUPHANESI[kod];
-  if (!kaynak) {
-    baslik.style.display = 'none';
-    return;
+  const kaynak = kod && KRITIK_KONTROL_KUTUPHANESI[kod];
+  return (kaynak && kaynak.kritik_maddeler.length) ? { kod, kaynak } : null;
+}
+
+async function _kritikKontrolMaddeleriGetir() {
+  const bulunan = _kritikKontrolKaynakBul();
+  if (!bulunan) return [];
+  const { kod, kaynak } = bulunan;
+  const alanTipi = currentSession.alanTipi;
+  const odaId = currentSession.odaId;
+
+  // Desktop'un mahal_yanitlari/denetim_capinda_cevaplanmis AYRIMIYLA
+  // AYNI ilke (2026-09-08 P1 düzeltmesi, bkz. kritik_kontrol.py) -- A
+  // odasındaki cevap B odasında GÖRÜNMEMELİ, yalnız tesis_geneli
+  // maddelerin "bu denetimde herhangi bir odada zaten soruldu mu"
+  // kontrolü denetim çapında bakar.
+  const denetimYanitlari = await dbIndexTumu(
+    'kritikKontrolYanitlari', 'denetimId', currentSession.id);
+  const odaYanitHaritasi = new Map();
+  const denetimCapindaCevaplanmis = new Set();
+  for (const y of denetimYanitlari) {
+    if (y.kaynakKod !== kod) continue;
+    denetimCapindaCevaplanmis.add(y.maddeSira);
+    if (y.odaId === odaId) odaYanitHaritasi.set(y.maddeSira, y);
   }
+
+  const tesisGeneliAdaylari = kaynak.kritik_maddeler.filter(
+    m => m.tesis_geneli && !denetimCapindaCevaplanmis.has(m.madde_sira));
+  // BİLİNÇLİ BASİTLEŞTİRME: PWA'nın `alanTipi` etiketleri (ORTAK_ALANLAR/
+  // HIZLI_ALANLAR, ör. "Ofis / idari oda") Desktop'un `alan_tipleri`
+  // sözlüğüyle (GENEL_ALAN_TIPLERI, ör. "Ofis") BİREBİR AYNI DEĞİL --
+  // PWA'nın FK'siz/serbest-metin modelinde (checklistKaynagiBul'un KENDİ
+  // "basit anahtar-kelime eşleşmesi" ilkesiyle AYNI ruhta) tam eşitlik
+  // yerine iki-yönlü alt-dize eşleşmesi kullanılır.
+  const alanTipiKucuk = String(alanTipi).toLocaleLowerCase('tr-TR');
+  const alanTipiAdaylari = kaynak.kritik_maddeler.filter(m => {
+    if (m.tesis_geneli) return false;
+    return (m.alan_tipleri || []).some(dt => {
+      const dtKucuk = String(dt).toLocaleLowerCase('tr-TR');
+      return alanTipiKucuk.includes(dtKucuk) || dtKucuk.includes(alanTipiKucuk);
+    });
+  });
+
+  let secilenler;
+  if (alanTipiAdaylari.length) {
+    secilenler = tesisGeneliAdaylari.concat(alanTipiAdaylari);
+  } else {
+    const genelFallback = kaynak.kritik_maddeler.filter(
+      m => !m.tesis_geneli && (!m.alan_tipleri || m.alan_tipleri.length === 0));
+    secilenler = tesisGeneliAdaylari.concat(genelFallback);
+  }
+
+  return secilenler.map(m => ({
+    ...m,
+    kaynakKod: kod,
+    kaynakAd: kaynak.ad,
+    durum: odaYanitHaritasi.has(m.madde_sira) ? odaYanitHaritasi.get(m.madde_sira).durum : null,
+  }));
+}
+
+async function _kritikKontrolTamamlandiMi() {
+  if (!currentSession) return false;
+  const kayit = await dbGetir(
+    'kritikKontrolTamamlama', `${currentSession.id}|${currentSession.odaId}`);
+  return !!kayit;
+}
+
+async function _kritikKontrolListesiGoster() {
+  const baslik = document.getElementById('kritik-kontrol-baslik');
+  const altYazi = document.getElementById('kritik-kontrol-alt-yazi');
+  const liste = document.getElementById('kritik-kontrol-liste');
+  if (!baslik || !liste) return;
+  liste.innerHTML = '';
+
+  const bulunan = _kritikKontrolKaynakBul();
+  if (!bulunan) { baslik.style.display = 'none'; return; }
+  const maddeler = await _kritikKontrolMaddeleriGetir();
+  if (!maddeler.length) { baslik.style.display = 'none'; return; }
+
   baslik.style.display = '';
-  for (const madde of kaynak.maddeler) {
-    const chip = document.createElement('div');
-    chip.className = 'chip';
-    chip.textContent = madde;
-    // SUPV-25 (2026-08-11) -- daha önce tıklanmış maddeler (checklistTaslak'a
-    // zaten girmiş) YENİDEN oluşturulan chip listesinde "active" (mavi)
-    // görünür -- yeni oda/oturuma geçince taslak sıfırlandığı için burada
-    // her zaman GÜNCEL durumu yansıtır.
-    if (checklistTaslak.includes(madde)) chip.classList.add('active');
-    chip.onclick = () => _checklistChipTiklandi(madde, chip);
-    grup.appendChild(chip);
+  if (altYazi) altYazi.textContent = bulunan.kaynak.ad || '';
+
+  const _DURUM_RENK = { sorun_yok: '#27ae60', sorun_var: '#e74c3c', kapsam_disi: '#999' };
+  for (const m of maddeler) {
+    const satir = document.createElement('div');
+    satir.className = 'kritik-kontrol-satir';
+    satir.style.cssText = 'display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid #eee;';
+    satir.innerHTML = `
+      <div style="flex:1; font-size:0.85rem;">${_esc(m.soru)}</div>
+      <button type="button" class="kk-btn kk-yok" style="width:32px;height:32px;border-radius:6px;border:1px solid #ddd;background:${m.durum === 'sorun_yok' ? _DURUM_RENK.sorun_yok : '#fff'};color:${m.durum === 'sorun_yok' ? '#fff' : '#333'};">✓</button>
+      <button type="button" class="kk-btn kk-var" style="width:32px;height:32px;border-radius:6px;border:1px solid #ddd;background:${m.durum === 'sorun_var' ? _DURUM_RENK.sorun_var : '#fff'};color:${m.durum === 'sorun_var' ? '#fff' : '#333'};">!</button>
+      <button type="button" class="kk-btn kk-disi" style="width:32px;height:32px;border-radius:6px;border:1px solid #ddd;background:#fff;color:${m.durum === 'kapsam_disi' ? _DURUM_RENK.kapsam_disi : '#333'};">⋯</button>`;
+    satir.querySelector('.kk-yok').onclick = () => _kritikKontrolYanitVer(m, 'sorun_yok');
+    satir.querySelector('.kk-var').onclick = () => _kritikKontrolSorunVarBaslat(m);
+    satir.querySelector('.kk-disi').onclick = () => _kritikKontrolYanitVer(m, 'kapsam_disi');
+    liste.appendChild(satir);
+  }
+
+  const altBar = document.createElement('div');
+  altBar.style.cssText = 'margin-top:6px;';
+  const tamamlandiMi = await _kritikKontrolTamamlandiMi();
+  if (tamamlandiMi) {
+    altBar.innerHTML = '<span style="color:#27ae60;font-size:0.8rem;">✓ Kritik kontrol tamamlandı</span>';
+  } else {
+    altBar.innerHTML = '<button type="button" class="btn" id="kk-kalanlari-onayla-btn" style="font-size:0.8rem;padding:6px 10px;">Kalanları onayla</button>';
+  }
+  liste.appendChild(altBar);
+  if (!tamamlandiMi) {
+    document.getElementById('kk-kalanlari-onayla-btn').onclick = _kritikKontrolKalanlariOnayla;
   }
 }
 
-// SUPV-25 (2026-08-11) -- GERÇEK kullanımda kullanıcı chip'e dokununca
-// hiçbir görünür değişiklik FARK ETMEDİĞİNİ bildirdi (chip'in kendisi
-// hiç görsel durum değiştirmiyordu VE 3 satırlık textarea, 2. satırdan
-// itibaren TAŞIYOR ama otomatik aşağı kaymıyordu -- kullanıcı textarea'yı
-// elle kaydırmadıkça eklenen metni HİÇ GÖRMÜYORDU, 58 maddelik chip
-// listesi ekranda hareketsiz durduğu için "ayrı bir liste" izlenimi
-// yaratıyordu). Kod/veri KATMANI baştan beri doğruydu (bkz. e-bulgu-not.
-// spec.js testleri) -- eksik olan yalnız görsel GERİ BİLDİRİMDİ. Bu
-// fonksiyon artık: (a) textarea'yı yeni eklenen satırın görünür olacağı
-// şekilde aşağı kaydırır, (b) tıklanan chip'i kalıcı olarak "active"
-// (mavi) işaretler -- kullanıcı hangi maddelere zaten dokunduğunu tek
-// bakışta görür, (c) AYNI chip'e ikinci kez dokununca metni TEKRAR
-// EKLEMEZ (önceden sessizce yinelenen bir satır bug'ıydı -- checklistTaslak
-// zaten dedup ediyordu ama textarea metni ETMİYORDU).
-function _checklistChipTiklandi(metin, chipEl) {
-  const kutu = document.getElementById('finding-manual');
-  if (!kutu) return;
-  if (checklistTaslak.includes(metin)) return;  // zaten eklendi -- yinelenmez
-  const mevcut = kutu.value.trim();
-  kutu.value = mevcut ? mevcut + '\n' + metin : metin;
-  kutu.scrollTop = kutu.scrollHeight;
-  checklistTaslak.push(metin);
-  if (chipEl) chipEl.classList.add('active');
+async function _kritikKontrolYanitKaydet(m, durum, bulguId) {
+  const denetimId = currentSession.id, odaId = currentSession.odaId;
+  const key = `${denetimId}|${odaId}|${m.kaynakKod}|${m.madde_sira}`;
+  await dbGuncelle('kritikKontrolYanitlari', {
+    key, denetimId, odaId, kaynakKod: m.kaynakKod, maddeSira: m.madde_sira,
+    durum, bulguId: bulguId || null, zaman: new Date().toISOString(),
+  });
 }
+
+// "Sorun Yok"/"Kapsam Dışı" -- HER cevaplanan madde için (SORUN_YOK
+// dahil) kayıt yazılır, "kayıt yoksa sorunsuz say" türü bir ÖRTÜK
+// çıkarım BİLEREK kullanılmaz (Desktop'un aynı ilkesiyle AYNI, bkz.
+// migrasyon.py::_v81 docstring'i, hukuki savunulabilirlik gerekçesi).
+async function _kritikKontrolYanitVer(m, durum) {
+  await _kritikKontrolYanitKaydet(m, durum, null);
+  await _kritikKontrolListesiGoster();
+}
+if (typeof window !== 'undefined') window._kritikKontrolYanitVer = _kritikKontrolYanitVer;
+
+// "Sorun Var" -- fotoğrafsız kaydedilemez (plan madde 3: "Fotoğrafsız
+// geçiş engellenir"). Mevcut kamera akışını (openOCR/capturePhoto)
+// yeniden kullanır -- capturePhoto()'daki kameraModu==='kritik-kontrol'
+// dalı gerçek kaydı yapar (bkz. _kritikKontrolFotoKaydet).
+function _kritikKontrolSorunVarBaslat(m) {
+  kritikKontrolAktifMadde = m;
+  openOCR('kritik-kontrol');
+}
+if (typeof window !== 'undefined') window._kritikKontrolSorunVarBaslat = _kritikKontrolSorunVarBaslat;
+
+// capturePhoto()'nun kritik-kontrol dalından çağrılır -- AYNI maddeye
+// TEKRAR "Sorun Var" basılırsa (ek kanıt eklemek için) YENİ bir bulgu
+// AÇILMAZ, mevcut bulguya yeni fotoğraf eklenir (Desktop'un
+// kritik_kontrol_sorun_var_kaydet'iyle AYNI ilke). `kritikKontrol: true`
+// bayrağı -- bu bulgunun ZIP export'ta normal tespitler[] listesine
+// GİRMEMESİ için (bkz. _denetimPaketiOlustur) -- aksi halde desktop
+// ZIP alıcı ucu hem tespitler[] hem kritikKontrol[] üzerinden AYNI
+// gözlem için İKİ AYRI bulgu oluştururdu.
+async function _kritikKontrolFotoKaydet(sonuc) {
+  const m = kritikKontrolAktifMadde;
+  kritikKontrolAktifMadde = null;
+  if (!m || !currentSession) return;
+  const denetimId = currentSession.id, odaId = currentSession.odaId;
+  const key = `${denetimId}|${odaId}|${m.kaynakKod}|${m.madde_sira}`;
+  const mevcutYanit = await dbGetir('kritikKontrolYanitlari', key);
+  let bulguId = (mevcutYanit && mevcutYanit.durum === 'sorun_var') ? mevcutYanit.bulguId : null;
+  let bulgu = bulguId ? await dbGetir('bulgular', bulguId) : null;
+  if (!bulgu) {
+    bulguId = uuid();
+    bulgu = {
+      id: bulguId, denetimId, metin: m.soru, fotolar: [], sesler: [],
+      hayatiRisk: false, checklist: null, kritikKontrol: true,
+      zaman: new Date().toISOString(),
+    };
+    await dbEkle('bulgular', bulgu);
+  }
+  bulgu.fotolar.push({
+    blob: sonuc.blob, boyut: sonuc.sikistirilmisBoyut,
+    genislik: sonuc.genislik, yukseklik: sonuc.yukseklik,
+  });
+  await dbGuncelle('bulgular', bulgu);
+
+  await _kritikKontrolYanitKaydet(m, 'sorun_var', bulguId);
+
+  currentSession.guncelleme = new Date().toISOString();
+  await dbGuncelle('denetimler', currentSession);
+
+  await _kritikKontrolListesiGoster();
+  await renderFindings();
+}
+
+async function _kritikKontrolKalanlariOnayla() {
+  if (!currentSession) return;
+  const maddeler = await _kritikKontrolMaddeleriGetir();
+  for (const m of maddeler) {
+    if (!m.durum) await _kritikKontrolYanitKaydet(m, 'sorun_yok', null);
+  }
+  const denetimId = currentSession.id, odaId = currentSession.odaId;
+  await dbGuncelle('kritikKontrolTamamlama', {
+    key: `${denetimId}|${odaId}`, denetimId, odaId, zaman: new Date().toISOString(),
+  });
+  await _kritikKontrolListesiGoster();
+}
+if (typeof window !== 'undefined') window._kritikKontrolKalanlariOnayla = _kritikKontrolKalanlariOnayla;
 
 function addQuickFinding(text) {
   document.getElementById('finding-manual').value = text;
@@ -6943,6 +7146,14 @@ async function capturePhoto() {
   // ama SONUÇ/STATE tamamen ayrıdır.
   if (kameraModu === 'dof-kanit') {
     await _dofKanitFotoKaydet(sonuc, 'camera');
+    return;
+  }
+
+  // Faz 11 PWA planı madde 3 (2026-09-08) -- Hızlı Kritik Kontrol "Sorun
+  // Var" kanıtı. 'dof-kanit' İLE AYNI ilke: aktifFotolarTaslak'a HİÇ
+  // dokunmaz, doğrudan _kritikKontrolFotoKaydet'e yönlendirir.
+  if (kameraModu === 'kritik-kontrol') {
+    await _kritikKontrolFotoKaydet(sonuc);
     return;
   }
 
@@ -7336,7 +7547,14 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
     if (b) turBirimleri.push({ birimId: b.id, birimAdi: b.ad });
   }
 
-  const tespitler = bulgular.map(b => {
+  // Faz 11 PWA planı madde 7 (2026-09-08) -- kritikKontrol kaynaklı
+  // bulgular (b.kritikKontrol===true, bkz. _kritikKontrolFotoKaydet)
+  // normal tespitler[] listesine GİRMEZ: bunlar aşağıda AYRI bir
+  // `kritikKontrol[]` girdisi olarak taşınır, desktop'un zip_import.py'si
+  // onları `kritik_kontrol_sorun_var_kaydet_conn` ile KENDİ bulgusunu
+  // oluşturarak işler -- ikisine BİRDEN girerse AYNI gözlem için İKİ
+  // AYRI bulgu oluşurdu.
+  const tespitler = bulgular.filter(b => !b.kritikKontrol).map(b => {
     const bFotolar = b.fotolar || [];
     const bSesler = b.sesler || [];
     const fotoAdlari = bFotolar.map((foto, i) => {
@@ -7366,6 +7584,37 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
     };
   });
 
+  // Hızlı Kritik Kontrol yanıtları -- zip_import.py'nin beklediği şema
+  // (odaId/odaAdi/kat/kaynakKod/kaynakAd/maddeSira/soru/durum/fotolar,
+  // bkz. zip_import.py modül-üstü yorumu). "sorun_var" fotoğrafları
+  // İLGİLİ bulgudan (b.kritikKontrol===true) çekilir -- bulgunun kendisi
+  // tespitler[]'e GİRMEDİĞİ için buradaki foto adlandırması ('_kk_')
+  // yukarıdaki normal foto adlarıyla ÇAKIŞMAZ.
+  const kkYanitlari = await dbIndexTumu('kritikKontrolYanitlari', 'denetimId', denetim.id);
+  const kritikKontrol = [];
+  for (const y of kkYanitlari) {
+    const girdi = {
+      odaId: denetim.odaId, odaAdi: denetim.oda, kat: denetim.kat,
+      kaynakKod: y.kaynakKod, maddeSira: y.maddeSira, durum: y.durum,
+    };
+    if (y.durum === 'sorun_var' && y.bulguId) {
+      const bulgu = await dbGetir('bulgular', y.bulguId);
+      if (bulgu) {
+        girdi.soru = bulgu.metin;
+        const kaynakBilgi = (typeof KRITIK_KONTROL_KUTUPHANESI !== 'undefined')
+          ? KRITIK_KONTROL_KUTUPHANESI[y.kaynakKod] : null;
+        girdi.kaynakAd = kaynakBilgi ? kaynakBilgi.ad : y.kaynakKod;
+        girdi.fotolar = (bulgu.fotolar || []).map((foto, i) => {
+          const ad = `${denetim.id}_kk_${bulgu.id}_${i + 1}.jpg`;
+          dosyalar.push(ad);
+          ekGirdiler.push({ ad: `fotolar/${ad}`, veri: foto.blob });
+          return ad;
+        });
+      }
+    }
+    kritikKontrol.push(girdi);
+  }
+
   const paket = {
     denetim: {
       id: denetim.id,
@@ -7384,6 +7633,7 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       turBirimleri
     },
     tespitler,
+    kritikKontrol,
     manifest: { dosyalar, fotoSayisi: dosyalar.length, sesDosyalari, sesSayisi: sesDosyalari.length }
   };
   return { paket, fotoGirdileri: ekGirdiler };

@@ -62,11 +62,15 @@ test.describe('E. Yazılı bulgu kaydı', () => {
   });
 });
 
-// SUPV-22 (2026-08-10) -- Checklist Kütüphanesi HAFİF chip UI. Desktop'un
-// TAM formunun (Evet/Hayır/Gerekli Değil) AKSİNE burada dokununca metin
-// nota EKLENİR, zorunlu tamamlama/Evet-Hayır durumu TUTULMAZ (plan §7
-// "pasif hatırlatma" kararı). checklist-kutuphanesi.js'deki
-// checklistKaynagiBul basit anahtar-kelime eşleşmesi yapar.
+// Faz 11, PWA planı madde 1/3/5/9 (2026-09-08) -- SUPV-22'nin chip/pasif-
+// hatırlatma UI'sı KALDIRILDI, yerini Hızlı Kritik Kontrol'ün 2-butonlu
+// (Sorun Yok / Sorun Var) yapılandırılmış cevabı aldı. checklist-
+// kutuphanesi.js'deki checklistKaynagiBul (basit anahtar-kelime
+// eşleşmesi) HÂLÂ kullanılıyor -- yalnız artık CHECKLIST_KUTUPHANESI
+// (tüm maddeler) değil KRITIK_KONTROL_KUTUPHANESI (yalnız kritik
+// etiketliler) sorgulanıyor.
+const { sahteKameraKur } = require('./media-mocks');
+
 async function _denetimBaslatAlanTipiIle(page, alanTipiChipMetni) {
   const kurumAdi = benzersizAd('Kurum');
   const birimAdi = benzersizAd('Birim');
@@ -80,131 +84,113 @@ async function _denetimBaslatAlanTipiIle(page, alanTipiChipMetni) {
   await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
 }
 
-test.describe('SUPV-22 -- Checklist kütüphanesi chip UI', () => {
-  test('eslesen alan tipinde checklist basligi ve chip satiri gorunur', async ({ page }) => {
+test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)', () => {
+  test('eslesen alan tipinde kritik kontrol basligi ve madde satiri gorunur', async ({ page }) => {
     // HIZLI_ALANLAR.genel[0] === 'Ofis / idari oda' -- "ofis" anahtar
-    // kelimesi csgb_ofisler'e eşleşir.
+    // kelimesi csgb_ofisler'e eşleşir, o kaynağın kritik maddeleri vardır.
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    await expect(page.locator('#checklist-chip-baslik')).toBeVisible();
-    const ilkMadde = await page.evaluate(
-      () => window.CHECKLIST_KUTUPHANESI.csgb_ofisler.maddeler[0]);
-    await expect(page.locator('#checklist-chip-grup .chip').first()).toHaveText(ilkMadde);
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    await expect(page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first()).toBeVisible();
   });
 
-  test('eslesmeyen alan tipinde checklist satiri gizli kalir', async ({ page }) => {
+  test('eski chip elemanlari artik DOM da yok (kaldirildi)', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    await expect(page.locator('#checklist-chip-baslik')).toHaveCount(0);
+    await expect(page.locator('#checklist-chip-grup')).toHaveCount(0);
+  });
+
+  test('eslesmeyen alan tipinde kritik kontrol basligi gizli kalir', async ({ page }) => {
     // "Toplantı salonu" hiçbir kaynağın anahtarKelimeler listesiyle eşleşmez.
     await _denetimBaslatAlanTipiIle(page, 'Toplantı salonu');
-    await expect(page.locator('#checklist-chip-baslik')).toBeHidden();
-    await expect(page.locator('#checklist-chip-grup .chip')).toHaveCount(0);
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeHidden();
   });
 
-  test('chip tiklaninca metin NOTA EKLENIR, textarea OVERWRITE edilmez, otomatik kaydedilmez', async ({ page }) => {
+  test('Sorun Yok basilinca IndexedDBde durum=sorun_yok kaydedilir, bulgu OLUSMAZ', async ({ page }) => {
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    await page.locator('#finding-manual').fill('Elle yazılmış not.');
+    await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first()
+      .locator('.kk-yok').click();
 
-    await page.locator('#checklist-chip-grup .chip').first().click();
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar.length).toBe(1);
+    expect(yanitlar[0].durum).toBe('sorun_yok');
+    expect(yanitlar[0].kaynakKod).toBe('csgb_ofisler');
 
-    const ilkMadde = await page.evaluate(
-      () => window.CHECKLIST_KUTUPHANESI.csgb_ofisler.maddeler[0]);
-    await expect(page.locator('#finding-manual')).toHaveValue(`Elle yazılmış not.\n${ilkMadde}`);
-    // Zorunlu tamamlama YOK -- chip'e dokunmak KAYDETMEZ.
-    const bulgularOnce = await storeTumu(page, 'bulgular');
-    expect(bulgularOnce.length).toBe(0);
-  });
-
-  test('birden fazla chip tiklaninca hepsi alt alta eklenir ve kayitta checklist alanina yazilir', async ({ page }) => {
-    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    const chipler = page.locator('#checklist-chip-grup .chip');
-    await chipler.nth(0).click();
-    await chipler.nth(1).click();
-
-    const maddeler = await page.evaluate(
-      () => window.CHECKLIST_KUTUPHANESI.csgb_ofisler.maddeler.slice(0, 2));
-    await expect(page.locator('#finding-manual')).toHaveValue(maddeler.join('\n'));
-
-    await page.click('button[onclick="saveFinding()"]');
     const bulgular = await storeTumu(page, 'bulgular');
-    expect(bulgular[0].checklist).toEqual(maddeler);
+    expect(bulgular.length).toBe(0);
   });
 
-  // SUPV-25 (2026-08-11) -- gerçek kullanımda kullanıcı chip'e dokununca
-  // "hiçbir şey olmuyor, ayrı bir liste gibi görünüyor" bildirdi. Kod/veri
-  // katmanı baştan beri doğruydu (üstteki testler) -- eksik olan GÖRSEL
-  // GERİ BİLDİRİMDİ: 3 satırlık textarea 2. maddeden itibaren taşıyordu
-  // ama otomatik kaymıyordu, chip'in kendisi hiç görsel durum
-  // değiştirmiyordu. Bu 3 test o düzeltmeyi kalıcı regresyona bağlar.
-  test('chip tiklaninca "active" sinifi kalici olarak eklenir (gorsel geri bildirim)', async ({ page }) => {
+  test('Kapsam Disi basilinca durum=kapsam_disi kaydedilir', async ({ page }) => {
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    const ilkChip = page.locator('#checklist-chip-grup .chip').first();
-    await expect(ilkChip).not.toHaveClass(/active/);
-    await ilkChip.click();
-    await expect(ilkChip).toHaveClass(/active/);
+    await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first()
+      .locator('.kk-disi').click();
+
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar[0].durum).toBe('kapsam_disi');
   });
 
-  test('chip tiklaninca textarea yeni eklenen satirin gorunur olacagi sekilde asagi kayar', async ({ page }) => {
+  test('Sorun Var -- kamera acilir, fotografsiz kaydedilmez, foto cekince bulgu olusur', async ({ page }) => {
+    await sahteKameraKur(page);
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    const chipler = page.locator('#checklist-chip-grup .chip');
-    // 3 satirlik textarea'yi tasiracak kadar (2+ madde) tikla.
-    await chipler.nth(0).click();
-    await chipler.nth(1).click();
 
-    const kaydiginiDogrula = await page.locator('#finding-manual').evaluate((ta) => {
-      return ta.scrollTop + ta.clientHeight >= ta.scrollHeight - 2;
+    await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first()
+      .locator('.kk-var').click();
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    // Sahte video akışının gerçekten kare üretmeye başladığını bekle (bkz.
+    // ah-dof-kanit-medya.spec.js emsali) -- aksi halde capturePhoto()
+    // videoWidth=0 ile boş bir kare yakalar.
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
     });
-    expect(kaydiginiDogrula).toBe(true);
+
+    // Foto çekilmeden (kamera kapatılmadan) hiçbir kayıt OLUŞMAMALI.
+    let bulgular = await storeTumu(page, 'bulgular');
+    expect(bulgular.length).toBe(0);
+
+    await page.click('button[onclick="capturePhoto()"]');
+    // capturePhoto()'nun onclick işleyicisi ASENKRON (_kritikKontrolFotoKaydet
+    // IndexedDB yazımlarını await eder) -- Playwright'ın click() çağrısı
+    // bunu BEKLEMEZ, bu yüzden storeTumu ham okumasından ÖNCE otomatik
+    // TEKRAR-DENEYEN bir expect() ile (Saha Tespitleri listesi) işin
+    // gerçekten bittiği kanıtlanır.
+    await expect(page.locator('#findings-list .finding-item')).toHaveCount(1);
+
+    bulgular = await storeTumu(page, 'bulgular');
+    expect(bulgular.length).toBe(1);
+    expect(bulgular[0].kritikKontrol).toBe(true);
+    expect(bulgular[0].fotolar.length).toBe(1);
+
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar[0].durum).toBe('sorun_var');
+    expect(yanitlar[0].bulguId).toBe(bulgular[0].id);
   });
 
-  test('ayni chip ikinci kez tiklaninca metin TEKRAR EKLENMEZ (yineleme onlenir)', async ({ page }) => {
-    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    const ilkChip = page.locator('#checklist-chip-grup .chip').first();
-    await ilkChip.click();
-    const degerBirTiklamaSonra = await page.locator('#finding-manual').inputValue();
-
-    await ilkChip.click();  // ayni chip'e IKINCI tiklama
-    const degerIkiTiklamaSonra = await page.locator('#finding-manual').inputValue();
-
-    expect(degerIkiTiklamaSonra).toBe(degerBirTiklamaSonra);
-    expect(degerIkiTiklamaSonra.split('\n').length).toBe(1);
-
-    await page.click('button[onclick="saveFinding()"]');
-    const bulgular = await storeTumu(page, 'bulgular');
-    expect(bulgular[0].checklist.length).toBe(1);
-  });
-
-  test('checklist chip HIC tiklanmazsa kayitta checklist alani null kalir (eski davranisla ayni)', async ({ page }) => {
+  test('kritikKontrol bulgusu normal bulgu listesinden ayri sayilir (checklist alani null kalir)', async ({ page }) => {
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
     await page.locator('#finding-manual').fill('Sadece elle yazıldı.');
     await page.click('button[onclick="saveFinding()"]');
 
     const bulgular = await storeTumu(page, 'bulgular');
     expect(bulgular[0].checklist).toBeNull();
+    expect(bulgular[0].kritikKontrol).toBeUndefined();
   });
 
-  test('yeni bulgu kaydedilince checklist taslak sifirlanir, bir sonraki bulguya tasinmaz', async ({ page }) => {
-    // KÖK NEDEN NOTU (bu test önceden ara sıra başarısız oluyordu, teşhis
-    // edildi -- bkz. debug oturumu): uygulama mantığı HER ZAMAN doğruydu
-    // (checklistTaslak doğrudan __DEBUG hook'uyla 8/8 tekrarda [] olarak
-    // doğrulandı). Gerçek hata BU TESTTEYDİ: `bulgular[1]` -- IndexedDB
-    // `getAll()` insertion sırasına GÖRE DEĞİL, birincil anahtara (id =
-    // uuid(), rastgele) göre sıralar; iki bulgunun rastgele UUID'lerinin
-    // sözlük sırası hangi kaydın index 0/1'e düştüğünü belirliyordu --
-    // bir yazı-turadan farksızdı. Düzeltme: kaydı METNİYLE bul, dizideki
-    // KONUMUNA asla güvenme.
+  test('Kalanlari Onayla -- isaretlenmemis TUM maddeler sorun_yok olur, tamamlama kaydi olusur', async ({ page }) => {
     await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
-    await page.locator('#checklist-chip-grup .chip').first().click();
-    await page.click('button[onclick="saveFinding()"]');
-    await expect(page.locator('.finding-item')).toHaveCount(1);
+    const maddeSayisi = await page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').count();
+    expect(maddeSayisi).toBeGreaterThan(0);
 
-    // İkinci bulgu -- hiç chip tıklanmadı, taslak önceki bulgudan miras
-    // ALINMAMALI.
-    await page.locator('#finding-manual').fill('İkinci bulgu, chip yok.');
-    await page.click('button[onclick="saveFinding()"]');
-    await expect(page.locator('.finding-item')).toHaveCount(2);
+    await page.click('#kk-kalanlari-onayla-btn');
+    // Asenkron onclick -- storeTumu ham okumasından ÖNCE otomatik
+    // TEKRAR-DENEYEN bir expect() ile işin bittiği kanıtlanır (bkz.
+    // yukarıdaki "Sorun Var" testinin AYNI yorumu).
+    await expect(page.locator('#kritik-kontrol-liste')).toContainText('tamamlandı');
 
-    const bulgular = await storeTumu(page, 'bulgular');
-    expect(bulgular.length).toBe(2);
-    const ikinciBulgu = bulgular.find((b) => b.metin === 'İkinci bulgu, chip yok.');
-    expect(ikinciBulgu).toBeTruthy();
-    expect(ikinciBulgu.checklist).toBeNull();
+    const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
+    expect(yanitlar.length).toBe(maddeSayisi);
+    expect(yanitlar.every((y) => y.durum === 'sorun_yok')).toBe(true);
+
+    const tamamlamalar = await storeTumu(page, 'kritikKontrolTamamlama');
+    expect(tamamlamalar.length).toBe(1);
   });
 });

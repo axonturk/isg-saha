@@ -33,13 +33,21 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await dbTemizle(page);
   });
 
-  test('Senaryo A -- temiz kurulum: hic veritabani yokken acilinca kanonik v4 semasi olusur', async ({ page }) => {
+  test('Senaryo A -- temiz kurulum: hic veritabani yokken acilinca kanonik v7 semasi olusur', async ({ page }) => {
     await page.goto('/index.html');
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
+    // 2026-09-08 -- bu assertion v5'te dondurulmus kalmisti (SUPV-65'in
+    // v6 store'lari hic yansitilmamisti); Faz 11 PWA plani madde 5 (v7)
+    // ile birlikte guncel tam listeye getirildi (bkz. a-app-startup.spec.js
+    // ile AYNI duzeltme).
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(5);
-    expect(bilgi.storeAdlari).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofKanitlari', 'dofler', 'kurumlar']);
+    expect(bilgi.versiyon).toBe(7);
+    expect(bilgi.storeAdlari.sort()).toEqual([
+      'askidaKayitlar', 'ayarlar', 'birimler', 'bulgular', 'denetimler',
+      'dofKanitlari', 'dofler', 'ekipmanlar', 'kritikKontrolTamamlama',
+      'kritikKontrolYanitlari', 'kurumlar', 'mahaller',
+    ].sort());
     expect(bilgi.doflerBilgisi).toMatchObject({
       keyPath: 'id',
       autoIncrement: false,
@@ -73,7 +81,7 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(5);
+    expect(bilgi.versiyon).toBe(7);
     expect(bilgi.storeAdlari).toContain('dofler');
     expect(bilgi.storeAdlari).toContain('dofKanitlari');
     expect(bilgi.doflerBilgisi.indexNames).toEqual(['birimId', 'dofUuid']);
@@ -151,7 +159,7 @@ test.describe('L. IndexedDB v2->v4 migration', () => {
     await expect(page.locator('#screen-setup')).toHaveClass(/active/);
 
     const bilgi = await rawDbBilgisi(page);
-    expect(bilgi.versiyon).toBe(5);
+    expect(bilgi.versiyon).toBe(7);
     expect(bilgi.storeAdlari).toContain('dofler');
     expect(bilgi.storeAdlari).toContain('dofKanitlari');
     // birimId korunmuş, dofUuid yeni oluşturulmuş.

@@ -11,10 +11,17 @@
     <!-- Kurum/Birim QR Aktarımı (2026-08-02) -- offline-first ilkesi gereği
          CDN değil yerel vendor dosyası (bkz. vendor/jsqr.min.js). -->
     <script src="vendor/jsqr.min.js"></script>
-    <!-- Checklist Kütüphanesi (SUPV-22, 2026-08-10) -- Desktop'un
-         checklist_kutuphanesi.py'sinden üretilen veri, app.js'den ÖNCE
-         yüklenmeli (CHECKLIST_KUTUPHANESI/checklistKaynagiBul global). -->
+    <!-- Checklist Kütüphanesi (SUPV-22, 2026-08-10) -- chip sistemi
+         KALDIRILDI (Faz 11 PWA planı madde 1, 2026-09-08), ama
+         `checklistKaynagiBul` fonksiyonu HÂLÂ kullanılıyor (Hızlı Kritik
+         Kontrol'ün hangi kaynak_kod'u uygulayacağını bulmak için, bkz.
+         app.js::_kritikKontrolKaynakBul) -- bu yüzden dosya SİLİNMEDİ. -->
     <script src="checklist-kutuphanesi.js"></script>
+    <!-- Hızlı Kritik Kontrol Kütüphanesi (Faz 11, PWA planı madde 2/5,
+         2026-09-08) -- Desktop'un tools/kritik_json_disa_aktar.py'sinden
+         üretilir (KRITIK_KONTROL_KUTUPHANESI/KRITIK_KONTROL_SURUM_TARIHI
+         global), app.js'den ÖNCE yüklenmeli. -->
+    <script src="kritik-kontrol-kutuphanesi.js"></script>
     <style>
         :root {
             --primary: #2c3e50;
@@ -749,12 +756,14 @@
                 <div class="chip" onclick="addQuickFinding('Kablo Dağınıklığı')">Kablo</div>
                 <div class="chip" onclick="addQuickFinding('Priz Yerinden Çıkmış')">Priz</div>
             </div>
-            <!-- Checklist Kütüphanesi (SUPV-22) -- pasif hatırlatma: dokununca
-                 nota metin eklenir, zorunlu tamamlama/Evet-Hayır durumu YOK. -->
-            <div id="checklist-chip-baslik" class="bulgu-alt-baslik" style="display:none; margin-top:15px">
-                Kontrol Listesi Hatırlatması (dokunun, nota eklenir)
+            <!-- Hızlı Kritik Kontrol (Faz 11, PWA planı madde 1/3/5, 2026-09-08)
+                 -- SUPV-22'nin chip/pasif-hatırlatma sistemini KALDIRDI, yerini
+                 yapılandırılmış Sorun Yok/Sorun Var/Kapsam Dışı cevabı aldı
+                 (bkz. app.js::_kritikKontrolListesiGoster). -->
+            <div id="kritik-kontrol-baslik" class="bulgu-alt-baslik" style="display:none; margin-top:15px">
+                Hızlı Kritik Kontrol <span id="kritik-kontrol-alt-yazi" style="font-weight:normal;font-size:0.75rem;color:#888"></span>
             </div>
-            <div id="checklist-chip-grup" class="chip-group"></div>
+            <div id="kritik-kontrol-liste"></div>
             <button id="btn-hayati-risk" class="btn hayati-risk-btn" style="margin-top:15px" onclick="toggleHayatiRisk()">
                 <i class="fas fa-triangle-exclamation"></i> <span id="hayati-risk-etiket">Hayati Risk İşaretle</span>
             </button>

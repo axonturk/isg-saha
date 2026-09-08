@@ -37,6 +37,7 @@ const { benzersizAd, gercekKurumEkle, gercekBirimEkle, storeTumu } = require('./
 const { dbTemizle } = require('./migration-helpers');
 const { dofIceriAktarDene } = require('./dof-import-helpers');
 const { gecerliDofKaydi, gecerliDofPaketi } = require('./dof-import-fixtures');
+const { sahteKameraKur } = require('./media-mocks');
 
 test.describe.configure({ mode: 'serial' });
 
@@ -68,7 +69,15 @@ test.describe('SUPV-23 -- Checklist -> Bulgu -> [Desktop DÖF] -> DÖF Sonra zin
     await dbTemizle(page);
   });
 
-  test('A+B. Gerçek checklist maddesine dokununca sahada bulgu notu üretilir (chip -> not, kayıt)', async ({ page }) => {
+  test('A+B. Gerçek kritik kontrol maddesine "Sorun Var" basılınca sahada bulgu üretilir (Faz 11)', async ({ page }) => {
+    // 2026-09-08 -- SUPV-22'nin chip->not sistemi kaldırıldığı için bu
+    // test artık Hızlı Kritik Kontrol'ün "Sorun Var" akışını kullanır
+    // (fotoğraf ZORUNLU, mevcut kamera altyapısı yeniden kullanılır --
+    // bkz. app.js::_kritikKontrolFotoKaydet). Senaryonun ASIL amacı
+    // DEĞİŞMEDİ: gerçek bir resmi kontrol maddesinden sahada bir bulgu
+    // üretilir.
+    await sahteKameraKur(page);
+    await page.goto('/index.html');   // addInitScript sonrası sayfayı tazele (bkz. ah-dof-kanit-medya.spec.js emsali)
     const kurumAdi = benzersizAd('AhsapAtolye');
     const birimAdi = benzersizAd('Atolye');
     await gercekKurumEkle(page, kurumAdi);
@@ -81,18 +90,23 @@ test.describe('SUPV-23 -- Checklist -> Bulgu -> [Desktop DÖF] -> DÖF Sonra zin
     await page.click('button[onclick="startInspection()"]');
     await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
 
-    await expect(page.locator('#checklist-chip-baslik')).toBeVisible();
-    const madde = await page.evaluate(() => window.CHECKLIST_KUTUPHANESI.csgb_ofisler.maddeler[0]);
-    await page.locator('#checklist-chip-grup .chip').first().click();
-    await expect(page.locator('#finding-manual')).toHaveValue(madde);
-
-    await page.click('button[onclick="saveFinding()"]');
+    await expect(page.locator('#kritik-kontrol-baslik')).toBeVisible();
+    const ilkSatir = page.locator('#kritik-kontrol-liste .kritik-kontrol-satir').first();
+    const madde = await ilkSatir.locator('div').first().innerText();
+    await ilkSatir.locator('.kk-var').click();
+    await expect(page.locator('#camera-ui')).toBeVisible();
+    await page.waitForFunction(() => {
+      const v = document.getElementById('video');
+      return v && v.videoWidth > 0;
+    });
+    await page.click('button[onclick="capturePhoto()"]');
     await expect(page.locator('.finding-item')).toHaveCount(1);
 
     const bulgular = await storeTumu(page, 'bulgular');
     expect(bulgular.length).toBe(1);
     expect(bulgular[0].metin).toBe(madde);
-    expect(bulgular[0].checklist).toEqual([madde]);
+    expect(bulgular[0].kritikKontrol).toBe(true);
+    expect(bulgular[0].fotolar.length).toBe(1);
 
     // ── BOŞLUK (bilinçli, GİZLENMEDİ) ──────────────────────────────────
     // Bu bulgu PWA'da OTOMATİK olarak bir "ramak kala"ya, risk'e veya

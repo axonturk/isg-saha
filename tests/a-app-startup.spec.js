@@ -31,13 +31,21 @@ test.describe('A. Uygulama başlangıcı', () => {
   // silinmedi -- pozitife çevrildi.
   // PWA Commit 4P (bilinçli güncelleme): DB_VERSION 4->5, yeni `dofKanitlari`
   // store'u (DÖF kanıt medyası) eklendi -- bkz. app.js::openDB.
-  test('IndexedDB v5 temiz kurulumda kanonik dofler + dofKanitlari store\'larını oluşturur', async ({ page }) => {
+  // SUPV-65 (bilinçli güncelleme): DB_VERSION 5->6, `mahaller`/`ekipmanlar`/
+  // `askidaKayitlar` store'ları eklendi (bu test o zaman güncellenmemiş
+  // kalmıştı -- 2026-09-08'de fark edilip birlikte düzeltildi).
+  // Faz 11 PWA planı madde 5 (bilinçli güncelleme, 2026-09-08): DB_VERSION
+  // 6->7, `kritikKontrolYanitlari`/`kritikKontrolTamamlama` store'ları
+  // eklendi (Hızlı Kritik Kontrol -- bkz. app.js::openDB).
+  test('IndexedDB v7 temiz kurulumda kanonik tum store\'lari olusturur', async ({ page }) => {
     await page.goto('/index.html');
     const { adlar, versiyon } = await storeAdlari(page);
 
-    expect(versiyon).toBe(5);
-    expect(adlar.sort()).toEqual(['ayarlar', 'birimler', 'bulgular', 'denetimler', 'dofKanitlari', 'dofler', 'kurumlar'].sort());
-    expect(adlar).toContain('dofler');
-    expect(adlar).toContain('dofKanitlari');
+    expect(versiyon).toBe(7);
+    expect(adlar.sort()).toEqual([
+      'askidaKayitlar', 'ayarlar', 'birimler', 'bulgular', 'denetimler',
+      'dofKanitlari', 'dofler', 'ekipmanlar', 'kritikKontrolTamamlama',
+      'kritikKontrolYanitlari', 'kurumlar', 'mahaller',
+    ].sort());
   });
 });
