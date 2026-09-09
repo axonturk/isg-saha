@@ -6723,6 +6723,14 @@ async function _kritikKontrolKaynaklariBul() {
       ? checklistKaynagiBul(currentSession.alanTipi, null) : null;
     kodlar = eskiKod ? [eskiKod, ...evrensel] : evrensel;
   }
+  // İkinci bağımsız inceleme R11 düzeltmesi (2026-09-09) -- `eskiKod`
+  // genelde ZATEN `evrensel` içinde de bulunuyor (ör. "csgb_kanal_
+  // kazisi" hem alan-tipi eşleşmesiyle HEM evrensel listede geliyor),
+  // aynı kaynak iki kez işlenip maddeler tekrarlanıyordu (doğrulandı:
+  // 21 satır/14 benzersiz kimlik). Madde üretiminden ÖNCE kaynak
+  // kodları tekilleştirilir -- yeni bir birleştirme kuralı İCAT
+  // EDİLMEDİ, yalnız var olan listedeki yinelenenler kaldırıldı.
+  kodlar = [...new Set(kodlar)];
   return kodlar
     .map(kod => ({ kod, kaynak: KRITIK_KONTROL_KUTUPHANESI[kod] }))
     .filter(x => x.kaynak && x.kaynak.kritik_maddeler && x.kaynak.kritik_maddeler.length);
@@ -6818,7 +6826,25 @@ async function _kritikKontrolMaddeleriGetir() {
     }
   }
 
-  return secilenler.map(m => {
+  // İkinci bağımsız inceleme R11 düzeltmesi (2026-09-09) -- kaynak
+  // listesi artık tekilleştirildiği için (bkz. _kritikKontrolKaynaklariBul)
+  // bu döngü normalde hiç tekrar üretmemeli; yine de SON LİSTEDE bir
+  // bütünlük kontrolü tutulur -- aynı (kaynakKod, madde_sira) ikinci kez
+  // görülürse SESSİZCE yutulmaz, tanılama için loglanır (aynı kimlik
+  // FARKLI içerikle geliyorsa bu sıradan tekrar değil, veri çakışmasıdır).
+  const gorulenAnahtarlar = new Set();
+  const tekillestirilmis = [];
+  for (const m of secilenler) {
+    const anahtar = `${m.kaynakKod}|${m.madde_sira}`;
+    if (gorulenAnahtarlar.has(anahtar)) {
+      console.warn('[kritik-kontrol] Tekrarlayan madde kimliği atlandı:', anahtar, m);
+      continue;
+    }
+    gorulenAnahtarlar.add(anahtar);
+    tekillestirilmis.push(m);
+  }
+
+  return tekillestirilmis.map(m => {
     const anahtar = `${m.kaynakKod}|${m.madde_sira}`;
     return {
       ...m,

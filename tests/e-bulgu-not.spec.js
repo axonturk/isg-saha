@@ -134,6 +134,24 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     expect(maddeler).toBeGreaterThan(0);
   });
 
+  test('R11 -- kanal kazısı anahtar kelimesiyle eşleşen alan tipinde kaynak listesi tekilleştirilir', async ({ page }) => {
+    // İkinci bağımsız inceleme R11 (2026-09-09): "csgb_kanal_kazisi"
+    // hem eski tek-kaynak (anahtar-kelime) eşleşmesiyle HEM evrensel
+    // kaynak listesinde geliyordu -- sektörsüz kurumda [eskiKod,
+    // ...evrensel] birleştirmesi aynı kodu iki kez üretiyordu (21
+    // satır/14 benzersiz kimlik, gerçek veriyle doğrulandı).
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const kodlar = await page.evaluate(async () => {
+      const eski = currentSession.alanTipi;
+      currentSession.alanTipi = 'Kanal Kazısı Alanı';
+      const kaynaklar = await _kritikKontrolKaynaklariBul();
+      currentSession.alanTipi = eski;
+      return kaynaklar.map(k => k.kod);
+    });
+    expect(kodlar).toContain('csgb_kanal_kazisi');
+    expect(new Set(kodlar).size).toBe(kodlar.length);
+  });
+
 
   test('eslesen alan tipinde kritik kontrol basligi ve madde satiri gorunur', async ({ page }) => {
     // HIZLI_ALANLAR.genel[0] === 'Ofis / idari oda' -- "ofis" anahtar
