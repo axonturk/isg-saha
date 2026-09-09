@@ -84,6 +84,13 @@ let sesRecorder       = null;
 let sesChunks         = [];
 let secilenKat        = null;   // Ekran B'de seçili kat
 let secilenAlanTipi   = null;   // Ekran B'de seçili alan tipi (chip veya dropdown)
+// İkinci bağımsız inceleme R08 (2026-09-09) -- QR/kısa kodla çözülen bir
+// mahalin Desktop'taki ÖNCELİKLİ (ilk) etiketi dışındaki etiketleri.
+// "Bir oda = öncelikli TEK alanTipi" temel varsayımı KORUNDU (secilenAlanTipi
+// hâlâ tekil); bunlar yalnız EK olarak taşınır (kritik kontrol eşleşmesi +
+// ZIP export -> Desktop mahal etiketleri). Elle chip/dropdown seçiminde
+// HER ZAMAN boş.
+let secilenEkAlanTipleri = [];
 let secilenMevcutOdaId = null;  // "Bu kattaki mevcut odalar"dan seçilirse dolu — yeni oda oluşturulmaz
 let secilenTur        = 'saha'; // 'saha' (Saha Denetimi) | 'risk' (Risk Analizi) — masaüstü bu etikete göre yönlendirir
 let secilenTurBirimIdleri = [];  // SUPV-49 -- "bu turda gezdiğim diğer birimler" İPUCU (bağlayıcı değil,
@@ -6037,7 +6044,11 @@ if (typeof window !== 'undefined') window._kisaKodBildirimGoster = _kisaKodBildi
  *   secilenAlanTipi = mahal.etiketler[0] || 'Genel'  -- mahalin kendi
  *     etiketi yoksa startInspection()'ın ZORUNLU kıldığı alan tipini
  *     dolduracak makul bir varsayılan; kullanıcı ekranda GÖRÜR/isterse
- *     elle değiştirir, gizli bir varsayım değil. */
+ *     elle değiştirir, gizli bir varsayım değil.
+ *   secilenEkAlanTipleri = mahal.etiketler.slice(1)  -- İkinci bağımsız
+ *     inceleme R08 (2026-09-09): ESKİDEN yalnız [0] kullanılıp Desktop'un
+ *     mahale verdiği diğer etiketler sessizce düşüyordu; artık kalanlar
+ *     EK etiket olarak taşınır (bkz. secilenEkAlanTipleri tanımı). */
 async function kisaKodBaglamiUygula(baglam) {
   const oncekiKurumId = currentSession ? currentSession.kurumId : null;
 
@@ -6060,7 +6071,10 @@ async function kisaKodBaglamiUygula(baglam) {
   if (birimSel) birimSel.value = mahal.birimId;
 
   secilenKat = mahal.kat || 'Zemin';
-  secilenAlanTipi = (mahal.etiketler && mahal.etiketler[0]) || 'Genel';
+  const mahalEtiketleri = (Array.isArray(mahal.etiketler) ? mahal.etiketler : [])
+    .filter((e) => typeof e === 'string' && e.trim());
+  secilenAlanTipi = mahalEtiketleri[0] || 'Genel';
+  secilenEkAlanTipleri = mahalEtiketleri.slice(1);
   const odaAdi = ekipman ? `${mahal.ad} — ${ekipman.ad}` : mahal.ad;
 
   // startInspection()'ın kendi "yeni oda" dalı `ad`'i `${alanTipi} ${odaNo}`
@@ -6095,6 +6109,12 @@ async function kisaKodBaglamiUygula(baglam) {
     odaKaydi = { id: mahal.id, kat: secilenKat, alanTipi: secilenAlanTipi, no: '', ad: odaAdi };
     birim.odalar.push(odaKaydi);
   }
+  // R08 -- ek etiketler HER SEFERİNDE Desktop'tan gelen değerle tazelenir
+  // (mahal etiketleri için Desktop tek yetkili kaynak, bkz.
+  // kurumAgaciUpsertEt'in "etiketler HER ZAMAN Desktop'tan" ilkesi);
+  // öncelikli `alanTipi` mevcut davranışta kalır (find-or-create
+  // sürekliliği), yalnız EK liste yenilenir.
+  odaKaydi.ekAlanTipleri = secilenEkAlanTipleri;
   await dbGuncelle('birimler', birim);
   secilenMevcutOdaId = odaKaydi.id;
   const odaNoAlani = document.getElementById('kat-alan-oda-no');
@@ -6212,6 +6232,7 @@ async function _katChipleriCiz(katlar, secilecekKat) {
       c.classList.add('active');
       secilenKat = kat;
       secilenAlanTipi = null;
+      secilenEkAlanTipleri = [];
       secilenMevcutOdaId = null;
       document.getElementById('kat-alan-oda-no').value = '';
       _katAlanMevcutOdalariGoster();
@@ -6221,6 +6242,7 @@ async function _katChipleriCiz(katlar, secilecekKat) {
   });
   secilenKat = secilecekKat;
   secilenAlanTipi = null;
+  secilenEkAlanTipleri = [];
   secilenMevcutOdaId = null;
   document.getElementById('kat-alan-oda-no').value = '';
   document.getElementById('kat-alan-oda-adaylar').innerHTML = '';
@@ -6283,6 +6305,7 @@ async function _odaSil(odaId) {
   if (secilenMevcutOdaId === odaId) {
     secilenMevcutOdaId = null;
     secilenAlanTipi = null;
+    secilenEkAlanTipleri = [];
     document.getElementById('kat-alan-oda-no').value = '';
   }
   await _katAlanMevcutOdalariGoster();
@@ -6308,6 +6331,7 @@ async function _katAlanMevcutOdaSec(odaId, el) {
 
   secilenMevcutOdaId = oda.id;
   secilenAlanTipi = oda.alanTipi;
+  secilenEkAlanTipleri = Array.isArray(oda.ekAlanTipleri) ? oda.ekAlanTipleri : [];
   document.getElementById('kat-alan-oda-no').value = oda.no || '';
   document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -6342,6 +6366,7 @@ function _katAlanChipSec(el) {
   document.querySelectorAll('#kat-alan-hizli-chips .chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
   secilenAlanTipi = el.dataset.alan;
+  secilenEkAlanTipleri = [];
   secilenMevcutOdaId = null;
   document.getElementById('kat-alan-alan-dropdown').value = secilenAlanTipi;
   document.querySelectorAll('#kat-alan-mevcut-odalar .chip').forEach(c => c.classList.remove('active'));
@@ -6352,6 +6377,7 @@ function _katAlanDropdownDegisti() {
   const deger = document.getElementById('kat-alan-alan-dropdown').value;
   if (!deger) return;
   secilenAlanTipi = deger;
+  secilenEkAlanTipleri = [];
   secilenMevcutOdaId = null;
   document.querySelectorAll('#kat-alan-hizli-chips .chip').forEach(c => {
     c.classList.toggle('active', c.dataset.alan === deger);
@@ -6360,13 +6386,27 @@ function _katAlanDropdownDegisti() {
 }
 if (typeof window !== 'undefined') window._katAlanDropdownDegisti = _katAlanDropdownDegisti;
 
+// İkinci bağımsız inceleme R08 (2026-09-09) -- serbest metin girişi
+// KORUNDU (kullanıcının sigortası, sabit listeye ZORLANMAZ). Yalnız:
+// (1) ardışık boşluklar tek boşluğa iner (görüntü metni bunun dışında
+// kullanıcının yazdığı gibi kalır -- büyük/küçük harfe DOKUNULMAZ),
+// (2) aynı karşılaştırma anahtarına (alanTipiAnahtar: "sunucu odası" ==
+// "SUNUCU ODASI" == "sunucu odasi") düşen bir tip zaten varsa (sabit
+// liste VEYA önceki özel tip) ikinci bir kopya eklenmez -- _katEkle'nin
+// "Bu kat zaten var." deseniyle AYNI.
 async function _katAlanOzelAlanEkle() {
   const ad = prompt('Yeni alan tipi adı (örn: Sunucu Odası):');
   if (!ad || !ad.trim()) return;
+  const temiz = ad.trim().replace(/\s+/g, ' ');
   const birimId = document.getElementById('setup-birim').value;
   const birim = await dbGetir('birimler', birimId);
   if (!birim.ozelAlanlar) birim.ozelAlanlar = [];
-  birim.ozelAlanlar.push(ad.trim());
+  const anahtar = alanTipiAnahtar(temiz);
+  if (_birimAlanTipleri(birim).some((a) => alanTipiAnahtar(a) === anahtar)) {
+    alert('Bu alan tipi zaten var.');
+    return;
+  }
+  birim.ozelAlanlar.push(temiz);
   await dbGuncelle('birimler', birim);
   await _katAlanAlanTipleriGoster();
 }
@@ -6378,7 +6418,7 @@ async function _ozelAlanSil(ad) {
   const birim = await dbGetir('birimler', birimId);
   birim.ozelAlanlar = (birim.ozelAlanlar || []).filter(a => a !== ad);
   await dbGuncelle('birimler', birim);
-  if (secilenAlanTipi === ad) secilenAlanTipi = null;
+  if (secilenAlanTipi === ad) { secilenAlanTipi = null; secilenEkAlanTipleri = []; }
   await _katAlanAlanTipleriGoster();
 }
 if (typeof window !== 'undefined') window._ozelAlanSil = _ozelAlanSil;
@@ -6426,7 +6466,8 @@ async function startInspection() {
   if (!odaKaydi) {
     odaKaydi = {
       id: uuid(), kat: secilenKat, alanTipi: secilenAlanTipi, no: odaNo,
-      ad: odaNo ? `${secilenAlanTipi} ${odaNo}` : secilenAlanTipi
+      ad: odaNo ? `${secilenAlanTipi} ${odaNo}` : secilenAlanTipi,
+      ekAlanTipleri: secilenEkAlanTipleri,   // R08 -- elle akışta hep []
     };
     birim.odalar.push(odaKaydi);
     await dbGuncelle('birimler', birim);
@@ -6484,6 +6525,10 @@ async function startInspection() {
       odaId: odaKaydi.id,
       oda: odaKaydi.ad,
       alanTipi: odaKaydi.alanTipi,
+      // R08 (2026-09-09) -- Desktop'un mahale verdiği EK etiketler (QR/
+      // kısa kod akışında dolu, elle akışta []); kritik kontrol eşleşmesi
+      // + ZIP export kullanır.
+      ekAlanTipleri: Array.isArray(odaKaydi.ekAlanTipleri) ? odaKaydi.ekAlanTipleri : [],
       odaNo: odaKaydi.no,
       tur: secilenTur,
       sorumlu: resp,
@@ -6700,7 +6745,8 @@ function _taslakTemizle() {
 // YERİNİ ALIR -- Desktop'un kritik_kontrol_paneli.py/kritik_kontrol.py
 // ile AYNI 3-kademeli eşleşme (tesis_geneli + alan-tipi-özel + Genel
 // fallback) ve AYNI yapılandırılmış cevap modeli (Sorun Yok/Sorun Var/
-// Kapsam Dışı), PWA'nın daha basit veri modeline (tek `alanTipi` string,
+// Kapsam Dışı), PWA'nın daha basit veri modeline (öncelikli tek `alanTipi`
+// string + R08'den itibaren QR mahalinin EK etiketleri `ekAlanTipleri`,
 // FK yok -- bkz. checklist-kutuphanesi.js docstring'i) uyarlanmış:
 // `checklistKaynagiBul` (SUPV-22'den kalan anahtar-kelime eşleştirici,
 // checklist-kutuphanesi.js) hangi kaynak_kod'un uygulanacağını bulur,
@@ -6715,11 +6761,130 @@ function _taslakTemizle() {
 // desktop'taki `mahaller` store'u (SUPV-65, QR-senkron kısa kod sistemi)
 // İLE KARIŞTIRILMASIN, BAMBAŞKA bir kavram (bkz. DB_VERSION=7 yorumu).
 
-function _altDizeEslesiyorMu(a, b) {
-  const aKucuk = String(a).toLocaleLowerCase('tr-TR');
-  const bKucuk = String(b).toLocaleLowerCase('tr-TR');
-  return aKucuk.includes(bKucuk) || bKucuk.includes(aKucuk);
+// ─── SAF seçim kuralı -- Desktop kritik_kontrol.py ile ORTAK sözleşme ───
+// İkinci bağımsız inceleme R08/R09 (2026-09-09): "bu mahalde HANGİ maddeler
+// sorulmalı" kararı ESKİDEN burada Desktop'tan BAĞIMSIZ, elle yeniden
+// yazılmış ikinci bir algoritmayla veriliyordu ve Desktop'unkinden
+// SAPMIŞTI (ölçülen: sahada 24 madde, Desktop'ta 25 -- Desktop "alan-tipi
+// eşleşmesi yoksa" kaynak-içi Genel fallback'e düşerken burada bir de
+// "tesis-geneli DE yoksa" koşulu vardı; ayrıca eşleşme yalnız tr-TR
+// küçültmeyle yapılıyor, Desktop hiç normalize etmiyordu).
+//
+// ÇÖZÜM (offline-first BOZULMADAN -- PWA hâlâ internete ihtiyaç duymadan,
+// elindeki senkron KRITIK_KONTROL_KUTUPHANESI/SEKTOR_KAYNAKLARI/
+// GENEL_KRITIK_MADDELER verisinden karar verir): kural aşağıdaki SAF
+// fonksiyonlara indirgendi ve Desktop'un kritik_kontrol.py'deki AYNI ADLI
+// saf fonksiyonlarını (alan_tipi_eslesiyor_mu / kritik_madde_secimi /
+// genel_havuz_secimi / kritik_madde_secimi_coklu) BİREBİR mirror eder.
+// İki taraf, Desktop'ta GERÇEK Python çalıştırılarak üretilen
+// tests/fixtures/kritik_secim_parite.json altın değerleriyle birbirine
+// KİLİTLİDİR (tests/bc-kritik-secim-paritesi.spec.js) -- fixtures_desktop_
+// gercek.json ile AYNI ilke. Kuralı burada tek taraflı DEĞİŞTİRMEYİN;
+// Desktop'ta değiştirip `python tools/kritik_json_disa_aktar.py --parite`
+// ile fixture'ı yeniden üretin, sonra burayı eşitleyin.
+
+/** tr_metin.alan_tipi_anahtar ile BİREBİR: tr-TR küçült + kırp + ASCII
+ * katlama (ç/ğ/ı/ö/ş/ü + â/î/û) + "/" etrafındaki boşluklar atılır +
+ * ardışık boşluklar tek boşluk. GÖRÜNTÜ metni değil, yalnız KARŞILAŞTIRMA
+ * anahtarı -- sahada "kanal kazisi" yazılması ile Desktop'un "Kanal
+ * Kazısı" chip'i aynı şey sayılır; kullanıcının yazdığı metin ASLA bu
+ * anahtarla değiştirilmez. */
+const _ALAN_TIPI_ASCII_KATLAMA = {
+  'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u',
+  'â': 'a', 'î': 'i', 'û': 'u',
+};
+function alanTipiAnahtar(metin) {
+  let anahtar = String(metin == null ? '' : metin).trim().toLocaleLowerCase('tr-TR');
+  anahtar = anahtar.replace(/[çğıöşüâîû]/g, (h) => _ALAN_TIPI_ASCII_KATLAMA[h] || h);
+  anahtar = anahtar.replace(/\s*\/\s*/g, '/');
+  return anahtar.replace(/\s+/g, ' ').trim();
 }
+if (typeof window !== 'undefined') window.alanTipiAnahtar = alanTipiAnahtar;
+
+/** kritik_kontrol.alan_tipi_eslesiyor_mu ile BİREBİR: mahalin etiketleri
+ * (1..n) ile maddenin alan_tipleri arasında normalize + İKİ YÖNLÜ alt-dize
+ * ("Ofis / idari oda" PWA sözlüğü "Ofis" Desktop sözlüğünü kapsar,
+ * "Ofis" de "Açık Ofis Alanı"nı). Boş anahtar hiçbir şeyle eşleşmez. */
+function alanTipiEslesiyorMu(mahalEtiketleri, maddeAlanTipleri) {
+  const mahalAnahtarlari = (mahalEtiketleri || []).map(alanTipiAnahtar).filter(Boolean);
+  const maddeAnahtarlari = (maddeAlanTipleri || []).map(alanTipiAnahtar).filter(Boolean);
+  for (const ma of mahalAnahtarlari) {
+    for (const da of maddeAnahtarlari) {
+      if (ma === da || da.includes(ma) || ma.includes(da)) return true;
+    }
+  }
+  return false;
+}
+if (typeof window !== 'undefined') window.alanTipiEslesiyorMu = alanTipiEslesiyorMu;
+
+/** kritik_kontrol.kritik_madde_secimi ile BİREBİR -- TEK kaynağın kritik
+ * maddelerinden bu mahalde gösterilecekler:
+ *  1. tesis_geneli -- HER ZAMAN aday, ama `tesisGeneliCevaplanmisSiralar`
+ *     (ziyaret çapında zaten cevaplanmış madde_sira'lar) içindeyse düşer;
+ *  2. mahal etiketleriyle EŞLEŞEN (alanTipiEslesiyorMu) maddeler;
+ *  3. (2) HİÇ aday üretmediyse kaynak-içi Genel fallback (alan_tipleri boş,
+ *     tesis_geneli false) -- tesis-geneli adaylar YİNE korunur. R09: koşul
+ *     YALNIZ (2)'ye bağlı, (1)'in boşluğuna DEĞİL (eski "ikisi de boşsa"
+ *     koşulu kaldırıldı). */
+function kritikMaddeSecimi(kritikler, mahalEtiketleri, tesisGeneliCevaplanmisSiralar) {
+  const cevaplanmis = new Set(tesisGeneliCevaplanmisSiralar || []);
+  const tesisGeneliAdaylari = kritikler.filter(
+    (m) => m.tesis_geneli && !cevaplanmis.has(m.madde_sira));
+  const alanTipiAdaylari = kritikler.filter(
+    (m) => !m.tesis_geneli && alanTipiEslesiyorMu(mahalEtiketleri, m.alan_tipleri || []));
+  if (alanTipiAdaylari.length) return tesisGeneliAdaylari.concat(alanTipiAdaylari);
+  const genelFallback = kritikler.filter(
+    (m) => !m.tesis_geneli && (!m.alan_tipleri || m.alan_tipleri.length === 0));
+  return tesisGeneliAdaylari.concat(genelFallback);
+}
+if (typeof window !== 'undefined') window.kritikMaddeSecimi = kritikMaddeSecimi;
+
+/** kritik_kontrol.genel_havuz_secimi ile BİREBİR -- kaynaklar-arası Genel
+ * havuz (GENEL_KRITIK_MADDELER): mahal etiketlerinden biri bir genel alan
+ * tipiyle eşleşiyorsa VE kaynaklardan zaten seçilmiş maddelerin HİÇBİRİ o
+ * tipi kapsamıyorsa o tipin konsolide seti eklenir (kapsıyorsa çift
+ * gösterim olmasın diye eklenmez). Sıra: GENEL_KRITIK_MADDELER'in sabit
+ * anahtar sırası (Desktop'un GENEL_ALAN_TIPLERI sırası -- export aynı
+ * sırayı taşır; parite testi kümeyi karşılaştırır, sıra sözleşme değil). */
+function genelHavuzSecimi(mahalEtiketleri, secilenler) {
+  const sonuc = [];
+  if (typeof GENEL_KRITIK_MADDELER === 'undefined') return sonuc;
+  for (const alanTipi of Object.keys(GENEL_KRITIK_MADDELER)) {
+    if (!alanTipiEslesiyorMu(mahalEtiketleri, [alanTipi])) continue;
+    if (secilenler.some((m) => alanTipiEslesiyorMu([alanTipi], m.alan_tipleri || []))) continue;
+    const genelKaynakKod = `genel:${alanTipi}`;
+    for (const m of (GENEL_KRITIK_MADDELER[alanTipi] || [])) {
+      sonuc.push({
+        soru: m.soru, madde_sira: m.madde_sira, alan_tipleri: [alanTipi],
+        tesis_geneli: false, kaynakKod: genelKaynakKod, kaynakAd: `Genel — ${alanTipi}`,
+      });
+    }
+  }
+  return sonuc;
+}
+if (typeof window !== 'undefined') window.genelHavuzSecimi = genelHavuzSecimi;
+
+/** kritik_kontrol.kritik_madde_secimi_coklu ile BİREBİR -- `kaynaklar`
+ * ([{kod, kaynak}], _kritikKontrolKaynaklariBul çıktısı) HER birinden
+ * kritikMaddeSecimi + genelHavuzSecimi. `denetimCapindaCevaplanmis`:
+ * Set<'kaynakKod|maddeSira'> (ziyaret çapında cevaplananlar). `durum` YOK
+ * (DB katmanı ekler). */
+function kritikMaddeSecimiCoklu(kaynaklar, mahalEtiketleri, denetimCapindaCevaplanmis) {
+  const cevaplanmis = denetimCapindaCevaplanmis || new Set();
+  const secilenler = [];
+  for (const { kod, kaynak } of kaynaklar) {
+    const kritikler = (kaynak && kaynak.kritik_maddeler) || [];
+    if (!kritikler.length) continue;
+    const kaynakCevaplanmis = kritikler
+      .map((m) => m.madde_sira)
+      .filter((sira) => cevaplanmis.has(`${kod}|${sira}`));
+    for (const m of kritikMaddeSecimi(kritikler, mahalEtiketleri, kaynakCevaplanmis)) {
+      secilenler.push({ ...m, kaynakKod: kod, kaynakAd: kaynak.ad });
+    }
+  }
+  return secilenler.concat(genelHavuzSecimi(mahalEtiketleri, secilenler));
+}
+if (typeof window !== 'undefined') window.kritikMaddeSecimiCoklu = kritikMaddeSecimiCoklu;
 
 // 2026-09-08 dis inceleme B06 duzeltmesi -- ESKIDEN `checklistKaynagiBul`
 // (tek-kaynak, sektorden bagimsiz anahtar-kelime eslesmesi) kullaniliyordu;
@@ -6778,7 +6943,12 @@ async function _ziyaretDenetimGrubu() {
 async function _kritikKontrolMaddeleriGetir() {
   const kaynaklar = await _kritikKontrolKaynaklariBul();
   if (!kaynaklar.length) return [];
-  const alanTipi = currentSession.alanTipi;
+  // R08 (2026-09-09) -- öncelikli alanTipi + QR/kısa koddan gelen EK
+  // Desktop etiketleri BİRLİKTE (Desktop'un mahal_alan_tipleri_listele'si
+  // de mahalin TÜM etiketlerini verir).
+  const mahalEtiketleri = [currentSession.alanTipi]
+    .concat(Array.isArray(currentSession.ekAlanTipleri) ? currentSession.ekAlanTipleri : [])
+    .filter(Boolean);
   const odaId = currentSession.odaId;
 
   // Desktop'un mahal_yanitlari/denetim_capinda_cevaplanmis AYRIMIYLA AYNI
@@ -6801,55 +6971,12 @@ async function _kritikKontrolMaddeleriGetir() {
     if (y.odaId === odaId) odaYanitHaritasi.set(anahtar, y);
   }
 
-  // BİLİNÇLİ BASİTLEŞTİRME: PWA'nın `alanTipi` etiketleri (ORTAK_ALANLAR/
-  // HIZLI_ALANLAR, ör. "Ofis / idari oda") Desktop'un `alan_tipleri`
-  // sözlüğüyle (GENEL_ALAN_TIPLERI, ör. "Ofis") BİREBİR AYNI DEĞİL --
-  // PWA'nın FK'siz/serbest-metin modelinde iki-yönlü alt-dize eşleşmesi
-  // kullanılır (_altDizeEslesiyorMu, checklistKaynagiBul'un KENDİ "basit
-  // anahtar-kelime eşleşmesi" ilkesiyle AYNI ruhta).
-  let secilenler = [];
-  let alanTipiEslesmesiVarMi = false;
-  for (const { kod, kaynak } of kaynaklar) {
-    const tesisGeneliAdaylari = kaynak.kritik_maddeler.filter(
-      m => m.tesis_geneli && !denetimCapindaCevaplanmis.has(`${kod}|${m.madde_sira}`));
-    const alanTipiAdaylari = kaynak.kritik_maddeler.filter(m => {
-      if (m.tesis_geneli) return false;
-      return (m.alan_tipleri || []).some(dt => _altDizeEslesiyorMu(alanTipi, dt));
-    });
-    if (alanTipiAdaylari.length) alanTipiEslesmesiVarMi = true;
-    // Desktop'un mahal_icin_kritik_maddeler'indeki 3. kademe (Genel
-    // fallback) İLE AYNI: bu KAYNAK ne tesis_geneli ne alan-tipi eşleşmesi
-    // sağlamadıysa, o kaynağın kendi "alan_tipleri boş" maddeleri devreye
-    // girer (kaynak-içi fallback -- aşağıdaki GENEL_KRITIK_MADDELER
-    // havuzuyla KARIŞTIRILMASIN, o kaynaklar-arası bir fallback).
-    let buKaynaktanSecilenler = tesisGeneliAdaylari.concat(alanTipiAdaylari);
-    if (!tesisGeneliAdaylari.length && !alanTipiAdaylari.length) {
-      buKaynaktanSecilenler = kaynak.kritik_maddeler.filter(
-        m => !m.tesis_geneli && (!m.alan_tipleri || m.alan_tipleri.length === 0));
-    }
-    for (const m of buKaynaktanSecilenler) {
-      secilenler.push({ ...m, kaynakKod: kod, kaynakAd: kaynak.ad });
-    }
-  }
-
-  // Desktop'un mahal_icin_kritik_maddeler_coklu'sundaki cross-kaynak Genel
-  // havuz İLE AYNI: HİÇBİR kaynak bu alan tipine ÖZEL bir madde
-  // sağlamadıysa (yalnız kaynak-içi fallback'ler devreye girmiş olabilir),
-  // GENEL_KRITIK_MADDELER'daki sektörler-arası-paylaşımlı sete bakılır.
-  if (!alanTipiEslesmesiVarMi && typeof GENEL_KRITIK_MADDELER !== 'undefined') {
-    const eslesenAnahtar = Object.keys(GENEL_KRITIK_MADDELER).find(
-      dt => _altDizeEslesiyorMu(alanTipi, dt));
-    const genelMaddeler = eslesenAnahtar && GENEL_KRITIK_MADDELER[eslesenAnahtar];
-    if (genelMaddeler && genelMaddeler.length) {
-      const genelKaynakKod = `genel:${eslesenAnahtar}`;
-      for (const m of genelMaddeler) {
-        secilenler.push({
-          soru: m.soru, madde_sira: m.madde_sira, alan_tipleri: [eslesenAnahtar],
-          tesis_geneli: false, kaynakKod: genelKaynakKod, kaynakAd: `Genel — ${eslesenAnahtar}`,
-        });
-      }
-    }
-  }
+  // R09 (2026-09-09) -- seçim kuralı artık burada YAZILMIYOR: Desktop'un
+  // kritik_kontrol.kritik_madde_secimi_coklu'sunun birebir mirror'ı olan
+  // SAF kritikMaddeSecimiCoklu çağrılır (bkz. o fonksiyonun üstündeki
+  // açıklama + tests/bc-kritik-secim-paritesi.spec.js). Bu fonksiyon
+  // yalnız DB girdilerini (etiketler, yanıtlar) toplar ve `durum` ekler.
+  const secilenler = kritikMaddeSecimiCoklu(kaynaklar, mahalEtiketleri, denetimCapindaCevaplanmis);
 
   // İkinci bağımsız inceleme R11 düzeltmesi (2026-09-09) -- kaynak
   // listesi artık tekilleştirildiği için (bkz. _kritikKontrolKaynaklariBul)
@@ -7863,6 +7990,12 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       // etiketi hep bos kaliyordu (kritik kontrol madde uretimi bu
       // etiketi okuyor, bkz. kritik_kontrol.mahal_icin_kritik_maddeler).
       alanTipi: denetim.alanTipi || null,
+      // Ikinci bagimsiz inceleme R08 (2026-09-09) -- oncelikli alanTipi
+      // DISINDAKI Desktop etiketleri (QR/kisa kodla cozulen mahalin
+      // etiketler[1..]); Desktop zip_import bunlarin TAMAMINI mahale
+      // yazar. Eski denetimlerde alan yok -> [] (Desktop bos listeyi
+      // "yalniz alanTipi" olarak gorur, davranis degismez).
+      ekAlanTipleri: Array.isArray(denetim.ekAlanTipleri) ? denetim.ekAlanTipleri : [],
       // 2026-09-08 dis inceleme B11 duzeltmesi -- ayni fiziksel ziyarette
       // gezilen odalari Desktop'ta tek bir "tesis geneli" dedup grubuna
       // baglamak icin (bkz. startInspection(), denetim.ziyaretId

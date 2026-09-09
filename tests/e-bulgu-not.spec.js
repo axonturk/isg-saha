@@ -649,5 +649,9 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
 
     const { paket } = await _zipPaketiniAl(page);
     expect(paket.denetim.alanTipi).toBe(denetimler[0].alanTipi);
+    // R08 (2026-09-09) -- elle chip akışında ek etiket YOK, ama alan her
+    // zaman (boş liste olarak) export edilir; QR/çoklu etiket durumu
+    // tests/bc-kritik-secim-paritesi.spec.js'te.
+    expect(paket.denetim.ekAlanTipleri).toEqual([]);
   });
 });
