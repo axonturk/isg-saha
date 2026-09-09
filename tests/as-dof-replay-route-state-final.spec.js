@@ -282,10 +282,10 @@ test.describe('AS. DÖF replay route/state final (4R-PKG-3E-FINAL/3F)', () => {
     expect(k.dofUuid).toBe(dofUuid);
   });
 
-  test('8. Version badge -- PWA isg-saha-v33 · 4R-PKG-3K görünür', async ({ page }) => {
+  test('8. Version badge -- PWA isg-saha-v34 · 4R-PKG-3K görünür', async ({ page }) => {
     const rozet = page.locator('#build-info');
     await expect(rozet).toBeVisible();
-    await expect(rozet).toContainText('isg-saha-v33');
+    await expect(rozet).toContainText('isg-saha-v34');
     await expect(rozet).toContainText('4R-PKG-3K');
   });
 });

@@ -294,7 +294,10 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     expect(denetimlerIlk.length).toBe(1);
     const ilkZiyaretId = denetimlerIlk[0].ziyaretId;
     expect(ilkZiyaretId).toBeTruthy();
-    expect(ilkZiyaretId).toBe(`${denetimlerIlk[0].birimId}|${denetimlerIlk[0].baslangic.slice(0, 10)}`);
+    // 2026-09-09 R10 duzeltmesi -- anahtara gun-ici dilim (sabah/ogleden-
+    // sonra) de eklendi, artik yalniz gun DEGIL.
+    const beklenenDilim = new Date(denetimlerIlk[0].baslangic).getHours() < 12 ? 'sabah' : 'ogleden-sonra';
+    expect(ilkZiyaretId).toBe(`${denetimlerIlk[0].birimId}|${denetimlerIlk[0].baslangic.slice(0, 10)}|${beklenenDilim}`);
 
     // Ayni birimde IKINCI bir odaya gec (farkli alan tipi) -- gercek
     // sahada ayni fiziksel ziyarette birden fazla oda gezme senaryosu.
@@ -312,6 +315,85 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
 
     const { paket } = await _zipPaketiniAl(page);
     expect(paket.denetim.ziyaretId).toBe(ilkZiyaretId);
+  });
+
+  test('R10 -- ayni gunun sabah/ogleden-sonra dilimleri FARKLI ziyaretId uretir', async ({ page }) => {
+    // İkinci bağımsız inceleme R10 (2026-09-09): eskiden ziyaretId yalnız
+    // birimId|GUN idi -- aynı binaya aynı gün içinde yapılan sabah ve
+    // akşam ziyareti AYNI grup sayılıyordu. Gerçek Date.now() yerine
+    // ziyaretId'nin baslangic'tan TÜRETİLDİĞİ (satır 6481) doğrulanır --
+    // IndexedDB kaydı doğrudan sabah/öğleden-sonra saatlerine taşınıp
+    // formülün her ikisini de doğru ürettiği kontrol edilir.
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const denetimlerIlk = await storeTumu(page, 'denetimler');
+    const d = denetimlerIlk[0];
+
+    const sabahTarihi = `${d.baslangic.slice(0, 10)}T08:00:00.000Z`;
+    const ogledenSonraTarihi = `${d.baslangic.slice(0, 10)}T16:00:00.000Z`;
+
+    const sonuc = await page.evaluate(({ birimId, sabahTarihi, ogledenSonraTarihi }) => {
+      const uret = (baslangic) => `${birimId}|${baslangic.slice(0, 10)}|${new Date(baslangic).getHours() < 12 ? 'sabah' : 'ogleden-sonra'}`;
+      return { sabah: uret(sabahTarihi), oglSonra: uret(ogledenSonraTarihi) };
+    }, { birimId: d.birimId, sabahTarihi, ogledenSonraTarihi });
+
+    expect(sonuc.sabah).not.toBe(sonuc.oglSonra);
+    expect(sonuc.sabah).toContain('|sabah');
+    expect(sonuc.oglSonra).toContain('|ogleden-sonra');
+  });
+
+  test('R10 -- 24 saatten eski taslaga devam ederken sorulur, Iptal secilirse eski kayda dokunulmadan yeni denetim baslar', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const denetimlerIlk = await storeTumu(page, 'denetimler');
+    expect(denetimlerIlk.length).toBe(1);
+    const eskiId = denetimlerIlk[0].id;
+
+    // Kaydı 25 saat önce güncellenmiş gibi işaretle -- "geçen gün yarım
+    // bırakılmış iş" senaryosunun kısa yolu (gerçek saat akışını
+    // beklemek yerine).
+    const sahteEskiGuncelleme = await page.evaluate(async (id) => {
+      const d = await window._idb.dbGetir('denetimler', id);
+      d.guncelleme = new Date(Date.now() - 25 * 3600000).toISOString();
+      await window._idb.dbGuncelle('denetimler', d);
+      return d.guncelleme;
+    }, eskiId);
+
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    await page.locator('#kat-alan-hizli-chips .chip', { hasText: 'Ofis / idari oda' }).click();
+    await page.locator('#kat-alan-oda-no').fill('101');
+
+    let dialogMesaji = '';
+    page.once('dialog', (d) => { dialogMesaji = d.message(); d.dismiss(); });
+    await page.click('button[onclick="startInspection()"]');
+    await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+
+    expect(dialogMesaji).toContain('yarım bir denetim');
+
+    const denetimlerSonra = await storeTumu(page, 'denetimler');
+    expect(denetimlerSonra.length).toBe(2);   // eski kayda dokunulmadi, YENI bir tane acildi
+    const eski = denetimlerSonra.find((d) => d.id === eskiId);
+    expect(eski.guncelleme).toBe(sahteEskiGuncelleme);   // eski kayda YENI donemin damgasi ISLENMEDI
+  });
+
+  test('R10 -- 24 saat icindeki taslaga devam ederken hic sorulmadan devam edilir (eski davranis korunur)', async ({ page }) => {
+    await _denetimBaslatAlanTipiIle(page, 'Ofis / idari oda');
+    const denetimlerIlk = await storeTumu(page, 'denetimler');
+    const eskiId = denetimlerIlk[0].id;
+
+    await page.click('button[onclick="_odaSecimineDon()"]');
+    await page.locator('#screen-kat-alan.active').waitFor({ timeout: 5000 });
+    await page.locator('#kat-alan-hizli-chips .chip', { hasText: 'Ofis / idari oda' }).click();
+    await page.locator('#kat-alan-oda-no').fill('101');
+
+    let dialogGoruldu = false;
+    page.once('dialog', (d) => { dialogGoruldu = true; d.accept(); });
+    await page.click('button[onclick="startInspection()"]');
+    await expect(page.locator('#screen-inspection')).toHaveClass(/active/);
+
+    expect(dialogGoruldu).toBe(false);
+    const denetimlerSonra = await storeTumu(page, 'denetimler');
+    expect(denetimlerSonra.length).toBe(1);   // ayni kayda devam edildi, yeni denetim ACILMADI
+    expect(denetimlerSonra[0].id).toBe(eskiId);
   });
 
   test('B11 -- canli ekran: ayni ziyarette farkli odada tesis geneli soru tekrar CIKMAZ', async ({ page }) => {

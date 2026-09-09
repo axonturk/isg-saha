@@ -37,7 +37,7 @@ const APP_VERSION = 'v0.11.2';
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
 const APP_BUILD = '4R-PKG-3K';
-const APP_CACHE = 'isg-saha-v33';
+const APP_CACHE = 'isg-saha-v34';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 7;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,
@@ -6442,6 +6442,25 @@ async function startInspection() {
     d.kurumId === kurumId && d.odaId === odaKaydi.id && d.tur === secilenTur);
   eslesenler.sort((a, b) => (b.guncelleme || b.baslangic || '').localeCompare(a.guncelleme || a.baslangic || ''));
   let denetim = eslesenler[0] || null;
+
+  // İkinci bağımsız inceleme R10 (2026-09-09, bilinçli KÜÇÜK kapsam --
+  // tam bir "ziyaret oturumu" ekranı/state'i İCAT EDİLMEDİ): eski bir
+  // taslağa SÜRESİZ sessiz devam etmek yerine, son güncellemeden 24
+  // saatten fazla geçtiyse kullanıcıya AÇIKÇA sorulur (native confirm()
+  // -- bu dosyada zaten kurulu desen, bkz. satır 7904-7906 açıklaması).
+  // "İptal" derse eski kayda DOKUNULMAZ, aşağıda yeni bir denetim
+  // başlatılır (eski taslak DB'de öylece durur, kaybolmaz).
+  if (denetim) {
+    const sonGuncelleme = new Date(denetim.guncelleme || denetim.baslangic);
+    const saatFarki = (Date.now() - sonGuncelleme.getTime()) / 3600000;
+    if (saatFarki > 24) {
+      const tarihMetni = sonGuncelleme.toLocaleDateString('tr-TR');
+      const devamEt = confirm(
+        `Bu oda için ${tarihMetni} tarihinde başlanmış yarım bir denetim ` +
+        `var.\n\nTamam = ona devam et\nİptal = yeni bir denetim başlat`);
+      if (!devamEt) denetim = null;
+    }
+  }
   const mevcudaDevamEdildi = !!denetim;
 
   // SUPV-49 -- ipucu, seçili haliyle YENİ VEYA DEVAM EDİLEN denetime aynen
@@ -6478,7 +6497,13 @@ async function startInspection() {
       // AYNI degeri uretir, yeni bir "ziyaret baslat" ekrani/state'i
       // ICAT EDILMEDI) -- Desktop bunu paylasan denetimleri tek bir
       // ziyaret grubu sayar (bkz. veritabani.denetim_ziyaret_grubu).
-      ziyaretId: `${birimId}|${baslangic.slice(0, 10)}`,
+      // 2026-09-09 ikinci dis inceleme R10 duzeltmesi -- yalniz gun
+      // (YYYY-AA-GG) DEGIL, gun-ici dilim (sabah/ogleden-sonra, 12:00
+      // esigi) de anahtara eklendi: ayni binaya ayni GUN icinde yapilan
+      // IKI AYRI fiziksel ziyaret (sabah + aksam) artik AYNI ziyaret
+      // grubuna dusup "tesis geneli" sorulari ikinci ziyarette
+      // sessizce atlatmiyor.
+      ziyaretId: `${birimId}|${baslangic.slice(0, 10)}|${new Date(baslangic).getHours() < 12 ? 'sabah' : 'ogleden-sonra'}`,
       baslangic,
       guncelleme: new Date().toISOString()
     };
