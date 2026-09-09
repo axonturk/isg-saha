@@ -7154,10 +7154,19 @@ function askDeleteFinding(id) {
       // (durum='sorun_var', bulguId=<silinen id>) dokunulmadan kaliyordu.
       // Export sonra fotografsiz bir 'sorun_var' uretiyor, Desktop bunu
       // `ValueError` ile reddedip TUM ZIP'i (yalniz bu bulguyu degil)
-      // rollback ediyordu (bkz. veritabani.kritik_kontrol_sorun_var_
-      // kaydet_conn). Simdi silinen bulgu kritikKontrol ise ilgili yanit
-      // 'sorun_yok'a cekilir -- export artik fotografsiz sorun_var
-      // uretmez.
+      // rollback ediyordu.
+      //
+      // 2026-09-09 ikinci dis inceleme R06 duzeltmesi -- ARA duzeltme
+      // ilgili yaniti OTOMATIK 'sorun_yok'a cekiyordu: kanit silme ile
+      // kontrol SONUCU (sorun cozuldu mu?) AYRI islemler olmali --
+      // kullanici "bu kontrol yapildi, sorun yok" diye ACIKCA beyan
+      // ETMEDEN sistem kanitsiz bir olumlu sonuc uretiyordu. Bu PWA'da
+      // bir bulgu = TEK bir kanit demeti (kismi/tek-foto silme UI'si
+      // YOK) -- bu yuzden "kaniti sil" burada fiilen "bu yanit CEVAPSIZ
+      // hale gelsin" demektir: yanit satiri GUNCELLENMEZ, SILINIR.
+      // Soru boylece tekrar "cevaplanmamis" gorunur, kullanici GERCEK
+      // bir karar (Sorun Var/Sorun Yok/Kapsam Disi) vermek ZORUNDA
+      // kalir -- kanitsiz bir "sorun yok" ASLA kendiliginden uretilmez.
       const bulgu = await dbGetir('bulgular', id);
       await dbSil('bulgular', id);
       if (bulgu && bulgu.kritikKontrol && currentSession) {
@@ -7165,8 +7174,9 @@ function askDeleteFinding(id) {
           'kritikKontrolYanitlari', 'denetimId', currentSession.id);
         for (const y of yanitlar) {
           if (y.bulguId === id) {
-            await dbGuncelle('kritikKontrolYanitlari',
-              { ...y, durum: 'sorun_yok', bulguId: null });
+            // 'kritikKontrolYanitlari' store'unun keyPath'i `key` (bkz.
+            // DB_VERSION 7 yorumu) -- `y.id` DEĞİL.
+            await dbSil('kritikKontrolYanitlari', y.key);
           }
         }
         await _kritikKontrolListesiGoster();

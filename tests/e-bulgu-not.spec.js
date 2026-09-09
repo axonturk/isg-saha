@@ -528,14 +528,16 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
     await page.click('#modal-action-btn');
     await expect(page.locator('#findings-list .finding-item')).toHaveCount(0);
 
+    // 2026-09-09 ikinci dis inceleme R06 duzeltmesi -- kanit silme ARTIK
+    // OTOMATIK "sorun_yok" beyani URETMEZ (kullanici bunu ACIKCA
+    // soylemedi). Yanit satiri SILINIR -- soru tekrar CEVAPSIZ olur,
+    // ZIP'e hic girmez (Desktop'ta da bu madde "henuz kontrol edilmedi"
+    // olarak kalir, YANLIS bir olumlu sonuc GORUNMEZ).
     const yanitlar = await storeTumu(page, 'kritikKontrolYanitlari');
-    expect(yanitlar[0].durum).toBe('sorun_yok');
-    expect(yanitlar[0].bulguId).toBeNull();
+    expect(yanitlar.length).toBe(0);
 
     const { paket } = await _zipPaketiniAl(page);
-    expect(paket.kritikKontrol.length).toBe(1);
-    expect(paket.kritikKontrol[0].durum).toBe('sorun_yok');
-    expect(paket.kritikKontrol[0].fotolar).toBeUndefined();
+    expect(paket.kritikKontrol.length).toBe(0);
     expect(paket.tespitler.length).toBe(0);
   });
 
