@@ -37,7 +37,7 @@ const APP_VERSION = 'v0.11.2';
 // TUTULMALI (bkz. tests/z-service-worker-cache-upgrade.spec.js) --
 // aksi halde rozet yanlış/eski sürüm gösterir.
 const APP_BUILD = '4R-PKG-3K';
-const APP_CACHE = 'isg-saha-v34';
+const APP_CACHE = 'isg-saha-v35';
 const DB_NAME = 'isgSahaDB';
 const DB_VERSION = 7;   // v2: 'ayarlar' deposu; v3 atlandı (yereldeki
                         // committed-olmayan bir denemede kullanılmıştı,

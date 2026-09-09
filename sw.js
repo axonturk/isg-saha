@@ -4,7 +4,7 @@
 // acilista bu dosyalar `undefined` kaliyor, Hizli Kritik Kontrol ve QR
 // tarama tamamen devre disi kaliyordu. Surum artirimi ZORUNLU: mevcut
 // kurulumlarin yeni service worker'i alip onbellegi yenilemesi icin.
-const CACHE = 'isg-saha-v34';
+const CACHE = 'isg-saha-v35';
 const RUNTIME = 'isg-saha-runtime-v1';
 const DOSYALAR = ['./index.html', './app.js', './manifest.json', './icon-192.png',
   './icon-512.png', './checklist-kutuphanesi.js', './kritik-kontrol-kutuphanesi.js',
