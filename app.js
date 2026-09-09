@@ -7745,10 +7745,27 @@ async function _denetimPaketiOlustur(denetim, kurumAdi, birimAdi) {
       ekGirdiler.push({ ad: `sesler/${ad}`, veri: ses.blob });
       return ad;
     });
+    // 2026-09-09 ikinci dis inceleme R07 duzeltmesi -- B01 duzeltmesi
+    // eski (artik aktif olmayan) kritikKontrol kanitinin KAYBOLMASINI
+    // engelledi ama BAGLAMSIZ tasidi: Desktop'ta bu, geri alinma
+    // bilgisi TASIMAYAN, sirf checklist soru metnini not olarak
+    // gosteren SIRADAN bir 'bekliyor' bulgusu olarak beliriyordu --
+    // insan bunu YENI/acik bir sorun sanabilirdi. `b.kritikKontrol ===
+    // true` (ve bu bulgunun BURAYA dusmus olmasi -- yani ARTIK aktif
+    // bir 'sorun_var' yanitina bagli OLMAMASI) TEK BASINA "bu kanit bir
+    // GERI ALINAN Hizli Kritik Kontrol beyanindan geliyor" bilgisini
+    // KESIN olarak verir (baglantisi sonradan koptugu icin HANGI
+    // yanita bagliydi taze cozulemez, ama KOKENI belirsizlik tasimaz)
+    // -- bu yuzden not'a acik bir baglam etiketi eklenir.
+    const notMetni = b.kritikKontrol
+      ? `[GERİ ALINAN HIZLI KRİTİK KONTROL KANITI -- bu fotoğraf/not, ` +
+        `önceden "Sorun Var" işaretlenip sonradan farklı bir yanıta ` +
+        `çevrilmiş bir kontrol maddesine aitti. Soru: ${b.metin}]`
+      : b.metin;
     return {
       alanTipi: denetim.alanTipi || denetim.kat || 'genel',
       konumKodu: `${denetim.bina}/${denetim.kat}/${denetim.oda}`,
-      not: b.metin,
+      not: notMetni,
       hayatiRisk: !!b.hayatiRisk,
       fotografsiz: fotoAdlari.length === 0,
       sesNotlari: sesAdlari,

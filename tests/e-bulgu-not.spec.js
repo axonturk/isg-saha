@@ -505,6 +505,13 @@ test.describe('Faz 11 -- Hızlı Kritik Kontrol (chip sisteminin yerini alır)',
       const fotoGirdi = zip.getEntries().find(
         (e) => e.entryName === `fotolar/${paket.tespitler[0].fotolar[0]}`);
       expect(fotoGirdi).toBeTruthy();
+
+      // R07 -- geri alinan kritik-kontrol kaniti BAGLAMSIZ tasinmiyor:
+      // Desktop'ta bunun sirf sorulan sorunun metni gibi gorunup YENI/
+      // acik bir sorun sanilmamasi icin not'a acik bir baglam etiketi
+      // eklenmis olmali.
+      expect(paket.tespitler[0].not).toContain('GERİ ALINAN');
+      expect(paket.tespitler[0].not).toContain('raflar');
     } finally {
       // zip nesnesi zaten dosyadan okundu, ek temizlik gerekmiyor.
     }
